@@ -1,0 +1,92 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/install
+#
+# Copies latex_it to ~/bin/ and creates symbolic link ~/bin/l -> latex_it.
+# Usage: ./tools/install (or ./tool/install)
+# ==============================================================================
+
+require 'fileutils'
+require 'open3'
+
+module Installer
+  GREEN  = "\e[32m"
+  YELLOW = "\e[33m"
+  RED    = "\e[31m"
+  CYAN   = "\e[36m"
+  BOLD   = "\e[1m"
+  RESET  = "\e[0m"
+
+  REPO_ROOT = File.expand_path('..', __dir__)
+  SRC_BIN   = File.join(REPO_ROOT, 'latex_it')
+  TARGET_DIR = File.expand_path('~/bin')
+  TARGET_BIN = File.join(TARGET_DIR, 'latex_it')
+  TARGET_LINK = File.join(TARGET_DIR, 'l')
+
+  def self.run!
+    puts "#{BOLD}==> Installing latex_it to ~/bin/ ...#{RESET}"
+
+    verify_source!
+    ensure_target_dir!
+    copy_binary!
+    create_symlink!
+    verify_installation!
+  end
+
+  def self.verify_source!
+    return if File.file?(SRC_BIN)
+
+    puts "#{RED}❌ Error: Source executable not found at: #{SRC_BIN}#{RESET}"
+    exit 1
+  end
+
+  def self.ensure_target_dir!
+    return if Dir.exist?(TARGET_DIR)
+
+    puts "--> Creating directory #{CYAN}#{TARGET_DIR}#{RESET}..."
+    FileUtils.mkdir_p(TARGET_DIR)
+  end
+
+  def self.copy_binary!
+    puts "--> Copying #{BOLD}latex_it#{RESET} -> #{CYAN}#{TARGET_BIN}#{RESET}..."
+    FileUtils.cp(SRC_BIN, TARGET_BIN)
+    File.chmod(0o755, TARGET_BIN)
+    puts "  [#{GREEN}OK#{RESET}] Copied executable (permissions: 0755)"
+  end
+
+  def self.create_symlink!
+    puts "--> Linking #{BOLD}l#{RESET} -> #{CYAN}latex_it#{RESET} in #{TARGET_DIR}..."
+    FileUtils.rm_f(TARGET_LINK) if File.exist?(TARGET_LINK) || File.symlink?(TARGET_LINK)
+
+    Dir.chdir(TARGET_DIR) do
+      FileUtils.ln_s('latex_it', 'l')
+    end
+    puts "  [#{GREEN}OK#{RESET}] Created symlink: #{TARGET_LINK} -> latex_it"
+  end
+
+  def self.verify_installation!
+    puts "\n#{BOLD}==> Verification & PATH Status#{RESET}"
+
+    in_path = ENV['PATH'].to_s.split(File::PATH_SEPARATOR).include?(TARGET_DIR)
+    if in_path
+      puts "  [#{GREEN}OK#{RESET}] #{TARGET_DIR} is present in your PATH."
+    else
+      puts "  [#{YELLOW}WARN#{RESET}] #{TARGET_DIR} is NOT found in your PATH."
+      puts "  Recommendation: Add ~/bin to your ~/.bashrc or ~/.zshrc:"
+      puts '    export PATH="$HOME/bin:$PATH"'
+    end
+
+    version_out, status = Open3.capture2(TARGET_LINK, '-V')
+    if status.success?
+      puts "  [#{GREEN}OK#{RESET}] Executable verification: #{BOLD}#{version_out.strip}#{RESET}"
+    else
+      puts "  [#{RED}FAIL#{RESET}] Could not execute #{TARGET_LINK}"
+    end
+
+    puts "#{GREEN}#{BOLD}Installation complete!#{RESET}"
+  end
+end
+
+Installer.run! if __FILE__ == $PROGRAM_NAME

@@ -16,6 +16,7 @@ This document provides architectural guidelines, core invariants, development wo
 - **Workflow & Quality Tooling** (`tools/` / `tool/`):
   - [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate): Sub-second (< 1s) quality gate verifying syntax and test suites.
   - [`tools/setup_ruby_dev`](file:///home/sariel/prog/26/latex_it/tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
+  - [`tools/install`](file:///home/sariel/prog/26/latex_it/tools/install) (aliased as `tool/install`): Installs `latex_it` to `~/bin/latex_it` and configures `~/bin/l` symlink.
   - [`tools/bump`](file:///home/sariel/prog/26/latex_it/tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate`, increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`, commits, tags, and pushes to remote.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
@@ -96,7 +97,17 @@ Always execute quality workflows through the provided scripts:
   rtk rubocop -A latex_it tools/ test/
   ```
 
-### 4. `tools/bump` (Version Bump, Tag & Push Workflow)
+### 4. `tools/install` (Local Binary Installation)
+- Copies `latex_it` to `~/bin/latex_it` (setting permissions to `0755`).
+- Creates symbolic link `~/bin/l -> latex_it`.
+- **Trigger**:
+  ```bash
+  ./tools/install
+  # Or via symlink:
+  ./tool/install
+  ```
+
+### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
 - Ensures working tree is completely clean (aborts if uncommitted changes exist).
 - Runs [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate).
 - Increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`.

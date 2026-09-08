@@ -153,6 +153,18 @@ The script [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) is organize
 
 ---
 
+## Installation
+
+To install `latex_it` directly to `~/bin/latex_it` and create the `~/bin/l` symlink:
+
+```bash
+./tools/install
+# Or via symlink:
+./tool/install
+```
+
+---
+
 ## Development Environment Setup
 
 To verify or install all development and AI agent tooling (linter, LSP, AST search, token compression):

@@ -50,8 +50,8 @@ rescue LoadError
     Rainbow.call(obj)
   end
 end
-
-VERSION = '0.5.6'
+VERSION_FILE = File.expand_path('VERSION', __dir__)
+VERSION = (File.file?(VERSION_FILE) ? File.read(VERSION_FILE).strip : '0.5.6')
 
 module LaTeXUtils
   PDFLATEX_ERROR = 'PDFLatex by now is outdated. It does not support utf8, and should probably be avoided.'

@@ -13,12 +13,14 @@ This document provides architectural guidelines, core invariants, development wo
   - [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L56-L306): Engine detection & validation, main file discovery heuristics, TeX environment sanitization, noise filtering, and directory cleanup.
   - [`LatexBuilder`](file:///home/sariel/prog/26/latex_it/latex_it#L308-L1166): Compilation lifecycle manager, pass scheduler, `junk/` directory isolation, bibliography handling, lockfile protection, and diagnostic log analysis.
   - **CLI Dispatcher** ([lines 1172–1345](file:///home/sariel/prog/26/latex_it/latex_it#L1172-L1345)): Symlink personality detection and option parsing with `OptionParser`.
-- **Workflow & Quality Tooling** (`tools/`):
+- **Workflow & Quality Tooling** (`tools/` / `tool/`):
   - [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate): Sub-second (< 1s) quality gate verifying syntax and test suites.
   - [`tools/setup_ruby_dev`](file:///home/sariel/prog/26/latex_it/tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
+  - [`tools/bump`](file:///home/sariel/prog/26/latex_it/tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate`, increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`, commits, tags, and pushes to remote.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
-- **Documentation**:
+- **Documentation & Configuration**:
+  - [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION): Plaintext file tracking the canonical project version.
   - [README.md](file:///home/sariel/prog/26/latex_it/README.md): User-facing feature reference, options, and architecture guide.
   - [AGENTS.md](file:///home/sariel/prog/26/latex_it/AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
 
@@ -92,6 +94,18 @@ Always execute quality workflows through the provided scripts:
 - Automatically correct safe offenses:
   ```bash
   rtk rubocop -A latex_it tools/ test/
+  ```
+
+### 4. `tools/bump` (Version Bump, Tag & Push Workflow)
+- Ensures working tree is completely clean (aborts if uncommitted changes exist).
+- Runs [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate).
+- Increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`.
+- Commits changes, creates a release git tag, and pushes to remote with `--follow-tags`.
+- **Trigger**:
+  ```bash
+  ./tools/bump
+  # Or via symlink:
+  ./tool/bump
   ```
 
 ---

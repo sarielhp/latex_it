@@ -1,0 +1,184 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/bump
+#
+# Automated version bump and release workflow for latex_it:
+# 1. Validates working tree is 100% clean (aborts if uncommitted changes exist).
+# 2. Runs the fast quality gate (tools/gate).
+# 3. Increments version by +0.1.0 (major.minor+1.patch).
+# 4. Updates VERSION and latex_it files.
+# 5. Commits the updated version, tags the release, and pushes to remote.
+# ==============================================================================
+
+require 'open3'
+require 'optparse'
+
+module VersionBumper
+  GREEN  = "\e[32m"
+  YELLOW = "\e[33m"
+  RED    = "\e[31m"
+  CYAN   = "\e[36m"
+  BOLD   = "\e[1m"
+  RESET  = "\e[0m"
+
+  REPO_ROOT = File.expand_path('..', __dir__)
+  VERSION_FILE = File.join(REPO_ROOT, 'VERSION')
+  LATEX_IT_FILE = File.join(REPO_ROOT, 'latex_it')
+
+  def self.run!(dry_run: false, skip_gate: false)
+    puts "#{BOLD}==> Version Bump Workflow (latex_it)#{RESET}"
+
+    Dir.chdir(REPO_ROOT) do
+      check_git_repo!
+      check_clean_working_tree!
+      run_quality_gate! unless skip_gate
+
+      current_v = read_current_version
+      new_v = compute_next_version(current_v)
+      puts "--> Bumping version: #{YELLOW}#{current_v}#{RESET} -> #{GREEN}#{BOLD}#{new_v}#{RESET}"
+
+      if dry_run
+        puts "#{CYAN}[Dry Run] Would update VERSION, commit, tag v#{new_v}, and push.#{RESET}"
+        return
+      end
+
+      apply_version_update(new_v)
+      git_commit_and_push!(new_v)
+    end
+  end
+
+  def self.check_git_repo!
+    _out, status = Open3.capture2('git', 'rev-parse', '--is-inside-work-tree')
+    return if status.success?
+
+    puts "#{RED}❌ Error: Not inside a git repository.#{RESET}"
+    exit 1
+  end
+
+  def self.check_clean_working_tree!
+    stdout, status = Open3.capture2('git', 'status', '--porcelain')
+    unless status.success?
+      puts "#{RED}❌ Error checking git status.#{RESET}"
+      exit 1
+    end
+
+    return if stdout.strip.empty?
+
+    puts "#{RED}#{BOLD}❌ Cannot bump version: uncommitted changes detected in working tree.#{RESET}"
+    puts "All modifications must be committed or stashed before bumping.\n\n"
+    puts stdout
+    puts "\nAborting bump."
+    exit 1
+  end
+
+  def self.run_quality_gate!
+    gate_script = File.join(REPO_ROOT, 'tools/gate')
+    return unless File.file?(gate_script) && File.executable?(gate_script)
+
+    puts "--> Running quality gate: #{CYAN}tools/gate#{RESET}..."
+    stdout_stderr, status = Open3.capture2e(gate_script)
+    return if status.success?
+
+    puts "#{RED}❌ Quality gate failed. Aborting bump.#{RESET}"
+    puts stdout_stderr
+    exit 1
+  end
+
+  def self.read_current_version
+    if File.file?(VERSION_FILE)
+      v = File.read(VERSION_FILE).strip
+      return v unless v.empty?
+    end
+
+    if File.file?(LATEX_IT_FILE)
+      content = File.read(LATEX_IT_FILE)
+      if content =~ /VERSION\s*=\s*['"]([^'"]+)['"]/
+        return Regexp.last_match(1)
+      end
+    end
+
+    '0.1.0'
+  end
+
+  def self.compute_next_version(version_str)
+    parts = version_str.split('.').map(&:to_i)
+    while parts.size < 3
+      parts << 0
+    end
+    # Add 0.1.0 (major + 0, minor + 1, patch + 0)
+    major = parts[0]
+    minor = parts[1] + 1
+    patch = parts[2]
+    "#{major}.#{minor}.#{patch}"
+  end
+
+  def self.apply_version_update(new_v)
+    # 1. Update VERSION file
+    File.write(VERSION_FILE, "#{new_v}\n")
+    puts "  [#{GREEN}OK#{RESET}] Updated #{VERSION_FILE}"
+
+    # 2. Update latex_it fallback string if present
+    if File.file?(LATEX_IT_FILE)
+      content = File.read(LATEX_IT_FILE)
+      updated = content.sub(/(: '\d+\.\d+\.\d+')/, ": '#{new_v}'")
+      File.write(LATEX_IT_FILE, updated) if updated != content
+      puts "  [#{GREEN}OK#{RESET}] Updated #{LATEX_IT_FILE}"
+    end
+  end
+
+  def self.git_commit_and_push!(new_v)
+    puts "--> Committing version bump to git..."
+    Open3.capture2('git', 'add', 'VERSION', 'latex_it')
+    commit_msg = "Bump version to #{new_v}"
+    out, status = Open3.capture2e('git', 'commit', '-m', commit_msg)
+    unless status.success?
+      puts "#{RED}❌ Failed to commit version bump:#{RESET}\n#{out}"
+      exit 1
+    end
+
+    tag_name = "v#{new_v}"
+    puts "--> Creating tag #{CYAN}#{tag_name}#{RESET}..."
+    out, status = Open3.capture2e('git', 'tag', '-a', tag_name, '-m', "Release #{tag_name}")
+    unless status.success?
+      puts "#{RED}❌ Failed to create tag #{tag_name}:#{RESET}\n#{out}"
+      exit 1
+    end
+
+    puts "--> Pushing commits and tags to remote..."
+    out, status = Open3.capture2e('git', 'push', '--follow-tags')
+    unless status.success?
+      puts "#{RED}❌ Failed to push to remote:#{RESET}\n#{out}"
+      exit 1
+    end
+
+    puts "#{GREEN}#{BOLD}✅ Successfully bumped to #{new_v}, committed, tagged, and pushed!#{RESET}"
+  end
+end
+
+options = {
+  dry_run: false,
+  skip_gate: false
+}
+
+OptionParser.new do |opts|
+  opts.banner = 'Usage: ./tools/bump [options]'
+  opts.separator ''
+  opts.separator 'Options:'
+
+  opts.on('-n', '--dry-run', 'Compute and print next version without modifying files or pushing') do
+    options[:dry_run] = true
+  end
+
+  opts.on('--skip-gate', 'Skip running tools/gate prior to bumping') do
+    options[:skip_gate] = true
+  end
+
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
+  end
+end.parse!
+
+VersionBumper.run!(dry_run: options[:dry_run], skip_gate: options[:skip_gate]) if __FILE__ == $PROGRAM_NAME

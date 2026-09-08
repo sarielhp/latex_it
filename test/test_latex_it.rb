@@ -8,6 +8,7 @@ require 'open3'
 
 class TestLatexItCLI < Minitest::Test
   BIN = File.expand_path('../latex_it', __dir__)
+  load BIN
 
   def test_version_flag
     stdout, status = Open3.capture2(BIN, '-V')
@@ -72,5 +73,62 @@ class TestLatexItCLI < Minitest::Test
         refute File.exist?(File.join(dir, 'test.log'))
       end
     end
+  end
+
+  def test_diagnostic_formatting_no_redundant_w
+    builder = LatexBuilder.new('sample.tex', emacs: false, color: true)
+    formatted = builder.send(:format_diagnostic_line, '42', 'Package hyperref Warning: Token not allowed on input line 42.', :yellow)
+    refute_includes formatted, 'W:'
+    assert_includes formatted, Rainbow('42').cyan.bright.to_s
+    assert_includes formatted, Rainbow(': ').yellow.bright.to_s
+
+    # In plain/monochrome mode, verify plain 42: prefix
+    Rainbow.enabled = false
+    mono_formatted = builder.send(:format_diagnostic_line, '42', 'Package hyperref Warning: Token not allowed on input line 42.', :yellow)
+    refute_includes mono_formatted, 'W:'
+    assert_equal '42: Package hyperref Warning: Token not allowed on input line 42.', mono_formatted
+
+    # In emacs mode, verify line prefixes are completely suppressed
+    emacs_builder = LatexBuilder.new('sample.tex', emacs: true)
+    emacs_formatted = emacs_builder.send(:format_diagnostic_line, '42', 'Package hyperref Warning: Token not allowed on input line 42.', :yellow)
+    assert_equal 'Package hyperref Warning: Token not allowed on input line 42.', emacs_formatted
+  end
+
+  def test_diagnostic_formatting_empty_line_str
+    builder = LatexBuilder.new('sample.tex', emacs: false, color: true)
+    formatted = builder.send(:format_diagnostic_line, '', 'LaTeX Warning: Label(s) may have changed.', :yellow)
+    refute_includes formatted, 'W:'
+    assert_includes formatted, Rainbow(': ').yellow.bright.to_s
+
+    Rainbow.enabled = false
+    mono_formatted = builder.send(:format_diagnostic_line, '', 'LaTeX Warning: Label(s) may have changed.', :yellow)
+    assert_equal ': LaTeX Warning: Label(s) may have changed.', mono_formatted
+
+    emacs_builder = LatexBuilder.new('sample.tex', emacs: true)
+    emacs_formatted = emacs_builder.send(:format_diagnostic_line, '', 'LaTeX Warning: Label(s) may have changed.', :yellow)
+    assert_equal 'LaTeX Warning: Label(s) may have changed.', emacs_formatted
+  end
+
+  def test_line_number_colorization_left_and_inside
+    Rainbow.enabled = true
+    builder = LatexBuilder.new('sample.tex', emacs: false, color: true)
+
+    formatted = builder.send(:format_diagnostic_line, '42', 'Package hyperref Warning: on input line 42.', :yellow)
+    cyan_bright_42 = Rainbow('42').cyan.bright.to_s
+    assert_includes formatted, cyan_bright_42
+
+    # Verify both left side and message interior have the highlighted number
+    occurrences = formatted.scan(cyan_bright_42).size
+    assert_equal 2, occurrences, 'Expected 42 to be highlighted in cyan.bright both on left side and inside message'
+  end
+
+  def test_error_line_number_colorization
+    Rainbow.enabled = true
+    builder = LatexBuilder.new('sample.tex', emacs: false, color: true)
+
+    err_lines = ['./sample.tex:42: Undefined control sequence.', 'l.42 \\badcommand']
+    formatted = builder.send(:format_error_block, err_lines, 42)
+    cyan_bright_42 = Rainbow('42').cyan.bright.to_s
+    assert_includes formatted, cyan_bright_42
   end
 end

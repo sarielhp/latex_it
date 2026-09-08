@@ -742,6 +742,81 @@ class LatexBuilder
     end
   end
 
+  def colorize_line_num(str, base_color = nil)
+    return str if @options[:emacs]
+
+    if base_color == :cyan
+      Rainbow(str).blue.bright.to_s
+    else
+      Rainbow(str).cyan.bright.to_s
+    end
+  end
+
+  def highlight_line_numbers(text, base_color, bright: false)
+    return text if @options[:emacs]
+
+    pattern = /((?:input\s+)?lines?\s+)(\d+(?:--?\d+)?)|(\bl\.)(\d+)\b|(:)(\d+)(:)/i
+    parts = []
+    last_pos = 0
+
+    apply_base = lambda do |str|
+      r = Rainbow(str).send(base_color)
+      bright ? r.bright.to_s : r.to_s
+    end
+
+    text.scan(pattern) do
+      m = Regexp.last_match
+      m_start = m.begin(0)
+      m_end = m.end(0)
+
+      parts << apply_base.call(text[last_pos...m_start]) if m_start > last_pos
+
+      if m[1]
+        parts << apply_base.call(m[1])
+        parts << colorize_line_num(m[2], base_color)
+      elsif m[3]
+        parts << apply_base.call(m[3])
+        parts << colorize_line_num(m[4], base_color)
+      elsif m[5]
+        parts << apply_base.call(m[5])
+        parts << colorize_line_num(m[6], base_color)
+        parts << apply_base.call(m[7])
+      end
+      last_pos = m_end
+    end
+
+    parts << apply_base.call(text[last_pos..-1]) if last_pos < text.length
+    parts.join
+  end
+
+  def format_diagnostic_line(line_str, message, base_color, bright_sep: true)
+    return message if @options[:emacs]
+
+    left_side = if line_str.nil? || line_str.to_s.empty?
+                  r = Rainbow(': ').send(base_color)
+                  bright_sep ? r.bright.to_s : r.to_s
+                else
+                  sep = Rainbow(': ').send(base_color)
+                  sep_str = bright_sep ? sep.bright.to_s : sep.to_s
+                  colorize_line_num(line_str.to_s, base_color) + sep_str
+                end
+
+    left_side + highlight_line_numbers(message, base_color)
+  end
+
+  def format_error_block(err_block, line_no)
+    return err_block.join("\n") if @options[:emacs]
+
+    err_block.map.with_index do |l, idx|
+      colored = highlight_line_numbers(l, :red, bright: true)
+      if idx == 0 && line_no > 0 && !l.match?(/:#{line_no}:|^\s*#{line_no}:/)
+        colorize_line_num(line_no.to_s, :red) + Rainbow(': ').red.bright.to_s + colored
+      else
+        colored
+      end
+    end.join("\n")
+  end
+
   def extract_warnings(content, verbose = false)
     raw_warnings = []
     seen_warnings = {}
@@ -781,18 +856,7 @@ class LatexBuilder
             line_no = $1.to_i
             line_str = $1
           end
-          prefix = if @options[:emacs]
-                     ''
-                   elsif line_str.empty?
-                     'W: '
-                   else
-                     "#{line_str} W: "
-                   end
-          formatted = if @options[:emacs]
-                        warn_text
-                      else
-                        Rainbow(prefix).yellow.bright.to_s + Rainbow(warn_text).yellow.to_s
-                      end
+          formatted = format_diagnostic_line(line_str, warn_text, :yellow)
           raw_warnings << { type: :warn, line: line_no, line_str: line_str, text: warn_text, formatted: formatted, index: start_idx }
         end
         next
@@ -822,20 +886,9 @@ class LatexBuilder
           line_no = $1.split('--').first.to_i
         end
 
-        prefix = if @options[:emacs]
-                   ''
-                 elsif line_str.empty?
-                   'W: '
-                 else
-                   "#{line_str} W: "
-                 end
-        formatted = if @options[:emacs]
-                      box_line
-                    else
-                      Rainbow(prefix).send(color_m).bright.to_s + Rainbow(box_line).send(color_m).to_s
-                    end
+        formatted = format_diagnostic_line(line_str, box_line, color_m)
         if verbose && !extra_lines.empty?
-          formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : Rainbow(line).send(color_m).to_s }.join("\n")
+          formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : highlight_line_numbers(line, color_m) }.join("\n")
         end
 
         severity = extract_box_severity(box_line)
@@ -916,11 +969,7 @@ class LatexBuilder
         err_block = err_block.map(&:rstrip).reject(&:empty?)
         err_text = err_block.join("\n")
         line_no = extract_error_line(err_text)
-        formatted = if @options[:emacs]
-                      err_block.join("\n")
-                    else
-                      err_block.map { |l| Rainbow(l).red.bright.to_s }.join("\n")
-                    end
+        formatted = format_error_block(err_block, line_no)
         errors << { line: line_no, text: err_text, formatted: formatted, index: start_idx }
       else
         i += 1
@@ -957,7 +1006,7 @@ class LatexBuilder
 
     if sorted_errors.empty? && !fallback_lines.empty?
       clean_fallback = fallback_lines.map(&:rstrip).reject(&:empty?)
-      clean_fallback = clean_fallback.map { |l| Rainbow(l).red.bright.to_s } unless @options[:emacs]
+      clean_fallback = clean_fallback.map { |l| @options[:emacs] ? l : highlight_line_numbers(l, :red, bright: true) }
       blocks << clean_fallback.join("\n") unless clean_fallback.empty?
     elsif !sorted_errors.empty?
       blocks << sorted_errors.map { |e| e[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
@@ -1076,21 +1125,10 @@ class LatexBuilder
           if bl =~ /Repeated entry---/i || bl =~ /Warning--/i || bl =~ /WARN - /
             line_str = ''
             line_str = $1 if bl =~ /line\s+(\d+)/i
-            prefix = if @options[:emacs]
-                       ''
-                     elsif line_str.empty?
-                       'W: '
-                     else
-                       "#{line_str} W: "
-                     end
-            formatted = if @options[:emacs]
-                          bl.strip
-                        else
-                          Rainbow(prefix).yellow.bright.to_s + Rainbow(bl.strip).yellow.to_s
-                        end
+            formatted = format_diagnostic_line(line_str, bl.strip, :yellow)
             warn_items << { line: line_str.to_i, line_str: line_str, text: bl.strip, formatted: formatted, index: 100000 + bidx }
           elsif bl =~ /couldn't open/i || bl =~ /error/i
-            formatted = @options[:emacs] ? bl.strip : Rainbow(bl.strip).red.bright.to_s
+            formatted = @options[:emacs] ? bl.strip : highlight_line_numbers(bl.strip, :red, bright: true)
             err_items << { line: 0, text: bl.strip, formatted: formatted, index: 100000 + bidx }
           end
         end
@@ -1169,7 +1207,9 @@ end
 # CLI Option Parsing
 # ------------------------------------------------------------------------------
 
-# Direct execution if invoked via symlink
+# Direct execution if invoked via symlink or binary
+return unless __FILE__ == $PROGRAM_NAME || (File.exist?($PROGRAM_NAME) && File.identical?(__FILE__, $PROGRAM_NAME))
+
 prog_name = File.basename($PROGRAM_NAME)
 if prog_name == 'latex_file_in_dir'
   dir = ARGV[0] || '.'
@@ -1311,7 +1351,7 @@ parser = OptionParser.new do |opts|
     options[:no_env] = true
   end
 
-  opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line/W: prefixes)') do
+  opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') do
     options[:emacs] = true
   end
 

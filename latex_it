@@ -1,0 +1,1345 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# ==============================================================================
+# Unified LaTeX Builder (l)
+#
+# Robust, high-performance LaTeX compilation manager with:
+# - Automatic main file detection (.mainfile or directory scan)
+# - Isolated junk directory output (`junk/`)
+# - Multi-engine support (xelatex [default], lualatex; pdflatex rejected)
+# - BibTeX and Biber bibliography generation
+# - Single-pass compilation mode (-u)
+# - PDF text diff-based update mode (-d / --diff)
+# - Detailed warning and error log analysis
+# - Clean pre-builds and timing diagnostics
+# ==============================================================================
+
+require 'fileutils'
+require 'open3'
+require 'optparse'
+require 'shellwords'
+
+begin
+  require 'rainbow'
+rescue LoadError
+  module Rainbow
+    class NullString < String
+      def method_missing(*)
+        self
+      end
+
+      def respond_to_missing?(*)
+        true
+      end
+    end
+
+    def self.call(obj)
+      NullString.new(obj.to_s)
+    end
+
+    def self.enabled=(val)
+      @enabled = val
+    end
+
+    def self.enabled
+      false
+    end
+  end
+
+  def Rainbow(obj)
+    Rainbow.call(obj)
+  end
+end
+
+VERSION = '0.5.6'
+
+module LaTeXUtils
+  PDFLATEX_ERROR = 'PDFLatex by now is outdated. It does not support utf8, and should probably be avoided.'
+
+  def self.pdflatex?(name)
+    return false if name.nil?
+
+    eng = name.to_s.strip.downcase
+    first_token = eng.split.first || ''
+    base = File.basename(first_token, '.*')
+    %w[pdflatex pdf pdftex].include?(base) || eng == 'pdflatex' || eng.start_with?('pdflatex')
+  end
+
+  def self.check_engine!(name)
+    return unless name
+
+    if pdflatex?(name)
+      warn PDFLATEX_ERROR
+      exit 1
+    end
+  end
+
+  def self.normalize_engine(engine)
+    return 'xelatex' if engine.nil? || engine.to_s.strip.empty?
+
+    eng = engine.to_s.strip.downcase
+    first_token = eng.split.first || ''
+    base = File.basename(first_token, '.*')
+    case base
+    when 'lua', 'lualatex', 'luatex'
+      'lualatex'
+    when 'xe', 'xelatex', 'xetex'
+      'xelatex'
+    when 'pdf', 'pdflatex', 'pdftex'
+      'pdflatex'
+    else
+      base
+    end
+  end
+
+  def self.detect_engine_from_file(path)
+    return nil unless path && File.file?(path)
+
+    content = safe_read(path)
+    return nil if content.empty?
+
+    # 1. Check magic comments in the top lines of the file
+    header_lines = content.lines.first(50) || []
+    header_lines.each do |line|
+      if line =~ /^\s*%\s*!T[eE]X\s+(?:TS-)?(?:program|engine)\s*=\s*(\S+)/i
+        raw = Regexp.last_match(1).strip
+        return normalize_engine(raw)
+      end
+    end
+
+    # 2. Check AUCTeX / Emacs Local Variables block at bottom of file
+    tail_lines = content.lines.last(40) || []
+    tail_lines.each do |line|
+      if line =~ /TeX-engine:\s*([a-zA-Z0-9_-]+)/i
+        raw = Regexp.last_match(1).strip
+        return normalize_engine(raw)
+      end
+    end
+
+    # 3. Check Lua-specific packages or code
+    if content =~ /\\usepackage(?:\[.*?\])?\{luacode\}/ ||
+       content =~ /\\usepackage(?:\[.*?\])?\{luamplib\}/ ||
+       content =~ /\\usepackage(?:\[.*?\])?\{luatex85\}/ ||
+       content.include?('\\directlua')
+      return 'lualatex'
+    end
+
+    nil
+  end
+
+  def self.safe_read(path)
+    return '' unless path && File.file?(path)
+
+    File.read(path, mode: 'r:binary', invalid: :replace, undef: :replace)
+  rescue StandardError
+    ''
+  end
+
+  def self.filter_subcommand_noise(text)
+    return '' if text.nil? || text.empty?
+
+    # Strip mktextfm / mktexpk / METAFONT sub-process invocations and their internal errors
+    text.gsub(/(?:kpathsea: Running mktex\S+|mktex\S+: Running mf).*?(?:failed to make \S+|Transcript written on mfput\.log\.)\n?/m, '')
+  end
+
+  def self.bbl_has_entries?(path)
+    return false unless path && File.file?(path) && File.size(path) > 0
+
+    content = safe_read(path)
+    content.include?('\bibitem') || content.include?('\entry{')
+  end
+
+  def self.command_available?(cmd)
+    ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? do |dir|
+      bin = File.join(dir, cmd.to_s)
+      File.file?(bin) && File.executable?(bin)
+    end
+  end
+
+  def self.check_program(cmd)
+    return if command_available?(cmd)
+
+    warn "ERROR: #{cmd} could not be found in PATH"
+    exit 1
+  end
+
+  def self.load_config_latex(dir = '.')
+    config_file = File.join(dir, '.config_latex')
+    return unless File.exist?(config_file)
+    return if ENV['LOADED_LATEX_CFG']
+
+    warn ' -- Loading local LaTeX preferences from .config_latex'
+    content = safe_read(config_file)
+    content.each_line do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?('#')
+
+      line = line.sub(/^export\s+/, '')
+      if line =~ /\A([A-Za-z0-9_]+)=(.*)\z/
+        key = Regexp.last_match(1)
+        val = Regexp.last_match(2).gsub(/\A["']|["']\z/, '')
+        ENV[key] = val
+      end
+    end
+    ENV['LOADED_LATEX_CFG'] = '1'
+  end
+
+  def self.find_main_latex_file(dir = '.')
+    mainfile = File.join(dir, '.mainfile')
+    if File.exist?(mainfile)
+      main_file = File.read(mainfile).strip
+      return main_file unless main_file.empty?
+    end
+
+    search_path = (dir == '.' ? '*.tex' : File.join(dir, '*.tex'))
+    raw_files = Dir[search_path].map { |f| File.basename(f) }
+
+    candidates = raw_files.reject do |f|
+      f =~ /\.num\.tex\z/ ||
+        f =~ /\Aprefix.*\.tex\z/ ||
+        f =~ /\Aprelim.*\.tex\z/ ||
+        f =~ /\Apreamble.*\.tex\z/ ||
+        f == 'pratenddefaultcategory.tex' ||
+        f.start_with?('flycheck_') ||
+        f.start_with?('.') ||
+        f.end_with?('~') ||
+        f.end_with?('.bak')
+    end
+
+    if candidates.empty?
+      warn "Error: No LaTeX (.tex) files found in directory '#{File.expand_path(dir)}'."
+      exit 1
+    end
+
+    return candidates.first if candidates.size == 1
+
+    # Heuristic 1: Directory name match (e.g. no_spread_ann.tex in no_spread_ann/)
+    dir_name = File.basename(File.expand_path(dir))
+    dir_match = "#{dir_name}.tex"
+    return dir_match if candidates.include?(dir_match)
+
+    # Heuristic 2: Check for \begin{document} or \documentclass in candidates
+    with_doc = candidates.select do |f|
+      c = safe_read(File.join(dir, f))
+      c.include?('\begin{document}') || c.include?('\documentclass')
+    end
+    return with_doc.first if with_doc.size == 1
+
+    # Heuristic 3: Check for existing matching output PDF or BBL
+    with_pdf = candidates.select do |f|
+      base = File.basename(f, '.tex')
+      File.exist?(File.join(dir, "#{base}.pdf")) || File.exist?(File.join(dir, 'junk', "#{base}.pdf"))
+    end
+    return with_pdf.first if with_pdf.size == 1
+
+    warn 'Error: Multiple candidate .tex files found. Please specify which file to compile, or'
+    warn '       create a .mainfile containing the name of the main LaTeX file:'
+    candidates.each { |f| warn "  #{f}" }
+    exit 1
+  end
+
+  def self.clean_directory(dir = '.', verbose = true)
+    target_dir = File.expand_path(dir)
+    return unless File.directory?(target_dir)
+
+    puts "Cleaning LaTeX auxiliary files in #{target_dir}..." if verbose
+
+    Dir.chdir(target_dir) do
+      # Remove build directories
+      %w[junk styles/junk figs/junk figs/bak refs/junk].each do |d|
+        FileUtils.rm_rf(d) if File.exist?(d)
+      end
+
+      # Remove temporary / junk LaTeX extensions
+      patterns = [
+        '*.{aux,bbl,bbl.bak,blg,bcf,run.xml}',
+        '*.{log,out,toc,lof,lot,thm,idx,ind,ilg}',
+        '*.{nav,snm,vrb,synctex.gz,synctex,dvi,ps}',
+        '*.{fls,fdb_latexmk,rel,vtc,axp,dpth,md5,soc}',
+        'log.txt', 'log.txt.1', 'texput.log',
+        'missfont.log', 'mfput.log',
+        '*.err*', 'err_*',
+        'flycheck_*.tex'
+      ]
+
+      patterns.each do |pat|
+        Dir.glob(pat).each do |f|
+          FileUtils.rm_f(f) if File.file?(f)
+        end
+      end
+    end
+  end
+
+  def self.reset_latex_environment!
+    vars = %w[
+      BIBINPUTS
+      BSTINPUTS
+      TEXINPUTS
+      PDFTEXINPUTS
+      XETEXINPUTS
+      LUATEXINPUTS
+      LUAINPUTS
+      BBLINPUTS
+      TEXMFOUTPUT
+      TEXFORMATS
+      TEXFONTS
+      TFMFONTS
+      T1FONTS
+      OFMFONTS
+      AFMFONTS
+      TTFONTS
+      OPENTYPEFONTS
+      MFINPUTS
+      MPINPUTS
+      TEXPICTS
+      TEXDOCS
+      TEXSOURCES
+      TEXPOOL
+      INDEXSTYLE
+      BIBTEX_PREFIX
+    ]
+    vars.each { |var| ENV.delete(var) }
+    ENV.keys.each do |key|
+      ENV.delete(key) if key =~ /\A(?:TEX|BIB|BST|LUA|MF|MP)INPUTS/i
+    end
+  end
+end
+
+class LatexBuilder
+  def initialize(target, options)
+    @options = options
+    @bdir = File.dirname(target)
+    @target_base = File.basename(target)
+    @bfilename = File.basename(@target_base, '.*')
+    @filename = "#{@bfilename}.tex"
+    @orig_stdout = $stdout
+  end
+
+  def run!
+    if @options[:score]
+      @orig_stdout = $stdout
+      $stdout = File.open(File::NULL, 'w')
+      begin
+        if @bdir != '.'
+          Dir.chdir(@bdir) { compile_target }
+        else
+          compile_target
+        end
+      ensure
+        $stdout.close rescue nil
+        $stdout = @orig_stdout
+      end
+    elsif @bdir != '.'
+      puts "      cd #{@bdir}"
+      Dir.chdir(@bdir) { compile_target }
+    else
+      compile_target
+    end
+  end
+
+  private
+
+  def compile_target
+    unless File.exist?(@filename)
+      warn "Error: File '#{@filename}' not found."
+      exit 1
+    end
+
+    with_lock do
+      setup_environment
+      deep_clean if @options[:clean]
+      paper_cleanup
+      junk_dir_create
+
+      total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
+
+      if @options[:single_pass]
+        print "      #{Rainbow(@engine_name).bright}"
+        run_latex_pass('_1')
+      elsif @options[:fast]
+        print "      #{Rainbow(@engine_name).bright} (1)"
+        aux_hash1 = compute_aux_hash
+        run_latex_pass('_1')
+
+        bib_tool = detect_bib_tool
+        bib_needed = bib_tool && needs_bib_pass?(bib_tool, "#{@pdferr}_1")
+        if bib_needed
+          print ", #{Rainbow(bib_tool).bright}"
+          run_bib_pass(bib_tool)
+        end
+
+        rerun_needed = bib_needed || needs_latex_rerun?("#{@pdferr}_1", aux_hash1)
+        if rerun_needed && @options[:passes] >= 2
+          print ", #{Rainbow(@engine_name).bright} (2)"
+          aux_hash2 = compute_aux_hash
+          run_latex_pass('_2')
+
+          if needs_latex_rerun?("#{@pdferr}_2", aux_hash2) && @options[:passes] >= 3
+            print ", #{Rainbow(@engine_name).bright} (3)"
+            run_latex_pass('_3')
+          end
+        end
+      else
+        max_passes = @options[:passes]
+        print "      #{Rainbow(@engine_name).bright} (1/#{max_passes})"
+        run_latex_pass('_1')
+
+        # Bibliography pass
+        bib_tool = detect_bib_tool
+        if bib_tool && @options[:passes] >= 2
+          print ", #{Rainbow(bib_tool).bright}"
+          run_bib_pass(bib_tool)
+        end
+
+        # Pass 2: Resolve citations
+        if @options[:passes] >= 2
+          print ", #{Rainbow(@engine_name).bright} (2/#{max_passes})"
+          run_latex_pass('_2')
+        end
+
+        # Pass 3: Final references & layout
+        if @options[:passes] >= 3
+          print ", #{Rainbow(@engine_name).bright} (3/#{max_passes})"
+          run_latex_pass('_3')
+        end
+      end
+
+      puts ''
+
+      # Update output files
+      update_target_file("junk/#{@bfilename}.pdf", "#{@bfilename}.pdf", update_on_diff: @options[:update_on_diff])
+      update_target_file("junk/#{@bfilename}.bbl", "#{@bfilename}.bbl") if LaTeXUtils.bbl_has_entries?("junk/#{@bfilename}.bbl")
+      update_target_file("junk/#{@bfilename}.synctex.gz", "#{@bfilename}.synctex.gz")
+
+      if @options[:time]
+        total_t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        printf("Total Build Time: %s seconds\n", Rainbow(format('%.2f', total_t1 - total_t0)).green.bright)
+      end
+
+      analyze_output
+    end
+  end
+
+  def with_lock
+    return yield unless @options[:lock]
+
+    FileUtils.mkdir_p('/tmp/sariel/latex')
+    lock_file = "/tmp/sariel/latex/#{@bfilename}.lock"
+    File.open(lock_file, File::RDWR | File::CREAT, 0o644) do |f|
+      f.flock(File::LOCK_EX)
+      yield
+    ensure
+      f.flock(File::LOCK_UN) rescue nil
+    end
+  end
+
+  def setup_environment
+    FileUtils.mkdir_p('junk/junk')
+    FileUtils.mkdir_p('junk/figs')
+    FileUtils.mkdir_p('junk/fragment')
+
+    LaTeXUtils.load_config_latex
+    LaTeXUtils.reset_latex_environment! if @options[:no_env]
+
+    file_engine = LaTeXUtils.detect_engine_from_file(@filename)
+
+    candidate_engine = @options[:engine] ||
+                       ENV['PDFBINONLY'] ||
+                       file_engine ||
+                       ENV['PDFBIN'] ||
+                       ENV['LATEX_ENGINE'] ||
+                       'xelatex'
+
+    LaTeXUtils.check_engine!(candidate_engine)
+
+    @engine_name = LaTeXUtils.normalize_engine(candidate_engine)
+    LaTeXUtils.check_engine!(@engine_name)
+    LaTeXUtils.check_program(@engine_name)
+
+    @latex_flags = ['-interaction=nonstopmode', '-synctex=1', '-no-mktex=tfm', '-output-directory=junk', '-file-line-error']
+
+    @pdferr = "junk/err_#{@engine_name}"
+    @biberrbase = 'err_bib'
+    @biberr = "junk/#{@biberrbase}"
+    @log = 'junk/log.txt'
+    @loga = 'junk/log.txt.1'
+
+    FileUtils.rm_f([@log, @loga, @biberr, @pdferr, "#{@pdferr}_1", "#{@pdferr}_2", "#{@pdferr}_3"])
+  end
+
+  def junk_dir_create
+    FileUtils.mkdir_p('junk/figs')
+    FileUtils.mkdir_p('junk/junk')
+    FileUtils.mkdir_p('junk/fragment')
+
+    return if @options[:fast]
+
+    FileUtils.mkdir_p('junk/old')
+    Dir['junk/*'].each do |f|
+      next if %w[old figs junk fragment].include?(File.basename(f))
+
+      dest = File.join('junk/old', File.basename(f))
+      FileUtils.rm_rf(dest)
+      FileUtils.mv(f, 'junk/old/')
+    end
+    FileUtils.mv('junk/old/num.tex', 'junk/') if File.exist?('junk/old/num.tex')
+
+    # Copy .aux, .bbl, and .out files between runs so cross-references, citations,
+    # and bookmark outlines are preserved
+    Dir.glob('junk/old/**/*.{aux,bbl,out}').each do |f|
+      rel = f.sub(%r{\Ajunk/old/}, '')
+      dest = File.join('junk', rel)
+      FileUtils.mkdir_p(File.dirname(dest))
+      FileUtils.cp(f, dest)
+    end
+  end
+
+  def deep_clean
+    LaTeXUtils.clean_directory('.', true)
+  end
+
+  def paper_cleanup
+    if File.exist?("#{@bfilename}.aux") && !File.exist?("junk/#{@bfilename}.aux") && !File.exist?("junk/old/#{@bfilename}.aux")
+      FileUtils.mkdir_p('junk')
+      FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux")
+    end
+
+    files = ["#{@bfilename}.ps", 'log.txt', "#{@bfilename}.blg", "#{@bfilename}.dvi",
+             "#{@bfilename}.thm", "#{@bfilename}.aux", "#{@bfilename}.idx", "#{@bfilename}.log",
+             "#{@bfilename}.out", "#{@bfilename}.vtc", 'texput.log', 'missfont.log', 'mfput.log',
+             "#{@bfilename}.bcf", "#{@bfilename}.run.xml"]
+    files.each { |f| FileUtils.rm_f(f) }
+
+    root_bbl = "#{@bfilename}.bbl"
+    FileUtils.rm_f(root_bbl) if File.exist?(root_bbl) && !LaTeXUtils.bbl_has_entries?(root_bbl)
+  end
+
+  def run_latex_pass(suffix)
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
+    lgx = "#{@pdferr}#{suffix}"
+    FileUtils.rm_f(lgx)
+
+    latexopts = ENV['LATEXOPTS'] || ''
+    latexoptions = ENV['LATEXOPTIONS'] || ''
+
+    cfilename = if !latexoptions.empty?
+                  "#{latexoptions} \\input{#{@filename}}"
+                elsif !latexopts.empty?
+                  "#{latexopts}\\input{#{@filename}}"
+                else
+                  "\\input{#{@filename}}"
+                end
+
+    cmd_args = [@engine_name] + @latex_flags + [cfilename]
+
+    File.open(lgx, 'a') do |f|
+      f.puts '========================================'
+      f.puts cmd_args.map(&:to_s).join(' ')
+      f.puts '========================================'
+      f.puts Time.now.strftime('%a %b %d %H:%M:%S %Z %Y')
+      f.puts '========================================'
+    end
+
+    stdout_stderr, status = Open3.capture2e(*cmd_args)
+    st = status.exitstatus || 0
+
+    File.open(lgx, 'a') { |f| f.write(stdout_stderr) }
+
+    if st > 0
+      puts "\nLaTeX process exited with status: #{st}\n"
+    end
+
+    errcnt = count_errors_in_log(st, lgx)
+    if errcnt > 0
+      if @options[:score]
+        output_score(lgx, st)
+        exit 1
+      else
+        report_errors(lgx)
+      end
+    end
+
+    File.open(@log, 'a') { |f| f.write(stdout_stderr) }
+
+    if @options[:time]
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
+    end
+  end
+
+  def detect_bib_tool
+    return nil if @options[:bib] == false
+
+    # Check for Biber / BibLaTeX control files
+    if File.exist?("junk/#{@bfilename}.bcf")
+      bcf_content = LaTeXUtils.safe_read("junk/#{@bfilename}.bcf")
+      return :biber if bcf_content.include?('<bcf:citekey>') || @options[:bib] == true
+    end
+
+    run_xml_path = "junk/#{@bfilename}.run.xml"
+    if File.exist?(run_xml_path)
+      run_xml_content = LaTeXUtils.safe_read(run_xml_path)
+      return :biber if run_xml_content =~ /biber/i && (run_xml_content =~ /active="1"/ || @options[:bib] == true)
+    end
+
+    aux_files = Dir.glob('junk/**/*.aux')
+    return (@options[:bib] == true ? :bibtex : nil) if aux_files.empty?
+
+    aux_contents = aux_files.map { |f| LaTeXUtils.safe_read(f) }.join("\n")
+
+    if aux_contents.include?('\abx@aux@bcf')
+      bcf_path = "junk/#{@bfilename}.bcf"
+      if File.exist?(bcf_path)
+        bcf_content = LaTeXUtils.safe_read(bcf_path)
+        return :biber if bcf_content.include?('<bcf:citekey>') || @options[:bib] == true
+      elsif @options[:bib] == true
+        return :biber
+      end
+    end
+
+    # BibTeX is needed only when \bibdata{...} AND \citation are present in the .aux file
+    return :bibtex if aux_contents =~ /\\bibdata\{/ && (aux_contents =~ /\\citation/ || @options[:bib] == true)
+
+    # If user explicitly forced bib pass (-b / --bib), fallback to bibtex
+    return :bibtex if @options[:bib] == true
+
+    nil
+  end
+
+  def run_bib_pass(tool)
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
+    fnbbl = "junk/#{@bfilename}.bbl"
+    fnbblbak = "junk/#{@bfilename}.bbl.bak"
+
+    Dir['*.bib'].each { |b| FileUtils.cp(b, 'junk/') }
+
+    if tool == :biber
+      biber_out, = Dir.chdir('junk') do
+        Open3.capture2e('biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename)
+      end
+      File.write(@biberr, biber_out)
+      Dir['junk/*.bbl'].each { |b| FileUtils.cp(b, '.') if LaTeXUtils.bbl_has_entries?(b) }
+      FileUtils.cp(fnbbl, fnbblbak) if File.exist?(fnbbl) && File.size(fnbbl) > 0
+    elsif tool == :bibtex
+      bib_out, = Dir.chdir('junk') do
+        FileUtils.mkdir_p('styles')
+        Dir['../styles/*'].each do |s|
+          if File.directory?(s)
+            FileUtils.cp_r(s, 'styles/')
+          else
+            FileUtils.cp(s, 'styles/')
+          end
+        end
+        Open3.capture2e('bibtex', @bfilename)
+      end
+
+      File.write(@biberr, bib_out)
+      Dir['junk/*.bbl'].each { |b| FileUtils.cp(b, '.') if LaTeXUtils.bbl_has_entries?(b) }
+      FileUtils.cp(fnbbl, fnbblbak) if File.exist?(fnbbl) && File.size(fnbbl) > 0
+
+      bbl_content = LaTeXUtils.safe_read(fnbbl)
+      bbl = bbl_content.scan(/\\bibitem/).size
+      bblx = bbl_content.scan(/biblatex/i).size
+
+      puts "\nEmpty bibliography." if bbl == 0 && bblx == 0
+    end
+
+    if @options[:time]
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
+    end
+  end
+
+  def compute_aux_hash
+    aux_files = Dir.glob('junk/**/*.aux').sort
+    aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
+  end
+
+  def needs_bib_pass?(tool, loga)
+    return false if @options[:bib] == false
+    return true if @options[:bib] == true
+
+    fnbbl = "junk/#{@bfilename}.bbl"
+    return true unless File.exist?(fnbbl) && File.size(fnbbl) > 0
+
+    bbl_mtime = File.mtime(fnbbl)
+
+    # Check if any .bib file is newer than .bbl
+    bib_files = Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }
+    return true if bib_files.any? { |b| File.mtime(b) > bbl_mtime }
+
+    # Check log for explicit rerun request
+    log_content = LaTeXUtils.safe_read(loga)
+    return true if log_content =~ /Please \(re\)run Biber/i
+    return true if log_content =~ /No file .*\.bbl/i
+    return true if log_content =~ /Citation .* undefined/i
+    return true if log_content =~ /There were undefined citations/i
+    return true if log_content =~ /Package biblatex Warning: Please rerun/i
+    return true if log_content =~ /Package natbib Warning: Citation\(s\) may have changed/i
+
+    false
+  end
+
+  def needs_latex_rerun?(loga, prev_aux_hash = nil)
+    if prev_aux_hash
+      curr_aux_hash = compute_aux_hash
+      return true if curr_aux_hash != prev_aux_hash
+    end
+
+    log_content = LaTeXUtils.safe_read(loga)
+    return true if log_content =~ /Label\(s\) may have changed/i
+    return true if log_content =~ /Rerun to get/i
+    return true if log_content =~ /Please rerun LaTeX/i
+    return true if log_content =~ /There were undefined references/i
+    return true if log_content =~ /There were undefined citations/i
+    return true if log_content =~ /Package rerunfilecheck Warning: File .* has changed/i
+    return true if log_content =~ /Package ocgx2 Warning: Rerun/i
+
+    false
+  end
+
+  def count_errors_in_log(st, loga)
+    raw = LaTeXUtils.safe_read(loga)
+    content = LaTeXUtils.filter_subcommand_noise(raw)
+    lines = content.lines
+
+    errcntx = lines.count { |l| l.include?('Error:') || l.match?(/^!\s/) || l.match?(/:\d+:\s+error/i) }
+    errcnty = lines.count { |l| l.include?('Undefined control sequence') }
+    errcntz = lines.count { |l| l.include?('Runaway argument?') }
+    errcnta = lines.count { |l| l.include?('WARN - ') }
+    errcntmd = lines.count { |l| l.include?('multiply defined') && l.include?('LaTeX Warning') }
+
+    begin
+      FileUtils.mkdir_p('/tmp/sariel')
+      File.write('/tmp/sariel/latex_multiply_defined', "#{errcntmd}\n")
+    rescue StandardError
+      nil
+    end
+
+    errcntx + errcnty + errcntz + errcnta + st + errcntmd
+  end
+
+  def extract_error_line(err_text)
+    clean = err_text.gsub(/\([a-zA-Z0-9_\-]+\)\s*/, '')
+    if clean =~ /:(\d+):/
+      $1.to_i
+    elsif clean =~ /\bl\.(\d+)\b/
+      $1.to_i
+    elsif clean =~ /(?:at|on|in)?\s*(?:input\s+)?lines?\s*(\d+)/i
+      $1.to_i
+    else
+      0
+    end
+  end
+
+  def extract_box_severity(box_line)
+    if box_line =~ /\(([\d\.]+)pt too (?:wide|high)\)/i
+      $1.to_f
+    elsif box_line =~ /\(badness (\d+)\)/i
+      $1.to_f
+    else
+      0.0
+    end
+  end
+
+  def extract_warnings(content, verbose = false)
+    raw_warnings = []
+    seen_warnings = {}
+    lines = content.lines
+    i = 0
+    while i < lines.size
+      l = lines[i]
+      if l =~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/
+        if l.include?('multiply defined')
+          i += 1
+          next
+        end
+        warn_block = [l.strip]
+        start_idx = i
+        i += 1
+        while i < lines.size && !lines[i].strip.empty? &&
+              lines[i] !~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/ &&
+              lines[i] !~ /^(Overfull|Underfull)/ &&
+              lines[i] !~ /^\[\d+\]/ &&
+              lines[i] !~ /^!\s+/ &&
+              lines[i] !~ /^.+:\d+:/ &&
+              lines[i] !~ /^Runaway argument\?/
+          warn_block << lines[i].strip
+          i += 1
+        end
+        warn_text = warn_block.join(' ')
+        unless seen_warnings[warn_text]
+          seen_warnings[warn_text] = true
+          clean_text = warn_text.gsub(/\([a-zA-Z0-9_\-]+\)\s*/, '')
+          clean_text = clean_text.gsub(/line (\d+)\s+(\d+)\b/, 'line \1\2')
+          line_no = 0
+          line_str = ''
+          if clean_text =~ /(?:at|on|in)?\s*(?:input\s+)?lines?\s*(\d+)/i
+            line_no = $1.to_i
+            line_str = $1
+          elsif clean_text =~ /:(\d+):/
+            line_no = $1.to_i
+            line_str = $1
+          end
+          prefix = if @options[:emacs]
+                     ''
+                   elsif line_str.empty?
+                     'W: '
+                   else
+                     "#{line_str} W: "
+                   end
+          formatted = if @options[:emacs]
+                        warn_text
+                      else
+                        Rainbow(prefix).yellow.bright.to_s + Rainbow(warn_text).yellow.to_s
+                      end
+          raw_warnings << { type: :warn, line: line_no, line_str: line_str, text: warn_text, formatted: formatted, index: start_idx }
+        end
+        next
+      elsif l =~ /^(Overfull|Underfull) \\(hbox|vbox)/
+        start_idx = i
+        box_type = "#{$1} \\#{$2}"
+        box_line = l.strip
+        color_m = box_line.start_with?('Overfull') ? :magenta : :cyan
+        i += 1
+        extra_lines = []
+        if i < lines.size && !lines[i].strip.empty? &&
+           lines[i] !~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/ &&
+           lines[i] !~ /^(Overfull|Underfull)/ &&
+           lines[i] !~ /^\[\d+\]/ &&
+           lines[i] !~ /^!\s+/ &&
+           lines[i] !~ /^.+:\d+:/ &&
+           lines[i] !~ /^Runaway argument\?/ &&
+           lines[i] !~ /^l\.\d+/
+          extra_lines << lines[i].strip
+          i += 1
+        end
+
+        line_no = 0
+        line_str = ''
+        if box_line =~ /lines?\s+(\d+(?:--\d+)?)/i
+          line_str = $1
+          line_no = $1.split('--').first.to_i
+        end
+
+        prefix = if @options[:emacs]
+                   ''
+                 elsif line_str.empty?
+                   'W: '
+                 else
+                   "#{line_str} W: "
+                 end
+        formatted = if @options[:emacs]
+                      box_line
+                    else
+                      Rainbow(prefix).send(color_m).bright.to_s + Rainbow(box_line).send(color_m).to_s
+                    end
+        if verbose && !extra_lines.empty?
+          formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : Rainbow(line).send(color_m).to_s }.join("\n")
+        end
+
+        severity = extract_box_severity(box_line)
+        raw_warnings << {
+          type: box_type,
+          line: line_no,
+          line_str: line_str,
+          text: box_line,
+          severity: severity,
+          formatted: formatted,
+          index: start_idx
+        }
+        next
+      end
+      i += 1
+    end
+
+    filtered_warnings = []
+    box_groups = {}
+    raw_warnings.each do |w|
+      if w[:type].is_a?(String) && w[:type] =~ /^(Overfull|Underfull)/ && !w[:line_str].empty?
+        key = [w[:type], w[:line_str]]
+        box_groups[key] ||= []
+        box_groups[key] << w
+      else
+        filtered_warnings << w
+      end
+    end
+
+    box_groups.each do |_key, items|
+      biggest = items.max_by { |item| item[:severity] }
+      filtered_warnings << biggest
+    end
+
+    filtered_warnings
+  end
+
+  def extract_errors(content)
+    errors = []
+    clean_content = LaTeXUtils.filter_subcommand_noise(content)
+    lines = clean_content.lines
+    i = 0
+    while i < lines.size
+      line = lines[i]
+
+      if line =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i
+        i += 1
+        next
+      end
+
+      is_err = false
+      if line =~ /^.+:\d+:\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use|.*error)/i ||
+         line =~ /^!\s+\S+/ ||
+         line =~ /^Runaway argument\?/ ||
+         line =~ /^Error:\s+/i ||
+         (line.include?('multiply defined') && line.include?('LaTeX Warning'))
+        is_err = true
+      end
+
+      if is_err
+        start_idx = i
+        err_block = [line]
+        i += 1
+        while i < lines.size && err_block.size < 6
+          curr = lines[i]
+          break if curr =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i
+          break if curr =~ /^.+:\d+:\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use|.*error)/i
+          break if curr =~ /^!\s+\S+/
+          break if curr =~ /^Runaway argument\?/
+          break if curr =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/
+          break if curr =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/
+
+          err_block << curr
+          i += 1
+          break if curr =~ /^l\.\d+/
+        end
+
+        err_block = err_block.map(&:rstrip).reject(&:empty?)
+        err_text = err_block.join("\n")
+        line_no = extract_error_line(err_text)
+        formatted = if @options[:emacs]
+                      err_block.join("\n")
+                    else
+                      err_block.map { |l| Rainbow(l).red.bright.to_s }.join("\n")
+                    end
+        errors << { line: line_no, text: err_text, formatted: formatted, index: start_idx }
+      else
+        i += 1
+      end
+    end
+    errors
+  end
+
+  def overfull_hbox?(item)
+    t = item[:type].to_s
+    txt = item[:text].to_s
+    (t.include?('Overfull') && t.include?('hbox')) || txt =~ /\AOverfull\s+\\hbox/i
+  end
+
+  def print_diagnostics_body(warnings, errors, fallback_lines: [])
+    overfull_warnings, other_warnings = warnings.partition { |w| overfull_hbox?(w) }
+
+    sorted_other = other_warnings.sort_by { |w| [w[:line] || 0, w[:index] || 0] }
+    sorted_overfull = overfull_warnings.sort_by do |w|
+      sev = w[:severity] || extract_box_severity(w[:text].to_s)
+      [sev.to_f, w[:line] || 0, w[:index] || 0]
+    end
+    sorted_errors = errors.sort_by { |e| [e[:line] || 0, e[:index] || 0] }
+
+    blocks = []
+
+    unless sorted_other.empty?
+      blocks << sorted_other.map { |w| w[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
+    end
+
+    unless sorted_overfull.empty?
+      blocks << sorted_overfull.map { |w| w[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
+    end
+
+    if sorted_errors.empty? && !fallback_lines.empty?
+      clean_fallback = fallback_lines.map(&:rstrip).reject(&:empty?)
+      clean_fallback = clean_fallback.map { |l| Rainbow(l).red.bright.to_s } unless @options[:emacs]
+      blocks << clean_fallback.join("\n") unless clean_fallback.empty?
+    elsif !sorted_errors.empty?
+      blocks << sorted_errors.map { |e| e[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
+    end
+
+    puts blocks.join("\n\n") unless blocks.empty?
+
+    [sorted_other.size + sorted_overfull.size, sorted_errors.size]
+  end
+
+  def report_errors(loga)
+    raw = LaTeXUtils.safe_read(loga)
+    content = LaTeXUtils.filter_subcommand_noise(raw)
+
+    puts Rainbow("\n===============================================================").red.bright
+    puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
+    puts Rainbow('===============================================================').red.bright
+    puts "(./#{@filename}"
+
+    warnings = extract_warnings(content, @options[:verbose])
+    errors = extract_errors(content)
+
+    fallback = errors.empty? ? content.lines.last(15) : []
+    num_warnings, num_errors = print_diagnostics_body(warnings, errors, fallback_lines: fallback)
+
+    puts ')'
+    puts Rainbow('===============================================================').red.bright
+    puts "See #{loga} for full error details."
+    errors = [num_errors, count_latex_errors(raw, 1)].max
+    warnings = num_warnings
+    errors_str = errors > 0 ? Rainbow("Errors: #{errors}").red.bright : Rainbow("Errors: #{errors}").green.bright
+    warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
+    puts ''
+    puts "#{errors_str}, #{warnings_str}"
+    exit 1
+  end
+
+  def update_target_file(src, dst, update_on_diff: false)
+    return unless File.exist?(src)
+
+    if update_on_diff && File.exist?(dst) && dst.end_with?('.pdf') && LaTeXUtils.command_available?('pdftotext')
+      txt_src, = Open3.capture2e('pdftotext', '-layout', src, '-')
+      txt_dst, = Open3.capture2e('pdftotext', '-layout', dst, '-')
+      if txt_src == txt_dst
+        puts "\n  \e[37;45m PDF text content unchanged (skipped target overwrite) \e[0m"
+        return
+      end
+    end
+
+    FileUtils.cp(src, dst)
+    puts "  Updated target: #{dst}" if update_on_diff
+  end
+
+  def analyze_output
+    pdferr = find_last_latex_log
+
+    if @options[:score]
+      output_score(pdferr, 0)
+      return
+    end
+
+    new_content = LaTeXUtils.safe_read(pdferr)
+
+    cnt_overfull = new_content.scan(/overfull/i).size
+    cnt_underfull = new_content.scan(/underfull/i).size
+
+    cnt_bibtex = 0
+    cnt_bibtexa = 0
+    cnt_bibtexb = 0
+    cnt_biberr = 0
+
+    if File.exist?(@biberr)
+      bib_content = LaTeXUtils.safe_read(@biberr)
+      cnt_bibtex = bib_content.scan(/Warning--/i).size
+      cnt_bibtexa = bib_content.scan(/Repeated entry---/i).size
+      cnt_bibtexb = bib_content.scan(/WARN - /).size
+      cnt_biberr = bib_content.scan(/error/i).size
+    end
+
+    cnt_undef_cite = 0
+    cnt_undef_ref = 0
+    cnt_mult_def = 0
+
+    new_content.each_line do |line|
+      cnt_undef_cite += 1 if line =~ /citation/i && line =~ /undefined/i
+      cnt_undef_ref += 1 if line =~ /reference/i && line =~ /undefined/i && line =~ /page/i
+      cnt_mult_def += 1 if line =~ /multiply defined/i && line =~ /label/i
+    end
+
+    cbib = cnt_bibtex + cnt_bibtexa + cnt_bibtexb + cnt_biberr
+    errs = cbib + cnt_undef_cite + cnt_undef_ref + cnt_mult_def + cnt_overfull + cnt_underfull
+
+    errors = count_latex_errors(new_content, 0) + cnt_biberr
+    warnings = count_latex_warnings(new_content) + cnt_bibtex + cnt_bibtexa + cnt_bibtexb
+
+    if errs > 0 || errors > 0
+      puts '----------------------------------------------------------'
+      overfull_s = cnt_overfull > 0 ? Rainbow("Overfull: #{cnt_overfull}").magenta : "Overfull: #{cnt_overfull}"
+      underfull_s = cnt_underfull > 0 ? Rainbow("Underfull: #{cnt_underfull}").cyan : "Underfull: #{cnt_underfull}"
+      bib_s = cbib > 0 ? Rainbow("Bibtex warns/errors: #{cbib}").yellow.bright : "Bibtex warns/errors: #{cbib}"
+      cite_s = cnt_undef_cite > 0 ? Rainbow("Undef cite: #{cnt_undef_cite}").red.bright : "Undef cite: #{cnt_undef_cite}"
+      refs_s = cnt_undef_ref > 0 ? Rainbow("Undef refs: #{cnt_undef_ref}").red.bright : "Undef refs: #{cnt_undef_ref}"
+      mult_s = cnt_mult_def > 0 ? Rainbow("Lab multi-def: #{cnt_mult_def}").red.bright : "Lab multi-def: #{cnt_mult_def}"
+      print "#{overfull_s} | #{underfull_s} | #{bib_s} | #{cite_s} | #{refs_s} | #{mult_s}\n"
+      puts '----------------------------------------------------------'
+
+      puts "(./#{@filename}"
+
+      clean_content = LaTeXUtils.filter_subcommand_noise(new_content)
+      warn_items = extract_warnings(clean_content, @options[:verbose])
+      err_items = extract_errors(clean_content)
+
+      if cbib > 0 && File.exist?(@biberr)
+        bib_content = LaTeXUtils.safe_read(@biberr)
+        bib_content.each_line.with_index do |bl, bidx|
+          if bl =~ /Repeated entry---/i || bl =~ /Warning--/i || bl =~ /WARN - /
+            line_str = ''
+            line_str = $1 if bl =~ /line\s+(\d+)/i
+            prefix = if @options[:emacs]
+                       ''
+                     elsif line_str.empty?
+                       'W: '
+                     else
+                       "#{line_str} W: "
+                     end
+            formatted = if @options[:emacs]
+                          bl.strip
+                        else
+                          Rainbow(prefix).yellow.bright.to_s + Rainbow(bl.strip).yellow.to_s
+                        end
+            warn_items << { line: line_str.to_i, line_str: line_str, text: bl.strip, formatted: formatted, index: 100000 + bidx }
+          elsif bl =~ /couldn't open/i || bl =~ /error/i
+            formatted = @options[:emacs] ? bl.strip : Rainbow(bl.strip).red.bright.to_s
+            err_items << { line: 0, text: bl.strip, formatted: formatted, index: 100000 + bidx }
+          end
+        end
+      end
+
+      num_warnings, num_errors = print_diagnostics_body(warn_items, err_items)
+
+      puts ')'
+
+      warnings = num_warnings
+      errors = [num_errors, errors].max
+    end
+
+    return unless errors > 0 || warnings > 0
+
+    errors_str = errors > 0 ? Rainbow("Errors: #{errors}").red.bright : Rainbow("Errors: #{errors}").green.bright
+    warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
+    puts ''
+    puts "#{errors_str}, #{warnings_str}"
+  end
+
+  def find_last_latex_log
+    %w[_3 _2 _1].each do |s|
+      candidate = "#{@pdferr}#{s}"
+      return candidate if File.exist?(candidate)
+    end
+    @pdferr
+  end
+
+  def count_latex_errors(content, status = 0)
+    errors = 0
+    clean_content = LaTeXUtils.filter_subcommand_noise(content)
+    clean_content.each_line do |line|
+      next if line =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i
+
+      if line =~ /^!\s+\S+/ ||
+         line =~ /^.+:\d+:\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use)/i ||
+         line =~ /^.+:\d+:\s+.*error/i ||
+         line =~ /^Error:\s+/i ||
+         (line.include?('multiply defined') && line.include?('LaTeX Warning'))
+        errors += 1
+      end
+    end
+    errors = 1 if errors == 0 && status.to_i > 0
+    errors
+  end
+
+  def count_latex_warnings(content)
+    warnings = 0
+    content.each_line do |line|
+      next if line.include?('multiply defined') && line.include?('LaTeX Warning')
+
+      if line =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/ ||
+         line =~ /^.+:\d+:\s+warning:/i ||
+         line =~ /^Warning:\s+/i ||
+         line =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/
+        warnings += 1
+      end
+    end
+    warnings
+  end
+
+  def output_score(last_log_path = nil, status = 0)
+    last_log_path ||= find_last_latex_log
+    content = LaTeXUtils.safe_read(last_log_path)
+    errors = count_latex_errors(content, status)
+    warnings = count_latex_warnings(content)
+    out = @orig_stdout || $stdout
+    errors_str = errors > 0 ? Rainbow("Errors: #{errors}").red.bright : Rainbow("Errors: #{errors}").green.bright
+    warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
+    out.puts "#{errors_str}, #{warnings_str}"
+  end
+end
+
+# ------------------------------------------------------------------------------
+# CLI Option Parsing
+# ------------------------------------------------------------------------------
+
+# Direct execution if invoked via symlink
+prog_name = File.basename($PROGRAM_NAME)
+if prog_name == 'latex_file_in_dir'
+  dir = ARGV[0] || '.'
+  puts LaTeXUtils.find_main_latex_file(dir)
+  exit 0
+elsif %w[latex_clean clean_latex latex-clean].include?(prog_name)
+  if ARGV.include?('-h') || ARGV.include?('--help')
+    puts "Usage: #{prog_name} [directory...]"
+    puts 'Clean all LaTeX auxiliary and junk files in the specified directory (default: current directory).'
+    exit 0
+  end
+  dirs = ARGV.empty? ? ['.'] : ARGV
+  dirs.each do |d|
+    target = File.directory?(d) ? d : File.dirname(d)
+    LaTeXUtils.clean_directory(target)
+  end
+  exit 0
+end
+
+symlink_engine = if %w[ll llua lualatex_l].include?(prog_name)
+                   'lualatex'
+                 elsif %w[lp pdflatex_l pdflatex].include?(prog_name)
+                   LaTeXUtils.check_engine!('pdflatex')
+                 end
+
+is_lw = (File.basename($PROGRAM_NAME) == 'lw')
+is_env_free = %w[pdflatex_env_free latex_env_free bibtex_env_free].include?(prog_name)
+
+options = {
+  engine: symlink_engine,
+  clean: false,
+  single_pass: false,
+  fast: is_lw,
+  update_on_diff: false,
+  bib: nil,
+  passes: 3,
+  time: false,
+  lock: false,
+  score: false,
+  color: nil,
+  no_env: is_env_free,
+  verbose: false,
+  emacs: false
+}
+
+ARGV.map! do |arg|
+  case arg
+  when '-score' then '--score'
+  when '-no-env' then '--no-env'
+  when '-env-free' then '--env-free'
+  when '-envfree' then '--envfree'
+  when '-emacs' then '--emacs'
+  else arg
+  end
+end
+
+parser = OptionParser.new do |opts|
+  opts.banner = 'Usage: l [options] [document.tex]'
+  opts.separator ''
+  opts.separator 'Compilation Options:'
+
+  opts.on('-m', '--main', '--find-main', '--file', 'Print the detected main LaTeX file and exit') do
+    dir = ARGV[0] || '.'
+    puts LaTeXUtils.find_main_latex_file(dir)
+    exit 0
+  end
+
+  opts.on('-C', '--clean-only', 'Clean auxiliary and junk files in directory and exit without building') do
+    dir = ARGV[0] || '.'
+    target = File.directory?(dir) ? dir : File.dirname(dir)
+    LaTeXUtils.clean_directory(target)
+    exit 0
+  end
+
+  opts.on('--fast', 'Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed') do
+    options[:fast] = true
+  end
+
+  opts.on('-e', '--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex') do |v|
+    LaTeXUtils.check_engine!(v)
+    options[:engine] = LaTeXUtils.normalize_engine(v)
+  end
+
+  opts.on('--lua', '--lualatex', 'Shortcut for --engine=lualatex') do
+    options[:engine] = 'lualatex'
+  end
+
+  opts.on('--xe', '--xelatex', 'Shortcut for --engine=xelatex (default)') do
+    options[:engine] = 'xelatex'
+  end
+
+  opts.on('--pdf', 'Generate PDF output (default behavior)') do
+    # No-op: output is already PDF using the default engine (xelatex)
+  end
+
+  opts.on('--pdflatex', 'Shortcut for --engine=pdflatex (rejected)') do
+    LaTeXUtils.check_engine!('pdflatex')
+  end
+
+  opts.on('-u', '--single-pass', '--quick', 'Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)') do
+    options[:single_pass] = true
+    options[:passes] = 1
+    options[:bib] = false
+  end
+
+  opts.on('-d', '--diff', '--update-on-diff', 'Only replace target PDF if text content changed') do
+    options[:update_on_diff] = true
+  end
+
+  opts.on('-c', '--clean', 'Clean temporary build files (junk/, .bbl, .aux) before building') do
+    options[:clean] = true
+  end
+
+  opts.on('-b', '--[no-]bib', 'Force or skip BibTeX pass (default: auto-detect)') do |v|
+    options[:bib] = v
+  end
+
+  opts.on('-n', '--passes NUM', Integer, 'Number of compilation passes (1-3, default: 3)') do |v|
+    options[:passes] = v.clamp(1, 3)
+  end
+
+  opts.on('-t', '--time', 'Show execution time diagnostics per pass') do
+    options[:time] = true
+  end
+
+  opts.on('--[no-]color', 'Enable or disable colored terminal output (default: auto)') do |v|
+    options[:color] = v
+  end
+
+  opts.on('--lock', 'Enable lockfile concurrency protection') do
+    options[:lock] = true
+  end
+
+  opts.on('-s', '--score', '[-score] Suppress stdout and output error/warning count from the last LaTeX run') do
+    options[:score] = true
+  end
+
+  opts.on('--no-env', '--env-free', '--envfree', '[-no-env, -env-free] Reset environment variables used by LaTeX/BibTeX/Biber') do
+    options[:no_env] = true
+  end
+
+  opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line/W: prefixes)') do
+    options[:emacs] = true
+  end
+
+  opts.on('-v', '--verbose', 'Verbose output (e.g. show box text snippets)') do
+    options[:verbose] = true
+  end
+
+  opts.on('-V', '--version', 'Show version') do
+    puts "l #{VERSION}"
+    exit 0
+  end
+
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
+  end
+end
+
+parser.parse!
+
+Rainbow.enabled = false if options[:emacs] && options[:color].nil?
+Rainbow.enabled = options[:color] unless options[:color].nil?
+
+LaTeXUtils.reset_latex_environment! if options[:no_env]
+
+# Target file resolution and execution
+targets = ARGV.empty? ? [LaTeXUtils.find_main_latex_file] : ARGV
+
+targets.each do |target|
+  LatexBuilder.new(target, options).run!
+end

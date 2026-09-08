@@ -1,0 +1,166 @@
+# latex_it (Unified LaTeX Builder)
+
+`latex_it` (commonly symlinked as `l` or `lw`) is a high-performance, robust Ruby-based wrapper and build manager for modern LaTeX workflows (`xelatex` and `lualatex`). It simplifies LaTeX document compilation by providing clean directory management, automatic main file detection, intelligent multi-pass scheduling, smart bibliography tooling (Biber/BibTeX), PDF diffing, and structured diagnostic error/warning analysis.
+
+---
+
+## Key Features
+
+### 1. Isolated Build Directory (`junk/`)
+- All intermediate build artifacts (`.aux`, `.log`, `.out`, `.toc`, `.fls`, `.bcf`, etc.) are written directly into an isolated `junk/` directory using LaTeX's `-output-directory=junk` option.
+- Keeps your working directory clean: only final output targets (`<document>.pdf`, `<document>.bbl`, and `<document>.synctex.gz`) are copied back to the document root upon completion.
+- Preserves compilation cache between runs in `junk/old/`, copying previous `.aux`, `.bbl`, and `.out` files forward to ensure references and outlines remain stable across incremental builds.
+
+### 2. Automatic Main File Detection
+If no target `.tex` file is explicitly passed, `latex_it` discovers the main document automatically:
+1. **`.mainfile`**: Reads the file name specified inside a `.mainfile` file if present.
+2. **Directory Filtering**: Scans directory `*.tex` files and excludes preamble/prefix snippets (`*.num.tex`, `prefix*.tex`, `prelim*.tex`, `preamble*.tex`, `pratenddefaultcategory.tex`, `flycheck_*.tex`, editor backups, and hidden files).
+3. **Directory Name Match**: Checks if `<directory_name>.tex` exists.
+4. **Document Marker Inspection**: Checks candidate files for `\begin{document}` or `\documentclass`.
+5. **Existing Output Match**: Checks if a matching `<name>.pdf` or `junk/<name>.pdf` exists.
+
+### 3. Modern Engine First (XeLaTeX & LuaLaTeX)
+- Default engine is **`xelatex`**.
+- Full support for **`lualatex`** via CLI flag or automatic detection.
+- **`pdflatex` is rejected by default**: Rejects compilation with an explanatory notice recommending modern UTF-8 capable engines.
+- **Engine Auto-Detection**:
+  - TeX magic comments: `% !TEX TS-program = <engine>` or `% !TEX program = <engine>`
+  - AUCTeX / Emacs file local variables: `TeX-engine: <engine>`
+  - LuaTeX packages: usage of `\usepackage{luacode}`, `\usepackage{luamplib}`, `\usepackage{luatex85}`, or `\directlua` automatically selects `lualatex`.
+
+### 4. Bibliography Automation (BibTeX & Biber)
+- Automatically detects whether the project uses **Biber** (via `.bcf` citekeys or `run.xml` declarations) or **BibTeX** (via `\bibdata` and `\citation` in `.aux`).
+- Copies local `.bib` files and style dependencies (`styles/`) into `junk/` before invocation.
+- Validates `.bbl` output: preserves `.bbl.bak` backups and only updates root `.bbl` if entries (`\bibitem` or `\entry`) were generated.
+
+### 5. Flexible Compilation Modes
+- **Standard Mode (Default: 3 Passes)**:
+  `Pass 1 (LaTeX) -> Bibliography (Biber/BibTeX) -> Pass 2 (LaTeX) -> Pass 3 (LaTeX)`
+- **Fast Incremental Mode (`--fast` / `lw`)**:
+  Computes checksums on `.aux` files, checks `.bib` file timestamps, and scans logs for rerun requests. Skips bibliography and extra LaTeX passes unless changes require them.
+- **Single-Pass Mode (`-u` / `--single-pass` / `--quick`)**:
+  Runs exactly one LaTeX pass without bibliography or extra iterations.
+
+### 6. PDF Text Diff Protection (`-d` / `--diff`)
+- When enabled, runs `pdftotext -layout` to compare newly compiled PDF text against the existing target PDF.
+- Skips overwriting the target PDF if text content is unchanged, preventing unnecessary PDF viewer redraws and timestamp changes.
+
+### 7. Diagnostics, Error & Warning Parsing
+- Strips low-level TeX font-generation noise (such as `mktextfm`, `mktexpk`, METAFONT errors).
+- Aggregates and colorizes syntax errors, undefined control sequences, missing citations, broken references, and multiply defined labels.
+- Groups and deduplicates `Overfull \hbox` and `Underfull \vbox` warnings per line, reporting the worst-case badness/pt dimension.
+- Provides `--emacs` flag for AUCTeX-compatible log format.
+- Provides `-s` / `--score` mode for quiet status reporting (`Errors: X, Warnings: Y`).
+
+### 8. Environment & Configuration Controls
+- Automatically sources directory-level preferences from `.config_latex` (lines matching `KEY=VALUE` or `export KEY=VALUE`).
+- Supports custom macro injections via `LATEXOPTS` or `LATEXOPTIONS`.
+- Provides `--no-env` (`--env-free`) to sanitize TeX-related environment variables (`TEXINPUTS`, `BIBINPUTS`, etc.) to prevent environment pollution.
+- Supports concurrency control with file locking (`--lock`).
+
+---
+
+## Symlink Personalities
+
+The script inspects `$PROGRAM_NAME` and changes default behavior based on the executable name:
+
+| Executable Name | Description / Activated Behavior |
+| :--- | :--- |
+| `latex_it`, `l` | Default compilation mode (`xelatex`, 3 passes, auto-bib). |
+| `lw` | Fast incremental mode (`--fast`). |
+| `ll`, `llua`, `lualatex_l` | Sets engine to `lualatex`. |
+| `lp`, `pdflatex_l`, `pdflatex` | Triggers pdflatex rejection check. |
+| `latex_file_in_dir` | Prints detected main `.tex` file in directory and exits. |
+| `latex_clean`, `clean_latex`, `latex-clean` | Cleans auxiliary and junk files in directory and exits. |
+| `latex_env_free`, `bibtex_env_free`, `pdflatex_env_free` | Enables `--no-env` to reset TeX environment variables. |
+
+---
+
+## Command-Line Options
+
+```text
+Usage: l [options] [document.tex]
+
+Compilation Options:
+    -m, --main, --find-main, --file  Print the detected main LaTeX file and exit
+    -C, --clean-only                 Clean auxiliary and junk files in directory and exit without building
+        --fast                       Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed
+    -e, --engine ENGINE              LaTeX compiler: xelatex (default), lualatex
+        --lua, --lualatex            Shortcut for --engine=lualatex
+        --xe, --xelatex              Shortcut for --engine=xelatex (default)
+        --pdf                        Generate PDF output (default behavior)
+        --pdflatex                   Shortcut for --engine=pdflatex (rejected)
+    -u, --single-pass, --quick       Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)
+    -d, --diff, --update-on-diff     Only replace target PDF if text content changed
+    -c, --clean                      Clean temporary build files (junk/, .bbl, .aux) before building
+    -b, --[no-]bib                   Force or skip BibTeX pass (default: auto-detect)
+    -n, --passes NUM                 Number of compilation passes (1-3, default: 3)
+    -t, --time                       Show execution time diagnostics per pass
+        --[no-]color                 Enable or disable colored terminal output (default: auto)
+        --lock                       Enable lockfile concurrency protection
+    -s, --score                      [-score] Suppress stdout and output error/warning count from the last LaTeX run
+        --no-env, --env-free, --envfree
+                                     [-no-env, -env-free] Reset environment variables used by LaTeX/BibTeX/Biber
+        --emacs                      Format warnings/errors for Emacs AUCTeX integration (suppress line/W: prefixes)
+    -v, --verbose                    Verbose output (e.g. show box text snippets)
+    -V, --version                    Show version
+    -h, --help                       Show this help message
+```
+
+---
+
+## Code Architecture
+
+The script [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) is organized into three primary sections:
+
+- [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L56-L306):
+  Utility module containing helper methods for:
+  - Engine normalization & validation ([`check_engine!`](file:///home/sariel/prog/26/latex_it/latex_it#L68-L75), [`normalize_engine`](file:///home/sariel/prog/26/latex_it/latex_it#L77-L93))
+  - File inspection & magic comment parsing ([`detect_engine_from_file`](file:///home/sariel/prog/26/latex_it/latex_it#L95-L128))
+  - Safe binary-safe file reading ([`safe_read`](file:///home/sariel/prog/26/latex_it/latex_it#L130-L136))
+  - Output noise reduction ([`filter_subcommand_noise`](file:///home/sariel/prog/26/latex_it/latex_it#L138-L143))
+  - Bibliography content verification ([`bbl_has_entries?`](file:///home/sariel/prog/26/latex_it/latex_it#L145-L150))
+  - Binary executable checks in `$PATH` ([`command_available?`](file:///home/sariel/prog/26/latex_it/latex_it#L152-L157), [`check_program`](file:///home/sariel/prog/26/latex_it/latex_it#L159-L164))
+  - Local configuration loading ([`load_config_latex`](file:///home/sariel/prog/26/latex_it/latex_it#L166-L185))
+  - Main file heuristic detection ([`find_main_latex_file`](file:///home/sariel/prog/26/latex_it/latex_it#L187-L239))
+  - Directory cleaning ([`clean_directory`](file:///home/sariel/prog/26/latex_it/latex_it#L241-L271))
+  - Environment sanitization ([`reset_latex_environment!`](file:///home/sariel/prog/26/latex_it/latex_it#L273-L305))
+
+- [`LatexBuilder`](file:///home/sariel/prog/26/latex_it/latex_it#L308-L1166):
+  Main orchestrator class managing target builds:
+  - Entry point and working directory context ([`run!`](file:///home/sariel/prog/26/latex_it/latex_it#L318-L338), [`compile_target`](file:///home/sariel/prog/26/latex_it/latex_it#L342-L421))
+  - Concurrency locking via `flock` ([`with_lock`](file:///home/sariel/prog/26/latex_it/latex_it#L423-L434))
+  - Build environment & compiler flag setup ([`setup_environment`](file:///home/sariel/prog/26/latex_it/latex_it#L436-L469))
+  - Isolated `junk/` directory layout and cache management ([`junk_dir_create`](file:///home/sariel/prog/26/latex_it/latex_it#L470-L495))
+  - Compilation execution via `Open3.capture2e` ([`run_latex_pass`](file:///home/sariel/prog/26/latex_it/latex_it#L517-L568))
+  - Bibliography engine selection and execution ([`detect_bib_tool`](file:///home/sariel/prog/26/latex_it/latex_it#L570-L607), [`run_bib_pass`](file:///home/sariel/prog/26/latex_it/latex_it#L609-L651))
+  - Change detection heuristics ([`needs_bib_pass?`](file:///home/sariel/prog/26/latex_it/latex_it#L658-L681), [`needs_latex_rerun?`](file:///home/sariel/prog/26/latex_it/latex_it#L683-L699), [`compute_aux_hash`](file:///home/sariel/prog/26/latex_it/latex_it#L653-L656))
+  - PDF diff comparison and target artifact updating ([`update_target_file`](file:///home/sariel/prog/26/latex_it/latex_it#L998-L1012))
+  - Diagnostics, warnings, and errors extraction ([`extract_warnings`](file:///home/sariel/prog/26/latex_it/latex_it#L745-L874), [`extract_errors`](file:///home/sariel/prog/26/latex_it/latex_it#L876-L930), [`report_errors`](file:///home/sariel/prog/26/latex_it/latex_it#L971-L996), [`analyze_output`](file:///home/sariel/prog/26/latex_it/latex_it#L1014-L1113))
+
+- **CLI Dispatcher** ([lines 1172–1345](file:///home/sariel/prog/26/latex_it/latex_it#L1172-L1345)):
+  Executable name inspection, option parsing using `OptionParser`, color setup via Rainbow, and target dispatching.
+
+---
+
+## Requirements & Dependencies
+
+- **Ruby**: 2.7+ (tested with Ruby 3.x).
+- **TeX System**: TeX Live, MacTeX, or compatible distribution with `xelatex`, `lualatex`, `bibtex`, or `biber`.
+- **Optional Tools**:
+  - `pdftotext` (from `poppler-utils`) for diff-based updates (`-d`).
+  - `rainbow` gem for colored terminal diagnostic output (automatic plain-text fallback included).
+
+---
+
+## Development Environment Setup
+
+To verify or install all development and AI agent tooling (linter, LSP, AST search, token compression):
+
+```bash
+# Check existing tool status without installing
+./tools/setup_ruby_dev --check-only
+
+# Check and install any missing tools
+./tools/setup_ruby_dev
+```

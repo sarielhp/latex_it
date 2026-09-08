@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/gate
+#
+# Fast Quality Gate (< 2s) for latex_it:
+# 1. Ruby syntax check (ruby -cw) across scripts and tests
+# 2. Automated test suite execution (minitest)
+# ==============================================================================
+
+require 'English'
+require 'open3'
+
+module QualityGate
+  GREEN = "\e[32m"
+  RED   = "\e[31m"
+  CYAN  = "\e[36m"
+  BOLD  = "\e[1m"
+  RESET = "\e[0m"
+
+  def self.run!
+    puts "#{BOLD}==> Running Fast Quality Gate (latex_it)...#{RESET}"
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    root = File.expand_path('..', __dir__)
+
+    Dir.chdir(root) do
+      check_syntax!
+      run_tests!
+    end
+
+    elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)
+    puts "#{GREEN}#{BOLD}All quality gate checks passed in #{elapsed}s!#{RESET}"
+  end
+
+  def self.check_syntax!
+    puts "--> #{CYAN}[1/2] Ruby syntax verification (ruby -cw)...#{RESET}"
+    files = ['latex_it', 'tools/setup_ruby_dev', 'tools/gate', 'test/test_latex_it.rb'].select { |f| File.exist?(f) }
+
+    files.each do |f|
+      stdout_stderr, status = Open3.capture2e('ruby', '-cw', f)
+      unless status.success?
+        puts "#{RED}❌ Syntax check failed on #{f}:#{RESET}"
+        puts stdout_stderr
+        exit 1
+      end
+    end
+  end
+
+  def self.run_tests!
+    puts "--> #{CYAN}[2/2] Automated test suite (minitest)...#{RESET}"
+    test_files = Dir.glob('test/**/test_*.rb')
+    if test_files.empty?
+      puts '    (No test files found, skipping)'
+      return
+    end
+
+    test_files.each do |tf|
+      stdout_stderr, status = Open3.capture2e('ruby', '-I.', tf)
+      unless status.success?
+        puts "#{RED}❌ Test failure in #{tf}:#{RESET}"
+        puts stdout_stderr
+        exit 1
+      end
+    end
+  end
+end
+
+QualityGate.run! if __FILE__ == $PROGRAM_NAME

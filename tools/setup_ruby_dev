@@ -1,0 +1,260 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/setup_ruby_dev
+#
+# Environment validator and installer for Ruby development tooling:
+# - Ruby Gems: rubocop, ruby-lsp, rainbow, minitest
+# - CLI Tools: ast-grep (sg), repomix, rtk, pdftotext
+# - PATH validation for user gem and local binary directories
+# ==============================================================================
+
+require 'fileutils'
+require 'open3'
+require 'optparse'
+
+module RubyDevSetup
+  GREEN  = "\e[32m"
+  YELLOW = "\e[33m"
+  RED    = "\e[31m"
+  CYAN   = "\e[36m"
+  BOLD   = "\e[1m"
+  RESET  = "\e[0m"
+
+  def self.user_gem_bindir
+    @user_gem_bindir ||= File.join(Gem.user_dir, 'bin')
+  end
+
+  def self.local_bindir
+    @local_bindir ||= File.expand_path('~/.local/bin')
+  end
+
+  def self.cargo_bindir
+    @cargo_bindir ||= File.expand_path('~/.cargo/bin')
+  end
+
+  def self.command_available?(cmd)
+    ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? do |dir|
+      bin = File.join(dir, cmd.to_s)
+      File.file?(bin) && File.executable?(bin)
+    end
+  end
+
+  def self.gem_available?(gem_name)
+    Gem::Specification.find_all_by_name(gem_name).any?
+  rescue StandardError
+    false
+  end
+
+  def self.run_cmd(cmd_array, verbose: false)
+    puts "      Running: #{cmd_array.join(' ')}" if verbose
+    stdout_stderr, status = Open3.capture2e(*cmd_array)
+    puts stdout_stderr if verbose && !stdout_stderr.empty?
+    status.success?
+  end
+
+  def self.check_path_environment
+    puts "#{BOLD}==> Checking Environment & PATH Configuration#{RESET}"
+    paths = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
+
+    dirs = [
+      ['User Gem bin', user_gem_bindir],
+      ['User Local bin', local_bindir],
+      ['Cargo bin', cargo_bindir]
+    ]
+
+    all_ok = true
+    dirs.each do |label, path|
+      if paths.include?(path)
+        puts "  [#{GREEN}OK#{RESET}] #{label} in PATH: #{path}"
+      else
+        puts "  [#{YELLOW}WARN#{RESET}] #{label} NOT found in PATH: #{path}"
+        all_ok = false
+      end
+    end
+
+    unless all_ok
+      puts "  #{YELLOW}Recommendation: Add the missing paths to your ~/.bashrc or ~/.zshrc:#{RESET}"
+      puts "    export PATH=\"#{user_gem_bindir}:#{local_bindir}:#{cargo_bindir}:$PATH\""
+    end
+    puts ''
+  end
+
+  class GemChecker
+    GEM_SPECS = [
+      { name: 'rubocop', binary: 'rubocop', desc: 'Static code analyzer and formatter' },
+      { name: 'ruby-lsp', binary: 'ruby-lsp', desc: 'Shopify Ruby Language Server Protocol' },
+      { name: 'rainbow', binary: nil, desc: 'Terminal ANSI color formatting library' },
+      { name: 'minitest', binary: nil, desc: 'Fast, lightweight testing framework' }
+    ].freeze
+
+    def self.verify_and_install(check_only: false, verbose: false)
+      puts "#{BOLD}==> Checking Ruby Gems#{RESET}"
+      FileUtils.mkdir_p(RubyDevSetup.user_gem_bindir)
+
+      GEM_SPECS.each do |spec|
+        name = spec[:name]
+        bin = spec[:binary]
+        desc = spec[:desc]
+
+        gem_ok = RubyDevSetup.gem_available?(name)
+        bin_ok = bin ? RubyDevSetup.command_available?(bin) : true
+
+        if gem_ok && bin_ok
+          puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        elsif check_only
+          puts "  [#{YELLOW}MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        else
+          install_gem(name, bin, desc, verbose: verbose)
+        end
+      end
+      puts ''
+    end
+
+    def self.install_gem(name, bin, desc, verbose: false)
+      print "  [..] Installing #{BOLD}#{name}#{RESET} (#{desc})... "
+      cmd = ['gem', 'install', '--user-install', '--bindir', RubyDevSetup.user_gem_bindir, name]
+      success = RubyDevSetup.run_cmd(cmd, verbose: verbose)
+
+      if success && bin
+        # Ensure binstub is generated
+        binstub_path = File.join(RubyDevSetup.user_gem_bindir, bin)
+        unless File.exist?(binstub_path)
+          pristine_cmd = ['gem', 'pristine', name, '--bindir', RubyDevSetup.user_gem_bindir]
+          RubyDevSetup.run_cmd(pristine_cmd, verbose: verbose)
+        end
+      end
+
+      if success
+        puts "#{GREEN}DONE#{RESET}"
+      else
+        puts "#{RED}FAILED#{RESET}"
+      end
+    end
+  end
+
+  class CliChecker
+    def self.verify_and_install(check_only: false, verbose: false)
+      puts "#{BOLD}==> Checking CLI & AST Development Tools#{RESET}"
+      FileUtils.mkdir_p(RubyDevSetup.local_bindir)
+
+      check_ast_grep(check_only, verbose)
+      check_repomix(check_only, verbose)
+      check_rtk(check_only, verbose)
+      check_pdftotext
+      puts ''
+    end
+
+    def self.check_ast_grep(check_only, verbose)
+      name = 'ast-grep (sg)'
+      desc = 'Structural AST code search and rewriting tool'
+      if RubyDevSetup.command_available?('sg') || RubyDevSetup.command_available?('ast-grep')
+        puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        return
+      end
+
+      if check_only
+        puts "  [#{YELLOW}MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        return
+      end
+
+      print "  [..] Installing #{BOLD}#{name}#{RESET}... "
+      installed = false
+
+      if RubyDevSetup.command_available?('uv')
+        installed = RubyDevSetup.run_cmd(['uv', 'tool', 'install', 'ast-grep-cli'], verbose: verbose)
+      elsif RubyDevSetup.command_available?('cargo')
+        installed = RubyDevSetup.run_cmd(['cargo', 'install', 'ast-grep', '--locked'], verbose: verbose)
+      elsif RubyDevSetup.command_available?('npm')
+        installed = RubyDevSetup.run_cmd(['npm', 'install', '-g', '--prefix', RubyDevSetup.local_bindir.sub(%r{/bin\z}, ''), '@ast-grep/cli'], verbose: verbose)
+      end
+
+      puts installed ? "#{GREEN}DONE#{RESET}" : "#{RED}FAILED (Install via 'uv tool install ast-grep-cli' or 'cargo install ast-grep')#{RESET}"
+    end
+
+    def self.check_repomix(check_only, verbose)
+      name = 'repomix'
+      desc = 'Packs repository context into LLM-friendly formats'
+      if RubyDevSetup.command_available?('repomix')
+        puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        return
+      end
+
+      if check_only
+        puts "  [#{YELLOW}MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        return
+      end
+
+      print "  [..] Installing #{BOLD}#{name}#{RESET}... "
+      installed = false
+
+      if RubyDevSetup.command_available?('npm')
+        prefix = RubyDevSetup.local_bindir.sub(%r{/bin\z}, '')
+        installed = RubyDevSetup.run_cmd(['npm', 'install', '-g', '--prefix', prefix, 'repomix'], verbose: verbose)
+      end
+
+      puts installed ? "#{GREEN}DONE#{RESET}" : "#{RED}FAILED (Install via 'npm install -g repomix')#{RESET}"
+    end
+
+    def self.check_rtk(check_only, verbose)
+      name = 'rtk'
+      desc = 'CLI token compression proxy'
+      if RubyDevSetup.command_available?('rtk')
+        puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        return
+      end
+
+      if check_only
+        puts "  [#{YELLOW}MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+      else
+        print "  [..] Installing #{BOLD}#{name}#{RESET}... "
+        installed = false
+        if RubyDevSetup.command_available?('cargo')
+          installed = RubyDevSetup.run_cmd(['cargo', 'install', 'rtk-cli'], verbose: verbose)
+        end
+        puts installed ? "#{GREEN}DONE#{RESET}" : "#{YELLOW}SKIPPED (Install via 'cargo install rtk-cli' or place in PATH)#{RESET}"
+      end
+    end
+
+    def self.check_pdftotext
+      name = 'pdftotext'
+      desc = 'Poppler PDF text extractor for latex_it --diff mode'
+      if RubyDevSetup.command_available?('pdftotext')
+        puts "  [#{GREEN}OK#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+      else
+        puts "  [#{YELLOW}OPTIONAL MISSING#{RESET}] #{BOLD}#{name}#{RESET} (#{desc})"
+        puts "    Install via system package manager (e.g. 'sudo apt-get install poppler-utils')"
+      end
+    end
+  end
+end
+
+options = {
+  check_only: false,
+  verbose: false
+}
+
+OptionParser.new do |opts|
+  opts.banner = 'Usage: setup_ruby_dev [options]'
+  opts.separator ''
+  opts.separator 'Options:'
+
+  opts.on('-c', '--check-only', 'Check for required tools without installing missing ones') do
+    options[:check_only] = true
+  end
+
+  opts.on('-v', '--verbose', 'Show detailed installation command outputs') do
+    options[:verbose] = true
+  end
+
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
+  end
+end.parse!
+
+RubyDevSetup.check_path_environment
+RubyDevSetup::GemChecker.verify_and_install(check_only: options[:check_only], verbose: options[:verbose])
+RubyDevSetup::CliChecker.verify_and_install(check_only: options[:check_only], verbose: options[:verbose])
+puts "#{RubyDevSetup::BOLD}==> Setup verification complete!#{RubyDevSetup::RESET}"

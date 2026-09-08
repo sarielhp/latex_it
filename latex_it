@@ -789,32 +789,66 @@ class LatexBuilder
     parts.join
   end
 
-  def format_diagnostic_line(line_str, message, base_color, bright_sep: true)
+  def format_diagnostic_line(line_str, message, base_color, width: 0, bright_sep: true)
     return message if @options[:emacs]
 
-    left_side = if line_str.nil? || line_str.to_s.empty?
-                  r = Rainbow(': ').send(base_color)
-                  bright_sep ? r.bright.to_s : r.to_s
+    str = line_str.to_s
+    sep = Rainbow(': ').send(base_color)
+    sep_str = bright_sep ? sep.bright.to_s : sep.to_s
+
+    left_side = if str.empty?
+                  padding = ' ' * width
+                  "#{padding}#{sep_str}"
                 else
-                  sep = Rainbow(': ').send(base_color)
-                  sep_str = bright_sep ? sep.bright.to_s : sep.to_s
-                  colorize_line_num(line_str.to_s, base_color) + sep_str
+                  padding = ' ' * [width - str.length, 0].max
+                  num_part = colorize_line_num(str, base_color)
+                  "#{padding}#{num_part}#{sep_str}"
                 end
 
     left_side + highlight_line_numbers(message, base_color)
   end
 
-  def format_error_block(err_block, line_no)
+  def format_error_block(err_block, line_no, width: 0)
     return err_block.join("\n") if @options[:emacs]
+
+    str = line_no.to_s
+    indent = ' ' * (width.positive? ? width + 2 : 2)
 
     err_block.map.with_index do |l, idx|
       colored = highlight_line_numbers(l, :red, bright: true)
-      if idx == 0 && line_no > 0 && !l.match?(/:#{line_no}:|^\s*#{line_no}:/)
-        colorize_line_num(line_no.to_s, :red) + Rainbow(': ').red.bright.to_s + colored
+      if idx == 0
+        if line_no.positive? && !l.match?(/:#{line_no}:|^\s*#{line_no}:/)
+          padding = ' ' * [width - str.length, 0].max
+          num_part = colorize_line_num(str, :red)
+          sep_str = Rainbow(': ').red.bright.to_s
+          "#{padding}#{num_part}#{sep_str}#{colored}"
+        elsif width.positive? && !l.match?(/:#{line_no}:|^\s*#{line_no}:/)
+          padding = ' ' * width
+          sep_str = Rainbow(': ').red.bright.to_s
+          "#{padding}#{sep_str}#{colored}"
+        else
+          colored
+        end
       else
-        colored
+        "#{indent}#{colored}"
       end
     end.join("\n")
+  end
+
+  def render_diagnostic_item(item, width: 0)
+    if item[:err_block]
+      format_error_block(item[:err_block], item[:line] || 0, width: width)
+    else
+      base_color = item[:base_color] || :yellow
+      out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width)
+      if @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
+        indent = ' ' * (width.positive? ? width + 2 : 2)
+        out += "\n" + item[:extra_lines].map do |el|
+          @options[:emacs] ? el : "#{indent}#{highlight_line_numbers(el, base_color)}"
+        end.join("\n")
+      end
+      out
+    end
   end
 
   def extract_warnings(content, verbose = false)
@@ -857,7 +891,7 @@ class LatexBuilder
             line_str = $1
           end
           formatted = format_diagnostic_line(line_str, warn_text, :yellow)
-          raw_warnings << { type: :warn, line: line_no, line_str: line_str, text: warn_text, formatted: formatted, index: start_idx }
+          raw_warnings << { type: :warn, line: line_no, line_str: line_str, text: warn_text, base_color: :yellow, formatted: formatted, index: start_idx }
         end
         next
       elsif l =~ /^(Overfull|Underfull) \\(hbox|vbox)/
@@ -897,6 +931,8 @@ class LatexBuilder
           line: line_no,
           line_str: line_str,
           text: box_line,
+          base_color: color_m,
+          extra_lines: extra_lines,
           severity: severity,
           formatted: formatted,
           index: start_idx
@@ -970,7 +1006,7 @@ class LatexBuilder
         err_text = err_block.join("\n")
         line_no = extract_error_line(err_text)
         formatted = format_error_block(err_block, line_no)
-        errors << { line: line_no, text: err_text, formatted: formatted, index: start_idx }
+        errors << { line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''), text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: start_idx }
       else
         i += 1
       end
@@ -994,14 +1030,17 @@ class LatexBuilder
     end
     sorted_errors = errors.sort_by { |e| [e[:line] || 0, e[:index] || 0] }
 
+    all_items = sorted_other + sorted_overfull + sorted_errors
+    max_width = all_items.map { |item| item[:line_str].to_s.length }.max || 0
+
     blocks = []
 
     unless sorted_other.empty?
-      blocks << sorted_other.map { |w| w[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
+      blocks << sorted_other.map { |w| render_diagnostic_item(w, width: max_width).rstrip }.reject(&:empty?).join("\n")
     end
 
     unless sorted_overfull.empty?
-      blocks << sorted_overfull.map { |w| w[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
+      blocks << sorted_overfull.map { |w| render_diagnostic_item(w, width: max_width).rstrip }.reject(&:empty?).join("\n")
     end
 
     if sorted_errors.empty? && !fallback_lines.empty?
@@ -1009,7 +1048,7 @@ class LatexBuilder
       clean_fallback = clean_fallback.map { |l| @options[:emacs] ? l : highlight_line_numbers(l, :red, bright: true) }
       blocks << clean_fallback.join("\n") unless clean_fallback.empty?
     elsif !sorted_errors.empty?
-      blocks << sorted_errors.map { |e| e[:formatted].to_s.rstrip }.reject(&:empty?).join("\n")
+      blocks << sorted_errors.map { |e| render_diagnostic_item(e, width: max_width).rstrip }.reject(&:empty?).join("\n")
     end
 
     puts blocks.join("\n\n") unless blocks.empty?

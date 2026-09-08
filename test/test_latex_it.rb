@@ -131,4 +131,23 @@ class TestLatexItCLI < Minitest::Test
     cyan_bright_42 = Rainbow('42').cyan.bright.to_s
     assert_includes formatted, cyan_bright_42
   end
+
+  def test_left_width_alignment
+    Rainbow.enabled = false
+    builder = LatexBuilder.new('sample.tex', emacs: false, color: false)
+
+    # Testing formatting with width = 10 (as in 1071--1075)
+    f_range = builder.send(:format_diagnostic_line, '1071--1075', 'Overfull \\hbox ...', :magenta, width: 10)
+    f_short = builder.send(:format_diagnostic_line, '448', 'Overfull \\hbox ...', :magenta, width: 10)
+    f_empty = builder.send(:format_diagnostic_line, '', 'Warning without line', :yellow, width: 10)
+
+    assert_match(/^1071--1075: Overfull/, f_range)
+    assert_match(/^       448: Overfull/, f_short)
+    assert_match(/^          : Warning/, f_empty)
+
+    # Check colon positions: all must align at index 10 (11th character)
+    assert_equal 10, f_range.index(':')
+    assert_equal 10, f_short.index(':')
+    assert_equal 10, f_empty.index(':')
+  end
 end

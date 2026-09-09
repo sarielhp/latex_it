@@ -48,6 +48,7 @@ flycheck_*.tex
 .DS_Store
 .vscode/
 .idea/
+.bws/
 
 # Ruby & Bundler
 *.gem
@@ -57,3 +58,8 @@ vendor/bundle/
 # Local reviews & audit scratch
 reviews/archive/
 .review_state.json
+
+# Local tooling shim & arXiv archives
+tools/rtk
+arxiv_*.zip
+arxiv_*_meta.txt

@@ -433,6 +433,7 @@ class TestLatexItCLI < Minitest::Test
       File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}Hello\\end{document}\n")
       File.write(File.join(dir, 'paper.pdf'), 'PDF-DUMMY')
       File.write(File.join(dir, 'paper.bbl'), "\\begin{thebibliography}{1}\n\\bibitem{a} A\n\\end{thebibliography}\n")
+      File.write(File.join(dir, 'paper.bib'), "@article{a, title={A}}\n")
       File.write(File.join(dir, 'figs', 'diagram.pdf'), 'PDF-FIG')
       File.write(File.join(dir, 'figs', 'diagram.fig'), 'FIG-SOURCE')
       File.write(File.join(dir, 'figs', 'diagram.ipe'), 'IPE-SOURCE')
@@ -458,6 +459,7 @@ class TestLatexItCLI < Minitest::Test
         assert_includes entries, 'paper.tex'
         assert_includes entries, 'paper.pdf'
         assert_includes entries, 'paper.bbl'
+        assert_includes entries, 'paper.bib'
         assert_includes entries, 'figs/diagram.pdf'
         assert_includes entries, 'figs/diagram.fig'
         assert_includes entries, 'figs/diagram.ipe'

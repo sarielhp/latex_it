@@ -81,6 +81,19 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
   - Runs `latex_it --env-free` with no ambient environment variables.
   - Compares the test build against the bundled PDF using `pdftotext -layout`.
 
+### 10. Complete arXiv Submission Preparation (`--arxiv` and `--meta`)
+- **Submission Packaging (`--arxiv`)**:
+  - Automatically compiles and bundles a sanitized, self-contained `arxiv_<document>.zip` package ready for immediate upload to [arXiv.org](https://arxiv.org).
+  - **Monolithic Flattening**: Inlines all subfiles referenced via `\input{...}` and `\include{...}` into a single unified `<document>.tex`.
+  - **Sanitization**: Strips private `%` draft comments (preserving `\%`, TeX magic directives, and URLs) and removes private/machine-specific style imports.
+  - **Active Figures Only**: Consults compiler recorder (`.fls`) to bundle only active `.pdf`/`.png` graphic files, strictly excluding raw figure sources (`.fig`, `.ipe`, `.svg`, etc.) and target PDF.
+  - **BibLaTeX Version Shielding**: Detects `biblatex` and automatically bundles local distribution files (`biblatex.sty`, `biblatex.cfg`, `*.bbx`, `*.cbx`, `*.lbx`) to shield against arXiv's `wrong format version` compilation mismatch.
+  - **Verification Sandbox**: Automatically extracts the archive to `/tmp` and compiles with `latex_it --env-free` to guarantee clean compilation on arXiv servers.
+- **Metadata Extraction (`--meta`)**:
+  - Extracts `Title`, `Authors`, and `Abstract` from source TeX and converts TeX math/formatting macros into clean, readable Unicode plaintext.
+  - Automatically derives page count and figure count for submission comments.
+  - Generates `arxiv_<document>_meta.txt` in the root and announces both files upon completion.
+
 ---
 
 ## Symlink Personalities
@@ -133,6 +146,14 @@ Compilation Options:
     -v, --verbose                    Verbose output (e.g. show box text snippets)
     -W, --werror                     [-Werror] Treat compilation warnings as fatal errors and exit with non-zero code
     -M, --deps                       Print Makefile dependency rule for the document and exit
+
+arXiv Preparation Options:
+        --arxiv                      Prepare sanitized, flattened, submission-ready arXiv zip package
+        --arxiv-name NAME            Specify custom output name for arXiv zip archive
+        --meta                       Extract and display sanitized paper metadata and write arxiv_<file>_meta.txt
+        --[no-]arxiv-verify          Enable/disable isolated /tmp sandbox verification pass for arXiv package
+        --[no-]biblatex-shield       Enable/disable bundling local biblatex distribution files
+
     -V, --version                    Show version
     -h, --help                       Show this help message
 ```
@@ -168,7 +189,19 @@ The script [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) is organize
   - PDF diff comparison and target artifact updating ([`update_target_file`](file:///home/sariel/prog/26/latex_it/latex_it#L998-L1012))
   - Diagnostics, warnings, and errors extraction ([`extract_warnings`](file:///home/sariel/prog/26/latex_it/latex_it#L745-L874), [`extract_errors`](file:///home/sariel/prog/26/latex_it/latex_it#L876-L930), [`report_errors`](file:///home/sariel/prog/26/latex_it/latex_it#L971-L996), [`analyze_output`](file:///home/sariel/prog/26/latex_it/latex_it#L1014-L1113))
 
-- **CLI Dispatcher** ([lines 1172–1345](file:///home/sariel/prog/26/latex_it/latex_it#L1172-L1345)):
+- [`LatexPackager`](file:///home/sariel/prog/26/latex_it/latex_it):
+  Portable paper archive generator (`-z`) and `/tmp` sandbox verifier (`-t`).
+
+- [`LaTeXMetaExtractor`](file:///home/sariel/prog/26/latex_it/latex_it):
+  Metadata parser for Title, Authors, and Abstract, converting TeX math and formatting into clean Unicode plaintext.
+
+- [`LaTeXFlattener`](file:///home/sariel/prog/26/latex_it/latex_it):
+  Recursive subfile inliner and comment sanitizer producing monolithic `<file>.tex`.
+
+- [`LatexArxivPackager`](file:///home/sariel/prog/26/latex_it/latex_it):
+  arXiv packaging manager (`--arxiv`), biblatex version shield collector, and isolated sandbox verifier.
+
+- **CLI Dispatcher**:
   Executable name inspection, option parsing using `OptionParser`, color setup via Rainbow, and target dispatching.
 
 ---

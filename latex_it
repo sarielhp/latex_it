@@ -110,6 +110,24 @@ module LaTeXConfig
 
         // Supplementary files or glob patterns to always bundle in this project
         "include": []
+      },
+
+      // arXiv Submission Preparation Settings (invoked via `l --arxiv`)
+      "arxiv": {
+        // Automatically bundle local biblatex files to prevent version mismatch
+        "bundle_biblatex": true,
+
+        // Recursively inline all \\input and \\include statements into a single .tex file
+        "flatten": true,
+
+        // Strip private comments (% ...) from sources
+        "strip_comments": true,
+
+        // Verify package in isolated /tmp sandbox before completing
+        "verify": true,
+
+        // Default comments string for submission (e.g. page count, conference details)
+        "comments": null
       }
     }
   JSONC
@@ -180,7 +198,9 @@ module LaTeXConfig
   def self.load_merged_config(dir = '.')
     ensure_global_config_exists!
 
+    base_cfg = parse_jsonc(DEFAULT_CONFIG_TEMPLATE)
     global_cfg = File.exist?(GLOBAL_CONFIG_FILE) ? parse_jsonc(File.read(GLOBAL_CONFIG_FILE)) : {}
+    merged_global = deep_merge(base_cfg, global_cfg)
 
     local_cfg = {}
     found_local = false
@@ -195,7 +215,7 @@ module LaTeXConfig
 
     LaTeXUtils.load_config_latex(dir) unless found_local
 
-    deep_merge(global_cfg, local_cfg)
+    deep_merge(merged_global, local_cfg)
   end
 
   def self.deep_merge(hash1, hash2)
@@ -418,7 +438,8 @@ module LaTeXUtils
         'log.txt', 'log.txt.1', 'texput.log',
         'missfont.log', 'mfput.log',
         '*.err*', 'err_*',
-        'flycheck_*.tex'
+        'flycheck_*.tex',
+        'arxiv_*_meta.txt'
       ]
 
       patterns.each do |pat|
@@ -1717,6 +1738,44 @@ class LatexPackager
     end
   end
 
+  def discover_local_bib_files
+    candidates = Dir.glob('*.bib') + Dir.glob('{refs,bib,bibliography}/**/*.bib')
+
+    blg_file = "junk/#{@bfilename}.blg"
+    if File.file?(blg_file)
+      blg_content = LaTeXUtils.safe_read(blg_file)
+      blg_content.scan(/(?:Found BibTeX data source|Looking for bibtex file)\s+'([^']+)'/) do |m|
+        candidates << m[0]
+      end
+      blg_content.scan(/Database file #\d+:\s*([^\s]+)/) do |m|
+        candidates << m[0]
+      end
+    end
+
+    aux_files = Dir.glob('junk/**/*.aux')
+    aux_content = aux_files.map { |f| LaTeXUtils.safe_read(f) }.join("\n")
+    aux_content.scan(/\\bibdata\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.each do |stem|
+      cand = "#{stem.strip}.bib"
+      candidates << cand if File.file?(cand)
+    end
+
+    bcf_file = "junk/#{@bfilename}.bcf"
+    if File.file?(bcf_file)
+      bcf_content = LaTeXUtils.safe_read(bcf_file)
+      bcf_content.scan(/<bcf:datasource[^>]*>([^<]+)<\/bcf:datasource>/).flatten.each do |ds|
+        candidates << ds if File.file?(ds)
+      end
+    end
+
+    cwd = Dir.pwd
+    candidates.map { |p| normalize_dep_path(p) }.uniq.select do |p|
+      expanded = File.expand_path(p)
+      File.file?(p) && (expanded.start_with?(cwd + '/') || expanded == cwd || !p.start_with?('/'))
+    end.reject do |p|
+      p =~ %r{(^|/)(junk|bak|old|archive)/} || p.end_with?('.bak', '~')
+    end
+  end
+
   def stage_and_create_zip(zip_filename, deps, fig_sources)
     unless system('which zip > /dev/null 2>&1')
       warn Rainbow("[ERROR] 'zip' command not found in PATH! Cannot create archive.").red.bright
@@ -1729,6 +1788,10 @@ class LatexPackager
 
       deps[:tex_inputs].each { |f| copy_preserving_path(f, stage_dir) if File.file?(f) }
       stage_styles(deps[:styles], stage_dir)
+
+      discover_local_bib_files.each do |f|
+        copy_preserving_path(f, stage_dir) if File.file?(f)
+      end
 
       (deps[:figures] + fig_sources).uniq.each do |f|
         copy_preserving_path(f, stage_dir) if File.file?(f)
@@ -1854,9 +1917,600 @@ class LatexPackager
     t2, = Open3.capture2('pdftotext', '-layout', new_pdf, '-')
     if t1 == t2
       puts Rainbow(" -- Text layout exact match confirmed between bundled PDF and test build.").green
-    else
-      warn Rainbow(" -- Note: Minor visual layout differences detected between bundled and sandbox PDF.").yellow
     end
+  end
+end
+
+module LaTeXMetaExtractor
+  def self.extract(main_tex, base_dir = '.', pdf_path = nil, fls_path = nil, log_path = nil, extra_comments = nil)
+    raw_content = LaTeXUtils.safe_read(File.join(base_dir, main_tex))
+    title = extract_title(raw_content)
+    authors = extract_authors(raw_content)
+    abstract = extract_abstract(raw_content)
+    page_count = extract_page_count(pdf_path, log_path)
+    fig_count = extract_figure_count(fls_path, base_dir)
+    comments = format_comments(page_count, fig_count, extra_comments)
+
+    {
+      title: title,
+      authors: authors,
+      abstract: abstract,
+      page_count: page_count,
+      fig_count: fig_count,
+      comments: comments
+    }
+  end
+
+  def self.extract_balanced_braces(text, start_pos)
+    return nil if start_pos.nil? || text[start_pos] != '{'
+
+    depth = 0
+    i = start_pos
+    len = text.length
+    while i < len
+      c = text[i]
+      if c == '{' && (i == 0 || text[i - 1] != '\\')
+        depth += 1
+      elsif c == '}' && (i == 0 || text[i - 1] != '\\')
+        depth -= 1
+        return text[(start_pos + 1)...i] if depth == 0
+      end
+      i += 1
+    end
+    nil
+  end
+
+  def self.find_macro_content(text, macro_name)
+    pattern = /\\#{Regexp.escape(macro_name)}(?:\[[^\]]*\])?\s*\{/
+    idx = text.index(pattern)
+    return nil unless idx
+
+    brace_start = text.index('{', idx)
+    extract_balanced_braces(text, brace_start)
+  end
+
+  def self.clean_latex_formatting(text)
+    return '' if text.nil?
+
+    str = text.dup
+    %w[thanks footnote].each do |macro|
+      while (idx = str.index(/\\#{macro}\s*\{/))
+        brace_start = str.index('{', idx)
+        inner = extract_balanced_braces(str, brace_start)
+        break unless inner
+
+        str[idx..(brace_start + inner.length + 1)] = ''
+      end
+    end
+
+    %w[textbf textit texttt textmd textsc textsl textnormal emph text mathsf mathbf mathit mathrm].each do |m|
+      while (idx = str.index(/\\#{m}\s*\{/))
+        brace_start = str.index('{', idx)
+        inner = extract_balanced_braces(str, brace_start)
+        break unless inner
+
+        str[idx..(brace_start + inner.length + 1)] = inner
+      end
+    end
+
+    str.gsub!(/\\\\(\[[^\]]*\])?/, ' ')
+    str.gsub!(/\\newline/, ' ')
+    str.gsub!(/~/, ' ')
+    str
+  end
+
+  def self.clean_latex_math(text)
+    return '' if text.nil?
+
+    str = text.dup
+    greek = {
+      'alpha' => 'α', 'beta' => 'β', 'gamma' => 'γ', 'delta' => 'δ',
+      'epsilon' => 'ε', 'varepsilon' => 'ε', 'zeta' => 'ζ', 'eta' => 'η',
+      'theta' => 'θ', 'vartheta' => 'θ', 'iota' => 'ι', 'kappa' => 'κ',
+      'lambda' => 'λ', 'mu' => 'μ', 'nu' => 'ν', 'xi' => 'ξ',
+      'pi' => 'π', 'varpi' => 'π', 'rho' => 'ρ', 'varrho' => 'ρ',
+      'sigma' => 'σ', 'varsigma' => 'σ', 'tau' => 'τ', 'upsilon' => 'υ',
+      'phi' => 'φ', 'varphi' => 'φ', 'chi' => 'χ', 'psi' => 'ψ', 'omega' => 'ω',
+      'Gamma' => 'Γ', 'Delta' => 'Δ', 'Theta' => 'Θ', 'Lambda' => 'Λ',
+      'Xi' => 'Ξ', 'Pi' => 'Π', 'Sigma' => 'Σ', 'Upsilon' => 'Υ',
+      'Phi' => 'Φ', 'Psi' => 'Ψ', 'Omega' => 'Ω'
+    }
+    greek.each { |tex, uni| str.gsub!(/\\#{tex}\b/, uni) }
+
+    symbols = {
+      'leq' => '≤', 'le' => '≤', 'geq' => '≥', 'ge' => '≥',
+      'neq' => '≠', 'ne' => '≠', 'approx' => '≈', 'times' => '×',
+      'cdot' => '·', 'in' => '∈', 'notin' => '∉', 'subset' => '⊂',
+      'subseteq' => '⊆', 'cap' => '∩', 'cup' => '∪', 'to' => '→',
+      'rightarrow' => '→', 'leftarrow' => '←', 'gets' => '←',
+      'infty' => '∞', 'pm' => '±', 'mp' => '∓',
+      'sum' => '∑', 'prod' => '∏', 'int' => '∫'
+    }
+    symbols.each { |tex, uni| str.gsub!(/\\#{tex}\b/, uni) }
+
+    str.gsub!(/\\mathbb\{([A-Za-z])\}/, '\1')
+    str.gsub!(/\\mathcal\{([A-Za-z])\}/, '\1')
+    str.gsub!(/\\mathfrak\{([A-Za-z])\}/, '\1')
+    str.gsub!(/\\sqrt\{([^}]+)\}/, '√(\1)')
+
+    %w[log ln exp min max sin cos tan det dim ker].each do |fn|
+      str.gsub!(/\\#{fn}\b/, fn)
+    end
+
+    str.gsub!(/\$([^\$]+)\$/, '\1')
+    str.gsub!(/\$/, '')
+    str
+  end
+
+  def self.extract_title(content)
+    raw = find_macro_content(content, 'title')
+    return 'Untitled' if raw.nil? || raw.strip.empty?
+
+    clean = clean_latex_formatting(raw)
+    clean = clean_latex_math(clean)
+    clean.gsub(/\s+/, ' ').strip
+  end
+
+  def self.extract_authors(content)
+    raw_blocks = []
+    content.scan(/\\author(?:\[[^\]]*\])?\s*\{/) do
+      idx = Regexp.last_match.begin(0)
+      brace_start = content.index('{', idx)
+      raw = extract_balanced_braces(content, brace_start)
+      raw_blocks << raw if raw
+    end
+    return 'Unknown' if raw_blocks.empty?
+
+    authors = []
+    raw_blocks.each do |raw|
+      str = raw.dup
+      %w[thanks footnote affil orcid email inst institution address].each do |macro|
+        while (idx = str.index(/\\#{macro}\s*\{/))
+          brace_start = str.index('{', idx)
+          inner = extract_balanced_braces(str, brace_start)
+          break unless inner
+
+          str[idx..(brace_start + inner.length + 1)] = ''
+        end
+      end
+
+      blocks = str.split(/\\and/)
+      blocks.each do |block|
+        lines = block.split(/\\\\|\\newline/).map do |l|
+          clean = clean_latex_formatting(l)
+          clean = clean_latex_math(clean)
+          clean.gsub(/\\orcid\S*/, '')
+               .gsub(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, '')
+               .gsub(/\s+/, ' ')
+               .strip
+        end.reject do |l|
+          l.empty? || l =~ /department|university|institute|laboratory|school|college|center|address|\b(?:USA|UK|IL|CA|NY)\b|\d{4,}/i
+        end
+
+        authors.concat(lines)
+      end
+    end
+
+    authors.empty? ? 'Unknown' : authors.join(', ')
+  end
+
+  def self.extract_abstract(content)
+    raw = nil
+    if content =~ /\\begin\{abstract\}(.*?)\\end\{abstract\}/m
+      raw = Regexp.last_match(1)
+    elsif (idx = content.index(/\\abstract\s*\{/))
+      brace_start = content.index('{', idx)
+      raw = extract_balanced_braces(content, brace_start)
+    end
+    return '' if raw.nil?
+
+    lines = raw.lines.map { |l| l.sub(/(?<!\\)%.*$/, '') }
+    raw = lines.join
+
+    raw.gsub!(/\\begin\{(?:itemize|enumerate)\}/, '')
+    raw.gsub!(/\\end\{(?:itemize|enumerate)\}/, '')
+    raw.gsub!(/\\item\s*/, '- ')
+
+    clean = clean_latex_formatting(raw)
+    clean = clean_latex_math(clean)
+
+    paragraphs = clean.split(/\n\s*\n/).map do |p|
+      p.gsub(/\s+/, ' ').strip
+    end.reject(&:empty?)
+
+    paragraphs.join("\n\n")
+  end
+
+  def self.extract_page_count(pdf_path, log_path)
+    if pdf_path && File.file?(pdf_path) && system('which pdfinfo > /dev/null 2>&1')
+      out, _err, status = Open3.capture3('pdfinfo', pdf_path)
+      return Regexp.last_match(1).to_i if status.success? && out =~ /^Pages:\s*(\d+)/
+    end
+
+    if log_path && File.file?(log_path)
+      content = LaTeXUtils.safe_read(log_path)
+      return Regexp.last_match(1).to_i if content =~ /Output written on .*?\((\d+)\s+pages?/
+    end
+
+    nil
+  end
+
+  def self.extract_figure_count(fls_path, base_dir = '.')
+    return 0 unless fls_path && File.file?(fls_path)
+
+    fls_content = LaTeXUtils.safe_read(fls_path)
+    cwd = File.expand_path(base_dir)
+    count = 0
+    fls_content.each_line do |line|
+      next unless line =~ /^INPUT\s+(\S+)/
+
+      path = Regexp.last_match(1)
+      next if path.include?('/usr/share/texlive') || path.include?('texmf-dist')
+      next unless path =~ /\.(pdf|png|jpg|jpeg|mps)$/i
+
+      expanded = File.expand_path(path, cwd)
+      count += 1 if expanded.start_with?(cwd + '/') || expanded == cwd
+    end
+    count
+  end
+
+  def self.format_comments(page_count, fig_count, extra_comments = nil)
+    parts = []
+    parts << "#{page_count} #{page_count == 1 ? 'page' : 'pages'}" if page_count && page_count > 0
+    parts << "#{fig_count} #{fig_count == 1 ? 'figure' : 'figures'}" if fig_count && fig_count > 0
+    base = parts.join(', ')
+    base += '.' unless base.empty? || base.end_with?('.')
+    if extra_comments && !extra_comments.strip.empty?
+      base.empty? ? extra_comments.strip : "#{base} #{extra_comments.strip}"
+    else
+      base.empty? ? nil : base
+    end
+  end
+
+  def self.format_meta_txt(meta)
+    out = []
+    out << 'Title:'
+    out << meta[:title]
+    out << ''
+    out << 'Authors:'
+    out << meta[:authors]
+    out << ''
+    if meta[:comments]
+      out << 'Comments:'
+      out << meta[:comments]
+      out << ''
+    end
+    out << 'Abstract:'
+    out << meta[:abstract]
+    out << ''
+    out.join("\n")
+  end
+
+  def self.write_meta_file(filename, meta_txt)
+    File.write(filename, meta_txt)
+  end
+end
+
+module LaTeXFlattener
+  def self.flatten(main_tex, base_dir = '.')
+    visited = Set.new
+    inlined = inline_file(main_tex, base_dir, visited)
+    cleaned = clean_host_specific(inlined)
+    strip_comments(cleaned)
+  end
+
+  def self.inline_file(filepath, base_dir, visited)
+    real_path = File.expand_path(filepath, base_dir)
+    return '' if visited.include?(real_path)
+
+    visited.add(real_path)
+    return '' unless File.file?(real_path)
+
+    content = LaTeXUtils.safe_read(real_path)
+    file_dir = File.dirname(real_path)
+
+    out_lines = []
+    content.each_line do |line|
+      if line =~ /^\s*%/
+        out_lines << line
+        next
+      end
+
+      if line =~ /^\s*\\(?:input|include)\{([^}]+)\}(.*)$/
+        target = Regexp.last_match(1).strip
+        rest = Regexp.last_match(2)
+
+        target_with_ext = target.end_with?('.tex') ? target : "#{target}.tex"
+        candidate_path = File.expand_path(target_with_ext, file_dir)
+
+        if File.file?(candidate_path)
+          inlined = inline_file(candidate_path, file_dir, visited)
+          out_lines << inlined
+          out_lines << rest unless rest.strip.empty?
+        else
+          out_lines << line
+        end
+      else
+        out_lines << line
+      end
+    end
+
+    out_lines.join
+  end
+
+  def self.clean_host_specific(content)
+    content.gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}\{[^}]*\}/m, '')
+           .gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}/m, '')
+  end
+
+  def self.strip_comments(content)
+    lines = []
+    content.each_line do |raw_line|
+      line = raw_line.chomp
+      if line =~ /^%!TEX\s+TS-program/i
+        lines << line
+        next
+      end
+
+      next if line =~ /^\s*%/
+
+      clean_line = strip_inline_comment(line)
+      lines << clean_line unless clean_line.nil?
+    end
+
+    lines.join("\n").gsub(/\n{3,}/, "\n\n") + "\n"
+  end
+
+  def self.strip_inline_comment(line)
+    in_url = false
+    i = 0
+    len = line.length
+    while i < len
+      c = line[i]
+      if line[i..].start_with?('\\url{', '\\href{')
+        in_url = true
+      elsif in_url && c == '}'
+        in_url = false
+      elsif c == '%' && !in_url
+        bs_count = 0
+        k = i - 1
+        while k >= 0 && line[k] == '\\'
+          bs_count += 1
+          k -= 1
+        end
+        return line[0...i].rstrip if bs_count.even?
+      end
+      i += 1
+    end
+    line
+  end
+end
+
+class LatexArxivPackager
+  attr_reader :builder, :filename, :bfilename, :bdir, :options
+
+  def initialize(builder, options = {})
+    @builder = builder
+    @filename = builder.filename
+    @bfilename = builder.bfilename
+    @bdir = builder.bdir
+    @options = builder.options.merge(options)
+  end
+
+  def package!
+    if @bdir != '.'
+      Dir.chdir(@bdir) { do_package }
+    else
+      do_package
+    end
+  end
+
+  private
+
+  def do_package
+    ensure_compiled!
+
+    zip_filename = @options[:arxiv_name] || "arxiv_#{@bfilename}.zip"
+    meta_filename = "arxiv_#{@bfilename}_meta.txt"
+
+    Dir.mktmpdir('latex_it_arxiv_stage_') do |stage_dir|
+      stage_arxiv_files(stage_dir)
+      build_arxiv_zip(stage_dir, zip_filename)
+      write_arxiv_metadata(meta_filename)
+
+      verify_arxiv_sandbox!(zip_filename) unless @options[:arxiv_verify] == false
+      file_count = count_zip_entries(zip_filename)
+      announce_arxiv_completion(zip_filename, meta_filename, file_count)
+    end
+  end
+
+  def ensure_compiled!
+    fls_path = "junk/#{@bfilename}.fls"
+    bbl_path = "#{@bfilename}.bbl"
+    bbl_junk = "junk/#{@bfilename}.bbl"
+    has_bbl = File.file?(bbl_path) || File.file?(bbl_junk)
+
+    unless File.file?(fls_path) && has_bbl
+      puts Rainbow("==> Pre-flight compilation of #{@filename} for arXiv submission...").cyan.bright
+      @builder.run!
+    end
+  end
+
+  def stage_arxiv_files(stage_dir)
+    flattened_tex = LaTeXFlattener.flatten(@filename, '.')
+    File.write(File.join(stage_dir, @filename), flattened_tex)
+
+    stage_bbl(stage_dir)
+    stage_active_figures(stage_dir)
+    stage_local_styles(stage_dir)
+    stage_biblatex_shield(stage_dir) unless @options[:biblatex_shield] == false
+  end
+
+  def stage_bbl(stage_dir)
+    bbl_source = File.file?("#{@bfilename}.bbl") ? "#{@bfilename}.bbl" : "junk/#{@bfilename}.bbl"
+    if File.file?(bbl_source) && LaTeXUtils.bbl_has_entries?(bbl_source)
+      FileUtils.cp(bbl_source, File.join(stage_dir, "#{@bfilename}.bbl"))
+    else
+      warn Rainbow("[WARN] No bibliography entries found in #{bbl_source}!").yellow
+    end
+  end
+
+  def stage_active_figures(stage_dir)
+    fls_path = "junk/#{@bfilename}.fls"
+    return unless File.file?(fls_path)
+
+    fls_content = LaTeXUtils.safe_read(fls_path)
+    figures = []
+    fls_content.each_line do |line|
+      next unless line =~ /^INPUT\s+(\S+)/
+
+      p = Regexp.last_match(1)
+      next if p.include?('/usr/share/texlive') || p.include?('texmf-dist')
+      next unless p =~ /\.(pdf|png|jpg|jpeg|mps)$/i
+
+      figures << p
+    end
+
+    figures.uniq.each do |fig|
+      copy_preserving_path(fig, stage_dir) if File.file?(fig)
+    end
+  end
+
+  def stage_local_styles(stage_dir)
+    fls_path = "junk/#{@bfilename}.fls"
+    return unless File.file?(fls_path)
+
+    fls_content = LaTeXUtils.safe_read(fls_path)
+    cwd = Dir.pwd
+    fls_content.each_line do |line|
+      next unless line =~ /^INPUT\s+(\S+)/
+
+      p = Regexp.last_match(1)
+      next if p.include?('/usr/share/texlive') || p.include?('texmf-dist')
+      next unless p =~ /\.(sty|cls|def)$/i
+
+      exp = File.expand_path(p)
+      if exp.start_with?(cwd + '/') || exp == cwd || !p.start_with?('/')
+        FileUtils.cp(p, File.join(stage_dir, File.basename(p))) if File.file?(p)
+      end
+    end
+  end
+
+  def stage_biblatex_shield(stage_dir)
+    return unless detect_biblatex?
+
+    puts Rainbow(" -- BibLaTeX detected: bundling local distribution files for arXiv shielding...").cyan
+    harvested = []
+    fls_path = "junk/#{@bfilename}.fls"
+    if File.file?(fls_path)
+      content = LaTeXUtils.safe_read(fls_path)
+      content.scan(/^INPUT\s+(\S*\/biblatex\/\S+\.(?:sty|cfg|bbx|cbx|lbx|def))$/).flatten.each do |f|
+        harvested << f if File.file?(f)
+      end
+    end
+
+    %w[biblatex.sty biblatex.cfg standard.bbx english.lbx].each do |core|
+      if harvested.none? { |h| File.basename(h) == core }
+        path, stat = Open3.capture2('kpsewhich', core)
+        harvested << path.strip if stat.success? && File.file?(path.strip)
+      end
+    end
+
+    harvested.uniq.each do |f|
+      dest = File.join(stage_dir, File.basename(f))
+      FileUtils.cp(f, dest) unless File.exist?(dest)
+    end
+  end
+
+  def detect_biblatex?
+    return true if File.file?("junk/#{@bfilename}.bcf")
+
+    main_content = LaTeXUtils.safe_read(@filename)
+    main_content.include?('biblatex')
+  end
+
+  def copy_preserving_path(src, dest_root)
+    return unless File.exist?(src)
+
+    cwd = Dir.pwd
+    expanded = File.expand_path(src)
+    rel_path = if expanded.start_with?(cwd + '/')
+                 expanded.sub(cwd + '/', '')
+               else
+                 File.basename(src)
+               end
+
+    dest = File.join(dest_root, rel_path)
+    FileUtils.mkdir_p(File.dirname(dest))
+    FileUtils.cp(src, dest)
+  end
+
+  def build_arxiv_zip(stage_dir, zip_filename)
+    zip_abs = File.expand_path(zip_filename)
+    FileUtils.rm_f(zip_abs)
+    Dir.chdir(stage_dir) do
+      system('zip', '-q', '-r', zip_abs, '.')
+    end
+  end
+
+  def write_arxiv_metadata(meta_filename)
+    pdf_path = File.file?("#{@bfilename}.pdf") ? "#{@bfilename}.pdf" : "junk/#{@bfilename}.pdf"
+    fls_path = "junk/#{@bfilename}.fls"
+    log_path = "junk/#{@bfilename}.log"
+    comments = @options[:comments]
+
+    meta = LaTeXMetaExtractor.extract(@filename, '.', pdf_path, fls_path, log_path, comments)
+    meta_txt = LaTeXMetaExtractor.format_meta_txt(meta)
+    LaTeXMetaExtractor.write_meta_file(meta_filename, meta_txt)
+  end
+
+  def verify_arxiv_sandbox!(zip_filename)
+    zip_abs = File.expand_path(zip_filename)
+    puts Rainbow("==> Verifying arXiv archive in isolated /tmp sandbox...").cyan.bright
+
+    Dir.mktmpdir('latex_it_arxiv_verify_') do |tmpdir|
+      unzip_out, unzip_stat = Open3.capture2e('unzip', '-q', zip_abs, '-d', tmpdir)
+      unless unzip_stat.success?
+        warn Rainbow("[FAIL] Failed to extract #{zip_filename}: #{unzip_out}").red.bright
+        return false
+      end
+
+      ruby_bin = RbConfig.ruby
+      script_bin = File.expand_path($PROGRAM_NAME)
+      cmd = [ruby_bin, script_bin, '--env-free', @filename]
+      compile_out, compile_stat = Open3.capture2e(*cmd, chdir: tmpdir)
+      new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
+
+      if compile_stat.success? && File.file?(new_pdf)
+        puts Rainbow("[VERIFIED] arXiv package compiles cleanly in isolated environment.").green.bright
+        true
+      else
+        warn Rainbow("[FAIL] Sandbox verification failed for arXiv package!").red.bright
+        warn compile_out
+        false
+      end
+    end
+  end
+
+  def count_zip_entries(zip_filename)
+    out, stat = Open3.capture2('unzip', '-l', zip_filename)
+    return 0 unless stat.success?
+
+    lines = out.lines[3..-3] || []
+    lines.size
+  end
+
+  def announce_arxiv_completion(zip_filename, meta_filename, file_count)
+    size_str = if File.file?(zip_filename)
+                 sz = File.size(zip_filename)
+                 sz > 1024 * 1024 ? "#{(sz / (1024.0 * 1024.0)).round(1)} MB" : "#{(sz / 1024.0).round(1)} KB"
+               else
+                 'unknown size'
+               end
+
+    puts Rainbow("\n==> arXiv Preparation Complete!").green.bright
+    puts "  [1] Submission Archive : #{Rainbow(zip_filename).bold} (#{size_str}, #{file_count} files)"
+    puts "  [2] Paper Metadata     : #{Rainbow(meta_filename).bold} (ready to copy-paste into arXiv form)\n\n"
   end
 end
 
@@ -1925,7 +2579,13 @@ options = {
   zip_name: nil,
   inject_styles: cfg.dig('zip', 'inject_styles') == true,
   fig_sources: cfg.dig('zip', 'fig_sources') || ['.fig', '.ipe', '.svg', '.asy', '.gp', '.gnuplot', '.py', '.R'],
-  extra_files: (Array(cfg.dig('zip', 'include')) + extra_cli_files).uniq
+  extra_files: (Array(cfg.dig('zip', 'include')) + extra_cli_files).uniq,
+  arxiv: false,
+  arxiv_name: nil,
+  meta_only: false,
+  arxiv_verify: cfg.dig('arxiv', 'verify') != false,
+  biblatex_shield: cfg.dig('arxiv', 'bundle_biblatex') != false,
+  comments: cfg.dig('arxiv', 'comments')
 }
 
 ARGV.map! do |arg|
@@ -2067,6 +2727,30 @@ parser = OptionParser.new do |opts|
     options[:deps] = true
   end
 
+  opts.separator ''
+  opts.separator 'arXiv Preparation Options:'
+
+  opts.on('--arxiv', 'Prepare sanitized, flattened, submission-ready arXiv zip package') do
+    options[:arxiv] = true
+  end
+
+  opts.on('--arxiv-name NAME', 'Specify custom output name for arXiv zip package') do |v|
+    options[:arxiv] = true
+    options[:arxiv_name] = v
+  end
+
+  opts.on('--meta', 'Extract and display sanitized paper metadata and write arxiv_<file>_meta.txt') do
+    options[:meta_only] = true
+  end
+
+  opts.on('--[no-]arxiv-verify', 'Enable or disable isolated /tmp sandbox verification pass for arXiv package (default: true)') do |v|
+    options[:arxiv_verify] = v
+  end
+
+  opts.on('--[no-]biblatex-shield', 'Enable or disable bundling local biblatex distribution files (default: true)') do |v|
+    options[:biblatex_shield] = v
+  end
+
   opts.on('-V', '--version', 'Show version') do
     puts "l #{VERSION}"
     exit 0
@@ -2089,10 +2773,32 @@ LaTeXUtils.reset_latex_environment! if options[:no_env]
 targets = ARGV.empty? ? [LaTeXUtils.find_main_latex_file] : ARGV
 
 targets.each do |target|
-  builder = LatexBuilder.new(target, options)
-  builder.run!
-  if options[:zip] || options[:verify]
-    packager = LatexPackager.new(builder)
-    packager.package!
+  if options[:meta_only]
+    bname = File.basename(target, '.tex')
+    pdf_path = File.file?("#{bname}.pdf") ? "#{bname}.pdf" : "junk/#{bname}.pdf"
+    fls_path = "junk/#{bname}.fls"
+    log_path = "junk/#{bname}.log"
+    comments = options[:comments]
+
+    meta = LaTeXMetaExtractor.extract(target, '.', pdf_path, fls_path, log_path, comments)
+    meta_txt = LaTeXMetaExtractor.format_meta_txt(meta)
+    meta_filename = "arxiv_#{bname}_meta.txt"
+    LaTeXMetaExtractor.write_meta_file(meta_filename, meta_txt)
+
+    puts Rainbow("\n========================= Paper Metadata =========================").cyan.bright
+    puts meta_txt
+    puts Rainbow("==================================================================").cyan.bright
+    puts Rainbow("==> Wrote paper metadata to: #{meta_filename}\n").green.bright
+  elsif options[:arxiv]
+    builder = LatexBuilder.new(target, options)
+    arxiv_packager = LatexArxivPackager.new(builder, options)
+    arxiv_packager.package!
+  else
+    builder = LatexBuilder.new(target, options)
+    builder.run!
+    if options[:zip] || options[:verify]
+      packager = LatexPackager.new(builder)
+      packager.package!
+    end
   end
 end

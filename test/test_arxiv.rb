@@ -1,0 +1,197 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "minitest/autorun"
+require "tmpdir"
+require "fileutils"
+require "open3"
+
+class TestArxivSupport < Minitest::Test
+  BIN = File.expand_path("../latex_it", __dir__)
+  load BIN
+
+  def test_meta_extraction_title_and_math
+    tex = <<~TEX
+      \\documentclass{article}
+      \\title{Fast \\textbf{Approximations} of $\\alpha \\le \\beta$ in $\\mathbb{R}^d$}
+      \\begin{document}
+      \\end{document}
+    TEX
+    assert_equal "Fast Approximations of α ≤ β in R^d", LaTeXMetaExtractor.extract_title(tex)
+  end
+
+  def test_meta_extraction_authors
+    tex = <<~TEX
+      \\documentclass{article}
+      \\author{Sariel Har-Peled\\thanks{Supported by NSF}\\\\University of Illinois \\and Timothy M. Chan\\affil{UIUC}}
+      \\begin{document}
+      \\end{document}
+    TEX
+    authors = LaTeXMetaExtractor.extract_authors(tex)
+    assert_includes authors, "Sariel Har-Peled"
+    assert_includes authors, "Timothy M. Chan"
+    refute_includes authors, "University of Illinois"
+    refute_includes authors, "Supported by NSF"
+  end
+
+  def test_meta_extraction_abstract
+    tex = <<~TEX
+      \\documentclass{article}
+      \\begin{document}
+      \\begin{abstract}
+        % This is a private draft note
+        We study the problem of computing $\\mathcal{O}(n \\log n)$ approximations.
+        Here is more text in the same paragraph.
+
+        Second paragraph with $x \\in X$.
+      \\end{abstract}
+      \\end{document}
+    TEX
+    abstract = LaTeXMetaExtractor.extract_abstract(tex)
+    refute_includes abstract, "private draft note"
+    assert_includes abstract, "O(n log n)"
+    assert_includes abstract, "x ∈ X"
+    assert_includes abstract, "paragraph.\n\nSecond paragraph"
+  end
+
+  def test_flattener_recursive_inlining_and_comment_stripping
+    Dir.mktmpdir do |dir|
+      main_tex = <<~TEX
+        %!TEX TS-program = xelatex
+        \\documentclass{article}
+        % Document level comment
+        \\input{section1}
+        \\begin{document}
+        50\\% discount at \\url{https://example.com/%20test} % end of line comment
+        \\include{section2}
+        \\end{document}
+      TEX
+      sec1_tex = <<~TEX
+        % Section 1 comment
+        \\newcommand{\\foo}{bar}
+      TEX
+      sec2_tex = <<~TEX
+        \\section{Second}
+        Content of section 2.
+      TEX
+
+      File.write(File.join(dir, "main.tex"), main_tex)
+      File.write(File.join(dir, "section1.tex"), sec1_tex)
+      File.write(File.join(dir, "section2.tex"), sec2_tex)
+
+      flattened = LaTeXFlattener.flatten("main.tex", dir)
+      assert flattened.start_with?("%!TEX TS-program = xelatex\n")
+      assert_includes flattened, "\\newcommand{\\foo}{bar}"
+      assert_includes flattened, "\\section{Second}"
+      assert_includes flattened, "50\\% discount at \\url{https://example.com/%20test}"
+      refute_includes flattened, "Document level comment"
+      refute_includes flattened, "Section 1 comment"
+      refute_includes flattened, "end of line comment"
+    end
+  end
+
+  def test_arxiv_packaging_and_dual_announcement
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "figs"))
+      FileUtils.mkdir_p(File.join(dir, "junk"))
+
+      File.write(File.join(dir, "paper.tex"), "\\documentclass{article}\n\\title{Test Paper}\n\\author{Jane Doe}\n\\begin{abstract}Abstract text\\end{abstract}\n\\begin{document}Hello\\end{document}\n")
+      File.write(File.join(dir, "paper.pdf"), "PDF-DUMMY")
+      File.write(File.join(dir, "paper.bbl"), "\\begin{thebibliography}{1}\n\\bibitem{key} Author, Title.\n\\end{thebibliography}\n")
+      File.write(File.join(dir, "paper.bib"), "@article{key, title={T}}\n")
+      File.write(File.join(dir, "figs", "fig1.pdf"), "PDF-FIGURE")
+      File.write(File.join(dir, "figs", "fig1.fig"), "FIG-RAW-SOURCE")
+      File.write(File.join(dir, "figs", "fig1.ipe"), "IPE-RAW-SOURCE")
+
+      fls_content = <<~FLS
+        INPUT /usr/share/texlive/texmf-dist/tex/latex/base/article.cls
+        INPUT ./figs/fig1.pdf
+        INPUT ./paper.tex
+      FLS
+      File.write(File.join(dir, "junk", "paper.fls"), fls_content)
+
+      builder = LatexBuilder.new("paper.tex", {})
+      packager = LatexArxivPackager.new(builder, { arxiv_verify: false })
+
+      Dir.chdir(dir) do
+        out, = capture_io { packager.package! }
+
+        assert File.file?("arxiv_paper.zip")
+        assert File.file?("arxiv_paper_meta.txt")
+
+        assert_includes out, "==> arXiv Preparation Complete!"
+        assert_includes out, "[1] Submission Archive : arxiv_paper.zip"
+        assert_includes out, "[2] Paper Metadata     : arxiv_paper_meta.txt"
+
+        meta_content = File.read("arxiv_paper_meta.txt")
+        assert_includes meta_content, "Title:\nTest Paper"
+        assert_includes meta_content, "Authors:\nJane Doe"
+        assert_includes meta_content, "Abstract:\nAbstract text"
+
+        entries, = Open3.capture2("unzip", "-l", "arxiv_paper.zip")
+        assert_includes entries, "paper.tex"
+        assert_includes entries, "paper.bbl"
+        assert_includes entries, "figs/fig1.pdf"
+
+        refute_includes entries, "paper.pdf"
+        refute_includes entries, "paper.bib"
+        refute_includes entries, "figs/fig1.fig"
+        refute_includes entries, "figs/fig1.ipe"
+      end
+    end
+  end
+
+  def test_cli_meta_flag
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "paper.tex"), "\\documentclass{article}\n\\title{CLI Title}\n\\author{Bob Author}\n\\begin{abstract}Quick summary\\end{abstract}\n\\begin{document}\\end{document}\n")
+      Dir.chdir(dir) do
+        stdout, status = Open3.capture2(BIN, "--meta", "paper.tex")
+        assert status.success?
+        assert_includes stdout, "Title:"
+        assert_includes stdout, "CLI Title"
+        assert_includes stdout, "Authors:"
+        assert_includes stdout, "Bob Author"
+        assert_includes stdout, "==> Wrote paper metadata to: arxiv_paper_meta.txt"
+        assert File.file?("arxiv_paper_meta.txt")
+      end
+    end
+  end
+
+  def test_cli_arxiv_flag
+    Dir.mktmpdir do |dir|
+      tex_content = <<~TEX
+        \\documentclass{article}
+        \\title{E2E Paper}
+        \\author{Alice One \\and Bob Two}
+        \\begin{document}
+        \\begin{abstract}
+          Sample abstract with $\\alpha \\le \\beta$.
+        \\end{abstract}
+        \\maketitle
+        Hello world!
+        \\end{document}
+      TEX
+      File.write(File.join(dir, 'paper.tex'), tex_content)
+
+      Dir.chdir(dir) do
+        stdout, status = Open3.capture2(BIN, '--arxiv', 'paper.tex')
+        assert status.success?, "l --arxiv failed: #{stdout}"
+        assert_includes stdout, '==> arXiv Preparation Complete!'
+        assert_includes stdout, '[1] Submission Archive : arxiv_paper.zip'
+        assert_includes stdout, '[2] Paper Metadata     : arxiv_paper_meta.txt'
+
+        assert File.file?('arxiv_paper.zip')
+        assert File.file?('arxiv_paper_meta.txt')
+
+        entries, = Open3.capture2('unzip', '-l', 'arxiv_paper.zip')
+        assert_includes entries, 'paper.tex'
+        refute_includes entries, 'paper.pdf'
+
+        meta_txt = File.read('arxiv_paper_meta.txt')
+        assert_includes meta_txt, "Title:\nE2E Paper"
+        assert_includes meta_txt, "Authors:\nAlice One, Bob Two"
+        assert_includes meta_txt, "Abstract:\nSample abstract with α ≤ β."
+      end
+    end
+  end
+end

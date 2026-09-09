@@ -336,4 +336,198 @@ class TestLatexItCLI < Minitest::Test
       end
     end
   end
+
+  def test_parse_jsonc_with_comments_and_trailing_commas
+    jsonc = <<~JSONC
+      {
+        // Line comment
+        "engine": "lualatex",
+        /* Block
+           comment */
+        "url": "https://example.com/test",
+        "zip": {
+          "inject_styles": true,
+          "include": ["foo.txt", "bar.csv",], // trailing comma in array
+        }, // trailing comma in hash
+      }
+    JSONC
+
+    parsed = LaTeXConfig.parse_jsonc(jsonc)
+    assert_equal 'lualatex', parsed['engine']
+    assert_equal 'https://example.com/test', parsed['url']
+    assert_equal true, parsed.dig('zip', 'inject_styles')
+    assert_equal %w[foo.txt bar.csv], parsed.dig('zip', 'include')
+  end
+
+  def test_parse_jsonc_error_resilience
+    assert_equal({}, LaTeXConfig.parse_jsonc(nil))
+    assert_equal({}, LaTeXConfig.parse_jsonc('   '))
+    _out, err = capture_io do
+      assert_equal({}, LaTeXConfig.parse_jsonc('{ invalid json: }}'))
+    end
+    assert_includes err, 'Warning: Could not parse JSONC config'
+  end
+
+  def test_load_merged_config
+    Dir.mktmpdir do |dir|
+      local_jsonc = <<~JSONC
+        {
+          "engine": "lualatex",
+          "zip": {
+            "inject_styles": true
+          }
+        }
+      JSONC
+      File.write(File.join(dir, '.l.jsonc'), local_jsonc)
+
+      cfg = LaTeXConfig.load_merged_config(dir)
+      assert_equal 'lualatex', cfg['engine']
+      assert_equal true, cfg.dig('zip', 'inject_styles')
+      assert_equal false, cfg['fast']
+    end
+  end
+
+  def test_init_config_cli
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        stdout, status = Open3.capture2(BIN, '--init-config')
+        assert status.success?
+        assert_includes stdout, 'Created local configuration file: ./.l.jsonc'
+        assert File.file?('.l.jsonc')
+        content = File.read('.l.jsonc')
+        assert_includes content, 'latex_it Global Configuration File'
+        assert_includes content, '"engine": "xelatex"'
+      end
+    end
+  end
+
+  def test_bbl_without_bib_lifecycle
+    Dir.mktmpdir do |dir|
+      bbl_content = <<~BBL
+        \\begin{thebibliography}{1}
+        \\bibitem{ref1} Author. Title. 2026.
+        \\end{thebibliography}
+      BBL
+      File.write(File.join(dir, 'paper.bbl'), bbl_content)
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      File.write(File.join(dir, 'junk', 'paper.aux'), "\\bibdata{refs}\n\\citation{ref1}\n")
+
+      builder = LatexBuilder.new('paper.tex', {})
+      Dir.chdir(dir) do
+        # 1. paper_cleanup should seed bbl into junk/
+        builder.send(:paper_cleanup)
+        assert File.file?('junk/paper.bbl')
+        assert_equal bbl_content, File.read('junk/paper.bbl')
+
+        # 2. detect_bib_tool should skip bibtex because valid bbl exists and no .bib is present
+        assert_nil builder.send(:detect_bib_tool)
+      end
+    end
+  end
+
+  def test_figure_discovery_and_zip_creation
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'figs'))
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}Hello\\end{document}\n")
+      File.write(File.join(dir, 'paper.pdf'), 'PDF-DUMMY')
+      File.write(File.join(dir, 'paper.bbl'), "\\begin{thebibliography}{1}\n\\bibitem{a} A\n\\end{thebibliography}\n")
+      File.write(File.join(dir, 'figs', 'diagram.pdf'), 'PDF-FIG')
+      File.write(File.join(dir, 'figs', 'diagram.fig'), 'FIG-SOURCE')
+      File.write(File.join(dir, 'figs', 'diagram.ipe'), 'IPE-SOURCE')
+      File.write(File.join(dir, 'figs', 'standard.isy'), 'ISY-STYLESHEET')
+      File.write(File.join(dir, 'figs', 'diagram.bak'), 'JUNK-BAK')
+      File.write(File.join(dir, 'extra.txt'), 'EXTRA-CONTENT')
+
+      fls_content = <<~FLS
+        INPUT /usr/share/texlive/texmf-dist/tex/latex/base/article.cls
+        INPUT ./figs/diagram.pdf
+        INPUT ./paper.tex
+      FLS
+      File.write(File.join(dir, 'junk', 'paper.fls'), fls_content)
+
+      builder = LatexBuilder.new('paper.tex', extra_files: ['extra.txt'])
+      packager = LatexPackager.new(builder)
+
+      Dir.chdir(dir) do
+        packager.package!
+        assert File.file?('paper.zip')
+
+        entries, = Open3.capture2('unzip', '-l', 'paper.zip')
+        assert_includes entries, 'paper.tex'
+        assert_includes entries, 'paper.pdf'
+        assert_includes entries, 'paper.bbl'
+        assert_includes entries, 'figs/diagram.pdf'
+        assert_includes entries, 'figs/diagram.fig'
+        assert_includes entries, 'figs/diagram.ipe'
+        assert_includes entries, 'figs/standard.isy'
+        assert_includes entries, 'extra.txt'
+        refute_includes entries, 'diagram.bak'
+      end
+    end
+  end
+
+  def test_inject_styles_mode
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      File.write(File.join(dir, 'paper.tex'), "%!TEX TS-program = xelatex\n\\documentclass{article}\n\\usepackage{mystyle}\n\\begin{document}X\\end{document}\n")
+      File.write(File.join(dir, 'paper.pdf'), 'PDF-DUMMY')
+      File.write(File.join(dir, 'mystyle.sty'), "\\ProvidesPackage{mystyle}\n")
+
+      fls_content = <<~FLS
+        INPUT ./mystyle.sty
+        INPUT ./paper.tex
+      FLS
+      File.write(File.join(dir, 'junk', 'paper.fls'), fls_content)
+
+      builder = LatexBuilder.new('paper.tex', inject_styles: true)
+      packager = LatexPackager.new(builder)
+
+      Dir.chdir(dir) do
+        packager.package!
+        assert File.file?('paper.zip')
+
+        Dir.mktmpdir do |unzip_dir|
+          Open3.capture2('unzip', '-q', File.join(dir, 'paper.zip'), '-d', unzip_dir)
+          assert File.file?(File.join(unzip_dir, 'styles', 'mystyle.sty'))
+
+          tex_content = File.read(File.join(unzip_dir, 'paper.tex'))
+          assert_includes tex_content, "\\def\\input@path{{styles/}{./}}"
+          # Verify magic comments remain at the top
+          assert tex_content.start_with?("%!TEX TS-program = xelatex\n")
+        end
+      end
+    end
+  end
+
+  def test_cli_zip_with_separator
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}Hi\\end{document}\n")
+      File.write(File.join(dir, 'notes.txt'), "Important notes\n")
+      Dir.chdir(dir) do
+        stdout, status = Open3.capture2(BIN, '-z', 'paper.tex', '--', 'notes.txt')
+        assert status.success?, "l -z failed: #{stdout}"
+        assert File.file?('paper.zip')
+
+        entries, = Open3.capture2('unzip', '-l', 'paper.zip')
+        assert_includes entries, 'paper.tex'
+        assert_includes entries, 'notes.txt'
+      end
+    end
+  end
+
+  def test_cli_zip_and_verify
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}Verify me\\end{document}\n")
+      Dir.chdir(dir) do
+        stdout, status = Open3.capture2(BIN, '-z', '-t', 'paper.tex')
+        assert status.success?, "l -z -t failed: #{stdout}"
+        assert File.file?('paper.zip')
+        assert_includes stdout, 'Created portable zip: paper.zip'
+        assert_includes stdout, 'Verifying archive portability in isolated sandbox'
+        assert_includes stdout, 'Archive successfully verified'
+      end
+    end
+  end
 end

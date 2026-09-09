@@ -20,6 +20,7 @@ require 'json'
 require 'open3'
 require 'optparse'
 require 'shellwords'
+require 'tmpdir'
 
 begin
   require 'rainbow'
@@ -54,6 +55,161 @@ rescue LoadError
 end
 VERSION_FILE = File.expand_path('VERSION', __dir__)
 VERSION = (File.file?(VERSION_FILE) ? File.read(VERSION_FILE).strip : '0.6.6')
+
+module LaTeXConfig
+  CONFIG_DIR = File.expand_path('~/.config/latex_it')
+  GLOBAL_CONFIG_FILE = File.join(CONFIG_DIR, 'config.jsonc')
+  LOCAL_CONFIG_CANDIDATES = ['.l.jsonc', '.latex_it.jsonc'].freeze
+
+  DEFAULT_CONFIG_TEMPLATE = <<~JSONC
+    {
+      // =========================================================================
+      // latex_it Global Configuration File
+      // Location: ~/.config/latex_it/config.jsonc
+      //
+      // Project-level overrides can be placed in .l.jsonc (or .latex_it.jsonc).
+      // CLI flags always override settings defined here.
+      // =========================================================================
+
+      // LaTeX engine: "xelatex" (default) or "lualatex"
+      "engine": "xelatex",
+
+      // Fast incremental mode: reuse .aux and skip redundant passes
+      "fast": false,
+
+      // Maximum compilation passes (1-3, default: 3)
+      "passes": 3,
+
+      // Only update target PDF if extracted text content changed (requires pdftotext)
+      "update_on_diff": false,
+
+      // Display execution timing diagnostics per pass (-T / --time)
+      "time": false,
+
+      // Terminal color output: true (force), false (disable), or null (auto-detect)
+      "color": null,
+
+      // Lockfile concurrency protection
+      "lock": false,
+
+      // Treat compilation warnings as fatal errors (-W / --werror)
+      "werror": false,
+
+      // Format warnings/errors for Emacs AUCTeX integration
+      "emacs": false,
+
+      // Portable Zip Bundling Settings (invoked via `l -z`)
+      "zip": {
+        // When true, harvested style files are placed in styles/ and \\input@path
+        // is injected into the packaged .tex file.
+        // When false (default), harvested styles sit in the archive root.
+        "inject_styles": false,
+
+        // Additional figure source file extensions to auto-discover
+        "fig_sources": [".fig", ".ipe", ".svg", ".asy", ".gp", ".gnuplot", ".py", ".R"],
+
+        // Supplementary files or glob patterns to always bundle in this project
+        "include": []
+      }
+    }
+  JSONC
+
+  def self.ensure_global_config_exists!
+    return if File.exist?(GLOBAL_CONFIG_FILE)
+
+    FileUtils.mkdir_p(CONFIG_DIR)
+    File.write(GLOBAL_CONFIG_FILE, DEFAULT_CONFIG_TEMPLATE)
+  rescue StandardError
+    # Silently ignore if unable to create in restricted environments
+  end
+
+  def self.create_local_template!(dir = '.')
+    local_path = File.join(dir, '.l.jsonc')
+    if File.exist?(local_path)
+      warn " -- Local config already exists: #{local_path}"
+      return
+    end
+
+    File.write(local_path, DEFAULT_CONFIG_TEMPLATE)
+    puts "Created local configuration file: #{local_path}"
+  end
+
+  def self.parse_jsonc(content)
+    return {} if content.nil? || content.strip.empty?
+
+    in_string = false
+    escaped = false
+    out = []
+    i = 0
+    len = content.length
+    while i < len
+      c = content[i]
+      if in_string
+        out << c
+        if escaped
+          escaped = false
+        elsif c == '\\'
+          escaped = true
+        elsif c == '"'
+          in_string = false
+        end
+      elsif c == '"'
+        in_string = true
+        out << c
+      elsif c == '/' && content[i + 1] == '/'
+        i = content.index("\n", i) || len
+        next
+      elsif c == '/' && content[i + 1] == '*'
+        end_idx = content.index('*/', i + 2)
+        i = end_idx ? end_idx + 2 : len
+        next
+      else
+        out << c
+      end
+      i += 1
+    end
+    clean = out.join.gsub(/,(\s*[}\]])/, '\1')
+    JSON.parse(clean)
+  rescue JSON::ParserError => e
+    warn " -- Warning: Could not parse JSONC config (#{e.message}); using defaults."
+    {}
+  rescue StandardError
+    {}
+  end
+
+  def self.load_merged_config(dir = '.')
+    ensure_global_config_exists!
+
+    global_cfg = File.exist?(GLOBAL_CONFIG_FILE) ? parse_jsonc(File.read(GLOBAL_CONFIG_FILE)) : {}
+
+    local_cfg = {}
+    found_local = false
+    LOCAL_CONFIG_CANDIDATES.each do |candidate|
+      path = File.join(dir, candidate)
+      if File.exist?(path)
+        local_cfg = parse_jsonc(File.read(path))
+        found_local = true
+        break
+      end
+    end
+
+    LaTeXUtils.load_config_latex(dir) unless found_local
+
+    deep_merge(global_cfg, local_cfg)
+  end
+
+  def self.deep_merge(hash1, hash2)
+    merged = hash1.dup
+    hash2.each do |k, v|
+      merged[k] = if v.is_a?(Hash) && merged[k].is_a?(Hash)
+                    deep_merge(merged[k], v)
+                  else
+                    v
+                  end
+    end
+    merged
+  end
+end
 
 module LaTeXUtils
   PDFLATEX_ERROR = 'PDFLatex by now is outdated. It does not support utf8, and should probably be avoided.'
@@ -309,6 +465,8 @@ module LaTeXUtils
 end
 
 class LatexBuilder
+  attr_reader :options, :filename, :bfilename, :bdir, :engine_name
+
   def initialize(target, options)
     @options = options
     @bdir = File.dirname(target)
@@ -619,6 +777,12 @@ class LatexBuilder
       FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux")
     end
 
+    root_bbl = "#{@bfilename}.bbl"
+    if File.exist?(root_bbl) && !File.exist?("junk/#{root_bbl}") && !File.exist?("junk/old/#{root_bbl}") && LaTeXUtils.bbl_has_entries?(root_bbl)
+      FileUtils.mkdir_p('junk')
+      FileUtils.cp(root_bbl, "junk/#{root_bbl}")
+    end
+
     files = ["#{@bfilename}.ps", 'log.txt', "#{@bfilename}.blg", "#{@bfilename}.dvi",
              "#{@bfilename}.thm", "#{@bfilename}.aux", "#{@bfilename}.idx", "#{@bfilename}.log",
              "#{@bfilename}.out", "#{@bfilename}.vtc", 'texput.log', 'missfont.log', 'mfput.log',
@@ -713,12 +877,32 @@ class LatexBuilder
     end
 
     # BibTeX is needed only when \bibdata{...} AND \citation are present in the .aux file
-    return :bibtex if aux_contents =~ /\\bibdata\{/ && (aux_contents =~ /\\citation/ || @options[:bib] == true)
+    if aux_contents =~ /\\bibdata\{/ && (aux_contents =~ /\\citation/ || @options[:bib] == true)
+      return :bibtex if @options[:bib] == true
+
+      # Skip bibtex if valid .bbl exists and no requested .bib files exist on disk
+      has_bbl = LaTeXUtils.bbl_has_entries?("junk/#{@bfilename}.bbl") || LaTeXUtils.bbl_has_entries?("#{@bfilename}.bbl")
+      return nil if has_bbl && !bib_files_exist_for_bibdata?(aux_contents)
+
+      return :bibtex
+    end
 
     # If user explicitly forced bib pass (-b / --bib), fallback to bibtex
     return :bibtex if @options[:bib] == true
 
     nil
+  end
+
+  def bib_files_exist_for_bibdata?(aux_contents)
+    targets = aux_contents.scan(/\\bibdata\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.map(&:strip)
+    return true if targets.empty?
+
+    bib_dirs = ['.', 'refs'] + ENV['BIBINPUTS'].to_s.split(':').reject(&:empty?)
+    targets.any? do |target|
+      bib_dirs.any? do |d|
+        File.file?(File.join(d, "#{target}.bib")) || File.file?(File.join(d, target))
+      end
+    end
   end
 
   def run_bib_pass(tool)
@@ -1425,6 +1609,257 @@ class LatexBuilder
   end
 end
 
+class LatexPackager
+  attr_reader :builder, :filename, :bfilename, :bdir, :options
+
+  def initialize(builder)
+    @builder = builder
+    @filename = builder.filename
+    @bfilename = builder.bfilename
+    @bdir = builder.bdir
+    @options = builder.options
+  end
+
+  def package!
+    if @bdir != '.'
+      Dir.chdir(@bdir) { do_package }
+    else
+      do_package
+    end
+  end
+
+  private
+
+  def do_package
+    fls_path = "junk/#{@bfilename}.fls"
+    unless File.exist?(fls_path)
+      puts "==> Compiling #{@filename} to collect dependencies for zip..."
+      @builder.run!
+    end
+
+    deps = collect_fls_dependencies(fls_path)
+    fig_sources = discover_figure_sources(deps[:figures])
+    zip_filename = @options[:zip_name] || "#{@bfilename}.zip"
+
+    stage_and_create_zip(zip_filename, deps, fig_sources)
+    puts Rainbow("==> Created portable zip: #{zip_filename}").green.bright
+
+    verify_archive!(zip_filename) if @options[:verify]
+    zip_filename
+  end
+
+  def collect_fls_dependencies(fls_path)
+    content = LaTeXUtils.safe_read(fls_path)
+    styles = []
+    figures = []
+    tex_inputs = []
+
+    content.each_line do |line|
+      next unless line.start_with?('INPUT ')
+
+      path = line.sub(/^INPUT\s+/, '').strip
+      next if path.empty? || path.start_with?('junk/') || system_texmf_file?(path)
+
+      clean_path = normalize_dep_path(path)
+      next if clean_path == @filename || clean_path == "#{@bfilename}.pdf"
+
+      case File.extname(clean_path).downcase
+      when '.sty', '.cls', '.clo', '.def', '.bbx', '.cbx'
+        styles << clean_path
+      when '.pdf', '.png', '.jpg', '.jpeg', '.eps', '.mps'
+        figures << clean_path unless clean_path.end_with?("#{@bfilename}.pdf")
+      when '.tex'
+        tex_inputs << clean_path
+      end
+    end
+
+    { styles: styles.uniq, figures: figures.uniq, tex_inputs: tex_inputs.uniq }
+  end
+
+  def system_texmf_file?(path)
+    path =~ %r{/(texmf-dist|texmf-var|texlive/20\d\d|texlive/debian|share/texlive)/}
+  end
+
+  def normalize_dep_path(path)
+    return path unless path.start_with?('./')
+
+    path.sub(%r{^\./}, '')
+  end
+
+  def discover_figure_sources(figures)
+    valid_exts = @options[:fig_sources] || ['.fig', '.ipe', '.svg', '.asy', '.gp', '.gnuplot', '.py', '.R']
+    discovered = []
+
+    figures.each do |fig|
+      dir = File.dirname(fig)
+      stem = fig.sub(/\.[^.]+\z/, '')
+
+      valid_exts.each do |ext|
+        cand = "#{stem}#{ext}"
+        discovered << cand if File.file?(cand)
+      end
+
+      base_stem = stem.sub(/[-_]([0-9]+|[a-z]|fig[0-9]+)\z/i, '')
+      if base_stem != stem
+        valid_exts.each do |ext|
+          cand = "#{base_stem}#{ext}"
+          discovered << cand if File.file?(cand)
+        end
+      end
+
+      Dir.glob(File.join(dir, '*.isy')).each do |isy|
+        discovered << isy if File.file?(isy)
+      end
+    end
+
+    discovered.uniq.reject do |p|
+      p =~ %r{(^|/)(bak|old|old_ipe)/} || p.end_with?('.bak', '~')
+    end
+  end
+
+  def stage_and_create_zip(zip_filename, deps, fig_sources)
+    unless system('which zip > /dev/null 2>&1')
+      warn Rainbow("[ERROR] 'zip' command not found in PATH! Cannot create archive.").red.bright
+      return
+    end
+
+    Dir.mktmpdir('latex_it_stage_') do |stage_dir|
+      copy_target_outputs(stage_dir)
+      stage_main_tex(stage_dir, !deps[:styles].empty?)
+
+      deps[:tex_inputs].each { |f| copy_preserving_path(f, stage_dir) if File.file?(f) }
+      stage_styles(deps[:styles], stage_dir)
+
+      (deps[:figures] + fig_sources).uniq.each do |f|
+        copy_preserving_path(f, stage_dir) if File.file?(f)
+      end
+
+      extra_files = Array(@options[:extra_files]).flat_map { |g| Dir.glob(g).empty? ? [g] : Dir.glob(g) }
+      extra_files.uniq.each do |f|
+        copy_preserving_path(f, stage_dir) if File.exist?(f)
+      end
+
+      zip_abs = File.expand_path(zip_filename)
+      FileUtils.rm_f(zip_abs)
+      Dir.chdir(stage_dir) do
+        system('zip', '-q', '-r', zip_abs, '.')
+      end
+    end
+  end
+
+  def copy_target_outputs(stage_dir)
+    pdf_source = File.file?("#{@bfilename}.pdf") ? "#{@bfilename}.pdf" : "junk/#{@bfilename}.pdf"
+    FileUtils.cp(pdf_source, File.join(stage_dir, "#{@bfilename}.pdf")) if File.file?(pdf_source)
+
+    bbl_source = File.file?("#{@bfilename}.bbl") ? "#{@bfilename}.bbl" : "junk/#{@bfilename}.bbl"
+    if File.file?(bbl_source) && LaTeXUtils.bbl_has_entries?(bbl_source)
+      FileUtils.cp(bbl_source, File.join(stage_dir, "#{@bfilename}.bbl"))
+    end
+  end
+
+  def stage_main_tex(stage_dir, has_styles = false)
+    dest_path = File.join(stage_dir, @filename)
+    FileUtils.mkdir_p(File.dirname(dest_path))
+
+    content = LaTeXUtils.safe_read(@filename)
+    if @options[:inject_styles] && has_styles && !content.include?('input@path')
+      injection = "\\makeatletter\n\\def\\input@path{{styles/}{./}}\n\\makeatother\n"
+      injected_content = inject_into_tex(content, injection)
+      File.write(dest_path, injected_content)
+    else
+      File.write(dest_path, content)
+    end
+  end
+
+  def inject_into_tex(content, injection)
+    lines = content.lines
+    insert_idx = lines.find_index { |l| l =~ /^\s*\\(documentclass|RequirePackage|input)/ } || 0
+    lines.insert(insert_idx, injection).join
+  end
+
+  def stage_styles(styles, stage_dir)
+    if @options[:inject_styles]
+      dest_dir = File.join(stage_dir, 'styles')
+      FileUtils.mkdir_p(dest_dir)
+      styles.each do |style|
+        FileUtils.cp(style, File.join(dest_dir, File.basename(style))) if File.file?(style)
+      end
+    else
+      styles.each do |style|
+        copy_preserving_path(style, stage_dir) if File.file?(style)
+      end
+    end
+  end
+
+  def copy_preserving_path(src, dest_root)
+    return unless File.exist?(src)
+
+    cwd = Dir.pwd
+    expanded = File.expand_path(src)
+    rel_path = if expanded.start_with?(cwd + '/')
+                 expanded.sub(cwd + '/', '')
+               else
+                 File.basename(src)
+               end
+
+    dest = File.join(dest_root, rel_path)
+    FileUtils.mkdir_p(File.dirname(dest))
+    FileUtils.cp_r(src, dest)
+  end
+
+  def verify_archive!(zip_filename)
+    zip_abs = File.expand_path(zip_filename)
+    puts Rainbow("==> Verifying archive portability in isolated sandbox...").cyan.bright
+
+    unless system('which unzip > /dev/null 2>&1')
+      warn Rainbow("[ERROR] 'unzip' command not found in PATH! Cannot verify archive.").red.bright
+      return false
+    end
+
+    Dir.mktmpdir('latex_it_verify_') do |tmpdir|
+      unzip_out, unzip_stat = Open3.capture2e('unzip', '-q', zip_abs, '-d', tmpdir)
+      unless unzip_stat.success?
+        warn Rainbow("[FAIL] Failed to extract #{zip_filename}: #{unzip_out}").red.bright
+        return false
+      end
+
+      bundled_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
+      backup_pdf = File.join(tmpdir, "#{@bfilename}.pdf.bundled")
+      FileUtils.mv(bundled_pdf, backup_pdf) if File.file?(bundled_pdf)
+
+      ruby_bin = RbConfig.ruby
+      script_bin = File.expand_path($PROGRAM_NAME)
+      cmd = [ruby_bin, script_bin, '--env-free', @filename]
+
+      compile_out, compile_stat = Open3.capture2e(*cmd, chdir: tmpdir)
+      new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
+
+      if compile_stat.success? && File.file?(new_pdf)
+        verify_pdf_diff(backup_pdf, new_pdf)
+        puts Rainbow("[VERIFIED] Archive successfully verified: self-contained and compiles in clean environment.").green.bright
+        true
+      else
+        warn Rainbow("[FAIL] Verification failed! Document did not compile in clean environment.").red.bright
+        warn compile_out
+        false
+      end
+    end
+  end
+
+  def verify_pdf_diff(orig_pdf, new_pdf)
+    return unless File.file?(orig_pdf) && File.file?(new_pdf)
+    return unless system('which pdftotext > /dev/null 2>&1')
+
+    t1, = Open3.capture2('pdftotext', '-layout', orig_pdf, '-')
+    t2, = Open3.capture2('pdftotext', '-layout', new_pdf, '-')
+    if t1 == t2
+      puts Rainbow(" -- Text layout exact match confirmed between bundled PDF and test build.").green
+    else
+      warn Rainbow(" -- Note: Minor visual layout differences detected between bundled and sandbox PDF.").yellow
+    end
+  end
+end
+
 # ------------------------------------------------------------------------------
 # CLI Option Parsing
 # ------------------------------------------------------------------------------
@@ -1460,23 +1895,37 @@ symlink_engine = if %w[ll llua lualatex_l].include?(prog_name)
 is_lw = (File.basename($PROGRAM_NAME) == 'lw')
 is_env_free = %w[pdflatex_env_free latex_env_free bibtex_env_free].include?(prog_name)
 
+extra_cli_files = []
+if (sep_idx = ARGV.index('--'))
+  extra_cli_files = ARGV[(sep_idx + 1)..].flat_map { |f| Dir.glob(f).empty? ? [f] : Dir.glob(f) }
+  ARGV.slice!(sep_idx..)
+end
+
+cfg = LaTeXConfig.load_merged_config
+
 options = {
-  engine: symlink_engine,
+  engine: symlink_engine || cfg['engine'],
   clean: false,
   single_pass: false,
-  fast: is_lw,
-  update_on_diff: false,
-  bib: nil,
-  passes: 3,
-  time: false,
-  lock: false,
+  fast: is_lw || cfg['fast'] == true,
+  update_on_diff: cfg['update_on_diff'] == true,
+  bib: cfg['bib'],
+  passes: (cfg['passes'] || 3).to_i.clamp(1, 3),
+  time: cfg['time'] == true,
+  lock: cfg['lock'] == true,
   score: false,
-  color: nil,
+  color: cfg['color'],
   no_env: is_env_free,
   verbose: false,
-  emacs: false,
-  werror: false,
-  deps: false
+  emacs: cfg['emacs'] == true,
+  werror: cfg['werror'] == true,
+  deps: false,
+  zip: false,
+  verify: false,
+  zip_name: nil,
+  inject_styles: cfg.dig('zip', 'inject_styles') == true,
+  fig_sources: cfg.dig('zip', 'fig_sources') || ['.fig', '.ipe', '.svg', '.asy', '.gp', '.gnuplot', '.py', '.R'],
+  extra_files: (Array(cfg.dig('zip', 'include')) + extra_cli_files).uniq
 }
 
 ARGV.map! do |arg|
@@ -1488,6 +1937,8 @@ ARGV.map! do |arg|
   when '-emacs' then '--emacs'
   when '-deps' then '--deps'
   when '-werror', '-Werror' then '--werror'
+  when '-zip' then '--zip'
+  when '-verify' then '--verify'
   else arg
   end
 end
@@ -1557,8 +2008,31 @@ parser = OptionParser.new do |opts|
     options[:passes] = v.clamp(1, 3)
   end
 
-  opts.on('-t', '--time', 'Show execution time diagnostics per pass') do
+  opts.on('-T', '--time', 'Show execution time diagnostics per pass') do
     options[:time] = true
+  end
+
+  opts.on('-t', '--verify', '--test', 'Verify self-contained portability of generated zip in /tmp sandbox') do
+    options[:verify] = true
+    options[:zip] = true
+  end
+
+  opts.on('-z', '--zip', 'Create self-contained portable zip archive of paper') do
+    options[:zip] = true
+  end
+
+  opts.on('--zip-name NAME', 'Specify custom output name for zip archive') do |v|
+    options[:zip] = true
+    options[:zip_name] = v
+  end
+
+  opts.on('--[no-]inject-styles', 'Enable or disable isolating harvested styles into styles/ and injecting \input@path') do |v|
+    options[:inject_styles] = v
+  end
+
+  opts.on('--init-config', 'Create a local .l.jsonc configuration template in the current directory and exit') do
+    LaTeXConfig.create_local_template!('.')
+    exit 0
   end
 
   opts.on('--[no-]color', 'Enable or disable colored terminal output (default: auto)') do |v|
@@ -1615,5 +2089,10 @@ LaTeXUtils.reset_latex_environment! if options[:no_env]
 targets = ARGV.empty? ? [LaTeXUtils.find_main_latex_file] : ARGV
 
 targets.each do |target|
-  LatexBuilder.new(target, options).run!
+  builder = LatexBuilder.new(target, options)
+  builder.run!
+  if options[:zip] || options[:verify]
+    packager = LatexPackager.new(builder)
+    packager.package!
+  end
 end

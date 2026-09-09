@@ -57,10 +57,29 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
 - Provides `-s` / `--score` mode for quiet status reporting (`Errors: X, Warnings: Y`).
 
 ### 8. Environment & Configuration Controls
-- Automatically sources directory-level preferences from `.config_latex` (lines matching `KEY=VALUE` or `export KEY=VALUE`).
+- **Unified JSONC Configuration**:
+  - Global configuration at `~/.config/latex_it/config.jsonc` (auto-generated on first run with fully documented defaults).
+  - Per-project overrides at `.l.jsonc` (or `.latex_it.jsonc`). Initialize a local template via `l --init-config`.
+  - Strict precedence: `CLI Flags > Local (.l.jsonc) > Global (~/.config/latex_it/config.jsonc) > Defaults`.
+  - Legacy `.config_latex` supported as fallback.
 - Supports custom macro injections via `LATEXOPTS` or `LATEXOPTIONS`.
 - Provides `--no-env` (`--env-free`) to sanitize TeX-related environment variables (`TEXINPUTS`, `BIBINPUTS`, etc.) to prevent environment pollution.
 - Supports concurrency control with file locking (`--lock`).
+
+### 9. Portable Paper Archive & Verification (`-z` and `-t`)
+- **Portable Zip Bundling (`-z` / `--zip`)**:
+  - Generates self-contained `<document>.zip` bundling the paper, compiled target PDF, and compiled `.bbl`.
+  - Harvests active style and package dependencies from the compiler recorder (`.fls`), ignoring system TeX Live packages.
+  - Automatically discovers original figure sources (`.fig`, `.ipe`, `.svg`, `.asy`, `.gp`, `.gnuplot`, `.py`, `.R`) matching compiled figure stems, stripped view/page suffixes (`diagram_1.pdf` -> `diagram.ipe`), and companion `*.isy` stylesheets. Excludes backup files (`*.bak`, `figs/bak/`, `figs/old/`).
+  - **Styles Organization (`inject_styles`)**:
+    - Default (`false`): Harvested styles sit in the archive root for 100% universal journal/publisher compatibility without modifying `.tex` source code.
+    - Opt-in (`true` via config or `--inject-styles`): Styles routed to `styles/` and `\def\input@path{{styles/}{./}}` is safely injected into the staged `.tex`.
+  - **CLI Extra Assets (`-- <files...>)`**:
+    - Pass arbitrary supplementary files or globs after `--` to bundle them directly (e.g. `l -z -- notes.txt code/*.py`).
+- **Sandbox Portability Verification (`-t` / `--verify`)**:
+  - Unpacks the zip in an isolated `/tmp` directory.
+  - Runs `latex_it --env-free` with no ambient environment variables.
+  - Compares the test build against the bundled PDF using `pdftotext -layout`.
 
 ---
 
@@ -83,7 +102,7 @@ The script inspects `$PROGRAM_NAME` and changes default behavior based on the ex
 ## Command-Line Options
 
 ```text
-Usage: l [options] [document.tex]
+Usage: l [options] [document.tex] [-- extra_files...]
 
 Compilation Options:
     -m, --main, --find-main, --file  Print the detected main LaTeX file and exit
@@ -99,7 +118,12 @@ Compilation Options:
     -c, --clean                      Clean temporary build files (junk/, .bbl, .aux) before building
     -b, --[no-]bib                   Force or skip BibTeX pass (default: auto-detect)
     -n, --passes NUM                 Number of compilation passes (1-3, default: 3)
-    -t, --time                       Show execution time diagnostics per pass
+    -T, --time                       Show execution time diagnostics per pass
+    -t, --verify, --test             Verify self-contained portability of generated zip in /tmp sandbox
+    -z, --zip                        Create self-contained portable zip archive of paper
+        --zip-name NAME              Specify custom output name for zip archive
+        --[no-]inject-styles         Enable/disable isolating styles into styles/ and injecting \input@path
+        --init-config                Create a local .l.jsonc configuration template in the current directory
         --[no-]color                 Enable or disable colored terminal output (default: auto)
         --lock                       Enable lockfile concurrency protection
     -s, --score                      [-score] Suppress stdout and output error/warning count from the last LaTeX run

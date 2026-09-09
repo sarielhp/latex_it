@@ -10,9 +10,11 @@ This document provides architectural guidelines, core invariants, development wo
   - Standalone, high-performance Ruby executable (`#!/usr/bin/env ruby`).
   - Supports symlink personalities (`l`, `lw`, `ll`, `llua`, `latex_clean`, `latex_file_in_dir`, `latex_env_free`).
 - **Core Modules & Classes**:
-  - [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L56-L306): Engine detection & validation, main file discovery heuristics, TeX environment sanitization, noise filtering, and directory cleanup.
-  - [`LatexBuilder`](file:///home/sariel/prog/26/latex_it/latex_it#L308-L1166): Compilation lifecycle manager, pass scheduler, `junk/` directory isolation, bibliography handling, lockfile protection, and diagnostic log analysis.
-  - **CLI Dispatcher** ([lines 1172–1345](file:///home/sariel/prog/26/latex_it/latex_it#L1172-L1345)): Symlink personality detection and option parsing with `OptionParser`.
+  - [`LaTeXConfig`](file:///home/sariel/prog/26/latex_it/latex_it#L58-L185): Unified JSONC configuration loader (`.l.jsonc`, `~/.config/latex_it/config.jsonc`), auto-template creator, and quote-aware JSONC parser.
+  - [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L187-L435): Engine detection & validation, main file discovery heuristics, TeX environment sanitization, noise filtering, and directory cleanup.
+  - [`LatexBuilder`](file:///home/sariel/prog/26/latex_it/latex_it#L437-L1570): Compilation lifecycle manager, pass scheduler, `junk/` directory isolation, bibliography handling, lockfile protection, and diagnostic log analysis.
+  - [`LatexPackager`](file:///home/sariel/prog/26/latex_it/latex_it#L1572-L1825): Portable zip archive bundler (`-z`), active figure source discovery (`.fig`, `.ipe`, `.isy`, etc.), styles isolation, and `/tmp` sandbox verifier (`-t`).
+  - **CLI Dispatcher**: Symlink personality detection and option parsing with `OptionParser`.
 - **Workflow & Quality Tooling** (`tools/` / `tool/`):
   - [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate): Sub-second (< 1s) quality gate verifying syntax and test suites.
   - [`tools/setup_ruby_dev`](file:///home/sariel/prog/26/latex_it/tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
@@ -60,6 +62,16 @@ Any modifications to compilation logic must honor the following invariants:
    - `.bbl.bak` is preserved during updates.
 3. **PDF Text Diffing (`-d` / `--diff`)**:
    - When `--diff` is active and `pdftotext` is available, skip replacing the target PDF if the extracted text layout matches the existing PDF.
+4. **Portable Paper Bundling (`-z` / `--zip`)**:
+   - Gathers input dependencies from `.fls`, filtering out system TeX Live packages (`texmf-dist`).
+   - Discovers companion figure source files (`.fig`, `.ipe`, `.isy`, `.svg`, `.asy`, `.gp`, `.gnuplot`, `.py`, `.R`) matching compiled figure stems and stripped view suffixes.
+   - Preserves compiled `.bbl` and skips BibTeX/Biber passes when valid `.bbl` exists and no `.bib` files are present.
+   - Supports supplementary assets via trailing `-- <files...>`.
+   - Default `inject_styles: false` places styles in root for universal journal compatibility without modifying `.tex` source code.
+5. **Sandbox Portability Verification (`-t` / `--verify`)**:
+   - Unpacks bundle into `/tmp/latex_it_verify_XXXX` sandbox.
+   - Compiles with `latex_it --env-free` (wiping ambient `TEXINPUTS`, `BIBINPUTS`, `TEXMFHOME`).
+   - Compares PDF text layout against bundled PDF with `pdftotext -layout`.
 
 ---
 

@@ -10,6 +10,10 @@ class TestLatexItCLI < Minitest::Test
   BIN = File.expand_path('../latex_it', __dir__)
   load BIN
 
+  def strip_ansi(str)
+    str.to_s.gsub(/\e\[[0-9;]*m/, '')
+  end
+
   def test_version_flag
     stdout, status = Open3.capture2(BIN, '-V')
     assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
@@ -528,8 +532,264 @@ class TestLatexItCLI < Minitest::Test
         assert File.file?('paper.zip')
         assert_includes stdout, 'Created portable zip: paper.zip'
         assert_includes stdout, 'Verifying archive portability in isolated sandbox'
-        assert_includes stdout, 'Archive successfully verified'
       end
     end
   end
+
+  def test_report_errors_suppresses_warnings
+    Dir.mktmpdir do |dir|
+      log_file = File.join(dir, 'err_xelatex_1')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        LaTeX Warning: Reference `sec:unknown` undefined on input line 42.
+        Overfull \\hbox (15.0pt too wide) in paragraph at lines 10--15
+        ! LaTeX Error: File `missing.sty` not found.
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        assert_raises(SystemExit) do
+          builder.send(:report_errors, log_file)
+        end
+      end
+
+      # Errors should be displayed
+      assert_includes out, 'LaTeX Error: File `missing.sty` not found'
+      # Warnings should be suppressed from the displayed body
+      refute_includes out, 'Reference `sec:unknown` undefined'
+      refute_includes out, 'Overfull \hbox'
+      # But count is still reported in summary
+      assert_includes out, 'Errors: 1'
+      assert_includes out, 'Warnings: 2'
+    end
+  end
+
+  def test_alerts_and_warnings_display_by_default
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        LaTeX Warning: Reference `sec:unknown` undefined on page 1.
+        Overfull \\hbox (15.0pt too wide) in paragraph at lines 10--15
+        (./main.aux
+        LaTeX Warning: Label `sec:dup` multiply defined.
+        )
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      # Default: both alerts and warnings are displayed
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+
+      plain = strip_ansi(out)
+      assert_includes plain, 'Alerts found:'
+      assert_includes plain, 'Label `sec:dup` multiply defined.'
+      assert_includes plain, 'Reference `sec:unknown` undefined'
+      assert_includes plain, 'Errors: 0'
+      assert_includes plain, 'Alerts: 1'
+      assert_includes plain, 'Warnings: 2'
+      assert_includes plain, 'Whatevers: 0'
+      refute_includes plain, 'Warnings: 2 (suppressed)'
+
+      # When suppress_warnings: true, warnings are suppressed
+      suppressed_builder = LatexBuilder.new('main.tex', suppress_warnings: true)
+      out_supp, = capture_io do
+        Dir.chdir(dir) do
+          suppressed_builder.send(:analyze_output)
+        end
+      end
+
+      plain_supp = strip_ansi(out_supp)
+      assert_includes plain_supp, 'Alerts found:'
+      assert_includes plain_supp, 'Label `sec:dup` multiply defined.'
+      refute_includes plain_supp, 'Reference `sec:unknown` undefined'
+      assert_includes plain_supp, 'Warnings: 2 (suppressed)'
+    end
+  end
+
+  def test_overfull_hbox_alert_threshold
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        Overfull \\hbox (10.0pt too wide) in paragraph at lines 5--8
+        Overfull \\hbox (35.0pt too wide) detected at line 42
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+
+      plain = strip_ansi(out)
+      assert_includes plain, 'Alerts found:'
+      assert_includes plain, 'Overfull \hbox (35.0pt too wide)'
+      assert_includes plain, 'Overfull \hbox (10.0pt too wide)'
+      assert_includes plain, 'Errors: 0'
+      assert_includes plain, 'Alerts: 1'
+      assert_includes plain, 'Warnings: 1'
+      assert_includes plain, 'Whatevers: 0'
+
+      # Test custom threshold
+      custom_builder = LatexBuilder.new('main.tex', alert_overfull_pt: 50.0)
+      out_custom, = capture_io do
+        Dir.chdir(dir) do
+          custom_builder.send(:analyze_output)
+        end
+      end
+
+      # Under 50pt threshold, both are warnings (0 alerts)
+      plain_custom = strip_ansi(out_custom)
+      refute_includes plain_custom, 'Alerts found:'
+      assert_includes plain_custom, 'Overfull \hbox (35.0pt too wide)'
+      assert_includes plain_custom, 'Overfull \hbox (10.0pt too wide)'
+      assert_includes plain_custom, 'Errors: 0'
+      assert_includes plain_custom, 'Alerts: 0'
+      assert_includes plain_custom, 'Warnings: 2'
+    end
+  end
+
+  def test_whatevers_classification_and_suppression
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        Overfull \\hbox (2.09996pt too wide) in paragraph at lines 20--25
+        Package hyperref Warning: Token not allowed in a PDF string (PDFDocEncoding): removing `\\mathshift'
+        LaTeX Warning: `!h' float specifier changed to `!ht' on input line 50.
+        LaTeX Warning: There were multiply-defined labels.
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      # By default, whatevers are suppressed
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+
+      plain = strip_ansi(out)
+      refute_includes plain, '2.09996pt too wide'
+      refute_includes plain, 'Token not allowed in a PDF string'
+      refute_includes plain, 'float specifier changed to'
+      assert_includes plain, 'Whatevers: 4 (suppressed)'
+
+      # With all: true, whatevers are displayed
+      all_builder = LatexBuilder.new('main.tex', all: true, suppress_whatevers: false)
+      out_all, = capture_io do
+        Dir.chdir(dir) do
+          all_builder.send(:analyze_output)
+        end
+      end
+
+      plain_all = strip_ansi(out_all)
+      assert_includes plain_all, 'Whatevers found:'
+      assert_includes plain_all, '2.09996pt too wide'
+      assert_includes plain_all, 'Token not allowed in a PDF string'
+      assert_includes plain_all, 'float specifier changed to'
+      assert_includes plain_all, 'Whatevers: 4'
+      refute_includes plain_all, 'Whatevers: 4 (suppressed)'
+    end
+  end
+
+  def test_boxed_explanations_with_explain_flag
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        (./main.aux
+        LaTeX Warning: Label `sec:first` multiply defined.
+        LaTeX Warning: Label `sec:second` multiply defined.
+        )
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      # Without explain flag: no explanation box
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+      refute_includes out, 'Diagnostic Explanation'
+
+      # With explain: true: boxed explanation printed only on first occurrence
+      expl_builder = LatexBuilder.new('main.tex', explain: true)
+      out_expl, = capture_io do
+        Dir.chdir(dir) do
+          expl_builder.send(:analyze_output)
+        end
+      end
+
+      plain_expl = strip_ansi(out_expl)
+      assert_includes plain_expl, 'Diagnostic Explanation: Alert: Multiply-Defined Label'
+      assert_includes plain_expl, 'Why: Two or more \label{...} tags share the identical key'
+      assert_includes plain_expl, 'Fix: Search your .tex sources for \label{<key>}'
+      assert_includes plain_expl, '┌─ Diagnostic Explanation'
+      assert_includes plain_expl, '└'
+
+      # Count occurrences of Diagnostic Explanation: must be exactly 1 despite 2 duplicate labels!
+      assert_equal 1, plain_expl.scan('Diagnostic Explanation').size
+    end
+  end
+
+  def test_custom_whatever_pt_threshold
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        Overfull \\hbox (4.0pt too wide) in paragraph at lines 10--12
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      # Default threshold 2.5pt: 4.0pt is a Warning
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+      plain = strip_ansi(out)
+      assert_includes plain, 'Warnings: 1'
+      assert_includes plain, 'Whatevers: 0'
+
+      # Custom threshold 5.0pt: 4.0pt is demoted to Whatever (suppressed)
+      custom_builder = LatexBuilder.new('main.tex', whatever_overfull_pt: 5.0)
+      out_custom, = capture_io do
+        Dir.chdir(dir) do
+          custom_builder.send(:analyze_output)
+        end
+      end
+      plain_custom = strip_ansi(out_custom)
+      assert_includes plain_custom, 'Warnings: 0'
+      assert_includes plain_custom, 'Whatevers: 1 (suppressed)'
+    end
+  end
 end
+

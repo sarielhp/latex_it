@@ -51,10 +51,19 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
 
 ### 7. Diagnostics, Error & Warning Parsing
 - Strips low-level TeX font-generation noise (such as `mktextfm`, `mktexpk`, METAFONT errors).
-- Aggregates and colorizes syntax errors, undefined control sequences, missing citations, broken references, and multiply defined labels.
+- **4-Tier Diagnostic Hierarchy (`Errors -> Alerts -> Warnings -> Whatevers`)**:
+  - **Errors**: Fatal compilation failures (syntax errors, runaway arguments, process failure). Suppresses lower tiers on crash so only actionable errors are displayed.
+  - **Alerts**: Document integrity flaws (multiply-defined labels) and wild overfull `\hbox` lines exceeding the alert threshold (default $\ge 24\text{pt}$, configurable via `--alert-hbox <pt>` or `"alert_overfull_pt"` in `.l.jsonc`).
+  - **Warnings**: Actionable typesetting and layout issues ($2.5\text{pt} < \text{hbox} < 24\text{pt}$, underfull `\vbox`, undefined references/citations). Displayed by default alongside Alerts.
+  - **Whatevers**: Harmless background noise (micro overfull `\hbox \le 2.5\text{pt}`, hyperref PDF bookmark token removals, float specifier changes, redundant summaries, font substitutions). Suppressed by default in terminal output, with count reported in the summary line (`Whatevers: W (suppressed)`).
+- **First-Occurrence In-line Explanations (`-e` / `--explain`)**:
+  - Displays a clean boxed callout with colored borders explaining **Why** LaTeX emitted the diagnostic and **Fix** recommendations.
+  - Appears only on the first occurrence of each diagnostic category to keep terminal output readable.
+- **Unsuppressed Mode (`-a` / `--all`)**:
+  - Displays all diagnostics across all tiers (including Whatevers and any configured suppressed warnings).
 - Groups and deduplicates `Overfull \hbox` and `Underfull \vbox` warnings per line, reporting the worst-case badness/pt dimension.
 - Provides `--emacs` flag for AUCTeX-compatible log format.
-- Provides `-s` / `--score` mode for quiet status reporting (`Errors: X, Warnings: Y`).
+- Provides `-s` / `--score` mode for quiet status reporting (`Errors: X, Alerts: Y, Warnings: Z, Whatevers: W`).
 
 ### 8. Environment & Configuration Controls
 - **Unified JSONC Configuration**:
@@ -121,7 +130,9 @@ Compilation Options:
     -m, --main, --find-main, --file  Print the detected main LaTeX file and exit
     -C, --clean-only                 Clean auxiliary and junk files in directory and exit without building
         --fast                       Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed
-    -e, --engine ENGINE              LaTeX compiler: xelatex (default), lualatex
+    -a, --all                        Show all diagnostics across all tiers (including Whatevers and Warnings)
+    -e, --explain                    Display boxed plain-English explanations for diagnostics on first occurrence
+        --engine ENGINE              LaTeX compiler: xelatex (default), lualatex
         --lua, --lualatex            Shortcut for --engine=lualatex
         --xe, --xelatex              Shortcut for --engine=xelatex (default)
         --pdf                        Generate PDF output (default behavior)
@@ -146,6 +157,8 @@ Compilation Options:
     -v, --verbose                    Verbose output (e.g. show box text snippets)
     -W, --werror                     [-Werror] Treat compilation warnings as fatal errors and exit with non-zero code
     -M, --deps                       Print Makefile dependency rule for the document and exit
+        --alert-hbox PT              Overfull hbox threshold in pt to classify as Alert (default: 24.0)
+        --whatever-pt PT             Overfull hbox threshold in pt to classify as Whatever (default: 2.5)
 
 arXiv Preparation Options:
         --arxiv                      Prepare sanitized, flattened, submission-ready arXiv zip package

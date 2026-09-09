@@ -98,6 +98,17 @@ module LaTeXConfig
       // Format warnings/errors for Emacs AUCTeX integration
       "emacs": false,
 
+      // Overfull \\hbox threshold (in pt) to promote to Alert (default: 24.0)
+      "alert_overfull_pt": 24.0,
+
+      // Overfull \\hbox threshold (in pt) to demote to Whatever (default: 2.5)
+      "whatever_overfull_pt": 2.5,
+
+      // Diagnostic tier suppression (by default only Whatevers are suppressed)
+      "suppress_whatevers": true,
+      "suppress_warnings": false,
+      "suppress_alerts": false,
+
       // Portable Zip Bundling Settings (invoked via `l -z`)
       "zip": {
         // When true, harvested style files are placed in styles/ and \\input@path
@@ -488,6 +499,64 @@ end
 class LatexBuilder
   attr_reader :options, :filename, :bfilename, :bdir, :engine_name
 
+  DIAGNOSTIC_EXPLANATIONS = {
+    multiply_defined_label: {
+      title: 'Alert: Multiply-Defined Label',
+      why: 'Two or more \\label{...} tags share the identical key; references will be ambiguous.',
+      fix: 'Search your .tex sources for \\label{<key>} and rename or delete one.'
+    },
+    overfull_hbox_alert: {
+      title: 'Alert: Severe Overfull \\hbox (≥24pt)',
+      why: 'Content spills significantly (≥24pt / ~8.4mm) into the page margin.',
+      fix: 'Reword text, insert discretionary hyphens \\-, break equations, or resize figures.'
+    },
+    overfull_hbox_warning: {
+      title: 'Warning: Overfull \\hbox',
+      why: 'Line exceeds column width; TeX could not hyphenate within standard tolerances.',
+      fix: 'Reword sentence, insert \\-, or wrap code in \\sloppy / \\emergencystretch.'
+    },
+    overfull_hbox_whatever: {
+      title: 'Whatever: Micro Overfull \\hbox (≤2.5pt)',
+      why: 'Minor margin protrusion (≤2.5pt / ~0.88mm), often memoir TOC page numbers.',
+      fix: 'Harmless typesetting quirk; safely ignored.'
+    },
+    underfull_box: {
+      title: 'Warning: Underfull \\vbox or \\hbox',
+      why: 'LaTeX could not stretch whitespace enough to fill the target dimension.',
+      fix: 'Add \\raggedbottom to preamble, adjust figure heights, or reword text.'
+    },
+    undefined_reference: {
+      title: 'Warning: Undefined Reference',
+      why: 'A \\ref{...} or \\pageref{...} references a label that does not exist in any .aux.',
+      fix: 'Check spelling of the key, ensure target chapter is included, and recompile.'
+    },
+    undefined_citation: {
+      title: 'Warning: Undefined Citation',
+      why: 'A \\cite{...} key was not found in the bibliography database (.bib).',
+      fix: 'Verify key spelling, check \\bibliography / \\addbibresource, and run BibTeX/Biber.'
+    },
+    hyperref_token: {
+      title: 'Whatever: Hyperref PDF Bookmark Token Sanitization',
+      why: 'Math or formatting in a heading was stripped for plain-text PDF bookmarks.',
+      fix: 'Harmless. Use \\texorpdfstring{$math$}{text} in headings to clean cleanly.'
+    },
+    float_specifier: {
+      title: 'Whatever: Float Specifier Auto-Adjusted',
+      why: "'!h' (strictly here) violated page layout rules, so LaTeX added 't' (top of page).",
+      fix: "Harmless. Use '[!htbp]' to give LaTeX standard placement flexibility."
+    },
+    font_shape: {
+      title: 'Whatever: Font Shape Substitution',
+      why: 'Requested font weight/style combination was unavailable; fallback substituted.',
+      fix: 'Harmless fallback. Check font declarations if unexpected styling appears.'
+    },
+    summary_warning: {
+      title: 'Whatever: Redundant Summary Notice',
+      why: 'Document-level summary emitted at end of LaTeX run.',
+      fix: 'Harmless recap; individual items are already reported above.'
+    }
+  }.freeze
+
   def initialize(target, options)
     @options = options
     @bdir = File.dirname(target)
@@ -499,6 +568,7 @@ class LatexBuilder
     @pdferr = "junk/err_#{@engine_name}"
     @biberrbase = 'err_bib'
     @biberr = "junk/#{@biberrbase}"
+    @explained_categories = {}
   end
 
   def run!
@@ -1042,7 +1112,7 @@ class LatexBuilder
       nil
     end
 
-    errcntx + errcnty + errcntz + errcnta + st + errcntmd
+    errcntx + errcnty + errcntz + errcnta + st
   end
 
   def extract_error_line(err_text)
@@ -1347,8 +1417,7 @@ class LatexBuilder
         err_file = $1
       elsif line =~ /^!\s+\S+/ ||
             line =~ /^Runaway argument\?/ ||
-            line =~ /^Error:\s+/i ||
-            (line.include?('multiply defined') && line.include?('LaTeX Warning'))
+            line =~ /^Error:\s+/i
         is_err = true
       end
 
@@ -1418,6 +1487,15 @@ class LatexBuilder
       end
       rendered = render_diagnostic_item(item, width: max_width).rstrip
       puts rendered unless rendered.empty?
+
+      if @options[:explain]
+        cat = diagnostic_category(item)
+        if cat && cat != :generic && !@explained_categories[cat]
+          @explained_categories[cat] = true
+          box = format_boxed_explanation(cat)
+          puts box if box
+        end
+      end
     end
 
     if all_sorted.empty? && !fallback_lines.empty?
@@ -1434,6 +1512,205 @@ class LatexBuilder
     [sorted_other.size + sorted_overfull.size, sorted_errors.size]
   end
 
+  def terminal_columns
+    return 80 if @options[:emacs]
+
+    w = begin
+      IO.console&.winsize&.last rescue nil
+    end
+    (w && w > 40) ? [w, 80].min : 80
+  end
+
+  def wrap_box_field(prefix, text, inner_width)
+    full_prefix = "#{prefix} "
+    avail = inner_width - full_prefix.length
+    words = text.split(/\s+/)
+    lines = []
+    curr = ''
+    words.each do |wd|
+      if curr.empty?
+        curr = wd
+      elsif curr.length + 1 + wd.length <= avail
+        curr += " #{wd}"
+      else
+        lines << curr
+        curr = wd
+      end
+    end
+    lines << curr unless curr.empty?
+
+    lines.each_with_index.map do |ln, idx|
+      pfx = idx == 0 ? full_prefix : (' ' * full_prefix.length)
+      content = "#{pfx}#{ln}".ljust(inner_width)
+      "│ #{content} │"
+    end
+  end
+
+  def format_boxed_explanation(category)
+    expl = DIAGNOSTIC_EXPLANATIONS[category]
+    return nil unless expl
+
+    cols = terminal_columns
+    inner_width = cols - 4
+
+    top_title = "─ Diagnostic Explanation: #{expl[:title]} "
+    dash_count = [cols - 2 - top_title.length, 1].max
+    top_border = "┌#{top_title}#{'─' * dash_count}┐"
+    bottom_border = "└#{'─' * (cols - 2)}┘"
+
+    box_lines = [top_border]
+    box_lines.concat(wrap_box_field('Why:', expl[:why], inner_width))
+    box_lines.concat(wrap_box_field('Fix:', expl[:fix], inner_width))
+    box_lines << bottom_border
+
+    if @options[:color] == false || @options[:emacs]
+      "\n" + box_lines.join("\n") + "\n"
+    else
+      colored_box = box_lines.map do |bl|
+        if bl.start_with?('┌') || bl.start_with?('└')
+          Rainbow(bl).cyan.bright
+        else
+          left_bar = Rainbow('│').cyan.bright
+          right_bar = Rainbow('│').cyan.bright
+          inner_content = bl[2...-2]
+          "#{left_bar} #{inner_content} #{right_bar}"
+        end
+      end
+      "\n" + colored_box.join("\n") + "\n"
+    end
+  end
+
+  def diagnostic_category(item)
+    txt = item[:text].to_s
+    if txt.include?('multiply defined')
+      :multiply_defined_label
+    elsif overfull_hbox?(item)
+      sev = (item[:severity] || extract_box_severity(txt)).to_f
+      if sev >= alert_overfull_pt
+        :overfull_hbox_alert
+      elsif sev > 0 && sev <= whatever_overfull_pt
+        :overfull_hbox_whatever
+      else
+        :overfull_hbox_warning
+      end
+    elsif item[:type].to_s.include?('Underfull') || txt =~ /\AUnderfull\s+\\(?:hbox|vbox)/i
+      :underfull_box
+    elsif (txt.include?('Reference `') || txt.include?('reference `')) && txt.include?('undefined')
+      :undefined_reference
+    elsif (txt.include?('Citation `') || txt.include?('citation `')) && txt.include?('undefined')
+      :undefined_citation
+    elsif txt.include?('Token not allowed in a PDF string')
+      :hyperref_token
+    elsif txt =~ /float specifier changed to/i
+      :float_specifier
+    elsif txt.include?('Some font shapes were not available') || txt =~ /Font shape .* undefined/i
+      :font_shape
+    elsif txt.include?('There were multiply-defined labels') || txt.include?('There were undefined references')
+      :summary_warning
+    else
+      :generic
+    end
+  end
+
+  def alert_overfull_pt
+    (@options[:alert_overfull_pt] || 24.0).to_f
+  end
+
+  def whatever_overfull_pt
+    (@options[:whatever_overfull_pt] || 2.5).to_f
+  end
+
+  def extract_label_alerts(content)
+    alerts = []
+    clean_content = LaTeXUtils.filter_subcommand_noise(content)
+    lines = clean_content.lines
+    file_stack = ["./#{@filename}"]
+    lines.each_with_index do |line, i|
+      track_log_file(line, file_stack)
+      next unless line.include?('multiply defined') && line.include?('LaTeX Warning')
+
+      text = line.strip
+      file_name = file_stack.last || "./#{@filename}"
+      formatted = format_diagnostic_line('', text, :red)
+      alerts << {
+        file: file_name, line: 0, line_str: '', text: text,
+        base_color: :red, formatted: formatted, index: i
+      }
+    end
+    alerts
+  end
+
+  def extract_alerts(content, warn_items = nil)
+    clean_content = LaTeXUtils.filter_subcommand_noise(content)
+    warn_items ||= extract_warnings(clean_content, @options[:verbose])
+    threshold = alert_overfull_pt
+    alert_boxes = warn_items.select do |w|
+      overfull_hbox?(w) && (w[:severity] || 0.0) >= threshold
+    end
+    alert_boxes.each do |ab|
+      ab[:base_color] = :red
+      ab[:formatted] = format_diagnostic_line(ab[:line_str], ab[:text], :red)
+    end
+    extract_label_alerts(clean_content) + alert_boxes
+  end
+
+  def whatever_diagnostic?(item)
+    if overfull_hbox?(item)
+      sev = (item[:severity] || extract_box_severity(item[:text].to_s)).to_f
+      return true if sev > 0 && sev <= whatever_overfull_pt
+    end
+
+    txt = item[:text].to_s
+    return true if txt.include?('Token not allowed in a PDF string')
+    return true if txt =~ /float specifier changed to/i
+    return true if txt.include?('There were multiply-defined labels')
+    return true if txt.include?('There were undefined references')
+    return true if txt.include?('Some font shapes were not available')
+    return true if txt =~ /Font shape .* undefined using .* instead/i
+
+    false
+  end
+
+  def partition_diagnostics(clean_content, warn_items)
+    alert_items = extract_alerts(clean_content, warn_items)
+    whatevers = []
+    regular_warnings = []
+
+    threshold = alert_overfull_pt
+    warn_items.each do |w|
+      next if overfull_hbox?(w) && ((w[:severity] || 0.0) >= threshold)
+
+      if whatever_diagnostic?(w)
+        whatevers << w
+      else
+        regular_warnings << w
+      end
+    end
+
+    [alert_items, regular_warnings, whatevers]
+  end
+
+  def format_tier_count(label, count, color, suppressed)
+    if count == 0
+      Rainbow("#{label}: 0").green.bright
+    else
+      base = Rainbow("#{label}: #{count}").color(color).bright
+      suppressed ? "#{base} #{Rainbow('(suppressed)').faint}" : base
+    end
+  end
+
+  def print_summary_line(errors, alerts, warnings, whatevers,
+                         suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false)
+    err_str = format_tier_count('Errors', errors, :red, false)
+    alert_str = format_tier_count('Alerts', alerts, :red, suppressed_alerts)
+    warn_str = format_tier_count('Warnings', warnings, :yellow, suppressed_warnings)
+    what_str = format_tier_count('Whatevers', whatevers, :cyan, suppressed_whatevers)
+
+    target_io = (@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout
+    target_io.puts ''
+    target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}"
+  end
+
   def report_errors(loga)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
@@ -1442,20 +1719,26 @@ class LatexBuilder
     puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
     puts Rainbow('===============================================================').red.bright
 
-    warnings = extract_warnings(content, @options[:verbose])
     errors = extract_errors(content)
 
     fallback = errors.empty? ? content.lines.last(15) : []
-    num_warnings, num_errors = print_diagnostics_body(warnings, errors, fallback_lines: fallback)
+    _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback)
 
     puts Rainbow('===============================================================').red.bright
     puts "See #{loga} for full error details."
+    raw_warns = extract_warnings(content, false)
+    alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
+
     errors = [num_errors, count_latex_errors(raw, 1)].max
-    warnings = num_warnings
-    errors_str = errors > 0 ? Rainbow("Errors: #{errors}").red.bright : Rainbow("Errors: #{errors}").green.bright
-    warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
-    puts ''
-    puts "#{errors_str}, #{warnings_str}"
+    alerts = alert_items.size
+    warnings = regular_warns.size
+    whatevers = whatever_items.size
+    print_summary_line(
+      errors, alerts, warnings, whatevers,
+      suppressed_alerts: alerts > 0,
+      suppressed_warnings: warnings > 0,
+      suppressed_whatevers: whatevers > 0
+    )
     exit 1
   end
 
@@ -1548,30 +1831,65 @@ class LatexBuilder
     counts = collect_diagnostic_counts(new_content)
     total_diag = counts[:cbib] + counts[:undef_cite] + counts[:undef_ref] + counts[:mult_def] + counts[:overfull] + counts[:underfull]
 
+    clean_content = LaTeXUtils.filter_subcommand_noise(new_content)
+    raw_warn_items = extract_warnings(clean_content, @options[:verbose])
+    err_items = extract_errors(clean_content)
+    append_bib_diagnostics!(raw_warn_items, err_items) if counts[:cbib] > 0
+
+    alert_items, regular_warn_items, whatever_items = partition_diagnostics(clean_content, raw_warn_items)
+
     errors = count_latex_errors(new_content, 0) + counts[:biberr]
-    warnings = count_latex_warnings(new_content) + counts[:bib_warns]
+    alerts = alert_items.size
+    warnings = regular_warn_items.size
+    whatevers = whatever_items.size
 
-    if total_diag > 0 || errors > 0
-      print_diagnostic_banner(counts)
-      clean_content = LaTeXUtils.filter_subcommand_noise(new_content)
-      warn_items = extract_warnings(clean_content, @options[:verbose])
-      err_items = extract_errors(clean_content)
+    suppress_alerts = @options[:suppress_alerts] == true
+    suppress_warnings = @options[:suppress_warnings] == true
+    suppress_whatevers = @options[:suppress_whatevers] != false
 
-      append_bib_diagnostics!(warn_items, err_items) if counts[:cbib] > 0
+    if total_diag > 0 || errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
+      print_diagnostic_banner(counts) if total_diag > 0 || errors > 0 || alerts > 0
 
-      num_warnings, num_errors = print_diagnostics_body(warn_items, err_items)
-      warnings = num_warnings
-      errors = [num_errors, errors].max
+      if errors > 0 || !err_items.empty?
+        # Level 1: Only display errors
+        _num_warnings, num_errors = print_diagnostics_body([], err_items)
+        errors = [num_errors, errors].max
+      else
+        if !suppress_alerts && !alert_items.empty?
+          puts Rainbow('Alerts found:').red.bright
+          print_diagnostics_body([], alert_items)
+        end
+        if !suppress_warnings && !regular_warn_items.empty?
+          puts Rainbow('Warnings found:').yellow.bright if !alert_items.empty? && !suppress_alerts
+          print_diagnostics_body(regular_warn_items, [])
+        end
+        if !suppress_whatevers && !whatever_items.empty?
+          puts Rainbow('Whatevers found:').cyan.bright
+          whatevers_formatted = whatever_items.map do |wh|
+            wh_copy = wh.dup
+            wh_copy[:base_color] = :cyan
+            wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan)
+            wh_copy
+          end
+          print_diagnostics_body(whatevers_formatted, [])
+        end
+      end
     end
 
-    return unless errors > 0 || warnings > 0
+    return unless errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
 
-    errors_str = errors > 0 ? Rainbow("Errors: #{errors}").red.bright : Rainbow("Errors: #{errors}").green.bright
-    warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
-    puts ''
-    puts "#{errors_str}, #{warnings_str}"
+    suppressed_alt = (errors > 0) || suppress_alerts
+    suppressed_wrn = (errors > 0) || suppress_warnings
+    suppressed_wht = (errors > 0) || suppress_whatevers
 
-    if @options[:werror] && warnings > 0
+    print_summary_line(
+      errors, alerts, warnings, whatevers,
+      suppressed_alerts: suppressed_alt && alerts > 0,
+      suppressed_warnings: suppressed_wrn && warnings > 0,
+      suppressed_whatevers: suppressed_wht && whatevers > 0
+    )
+
+    if @options[:werror] && (alerts > 0 || warnings > 0)
       puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
       exit 1
     end
@@ -1594,8 +1912,7 @@ class LatexBuilder
       if line =~ /^!\s+\S+/ ||
          line =~ /^.+:\d+:\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use)/i ||
          line =~ /^.+:\d+:\s+.*error/i ||
-         line =~ /^Error:\s+/i ||
-         (line.include?('multiply defined') && line.include?('LaTeX Warning'))
+         line =~ /^Error:\s+/i
         errors += 1
       end
     end
@@ -1621,12 +1938,24 @@ class LatexBuilder
   def output_score(last_log_path = nil, status = 0)
     last_log_path ||= find_last_latex_log
     content = LaTeXUtils.safe_read(last_log_path)
+    clean_content = LaTeXUtils.filter_subcommand_noise(content)
+    raw_warns = extract_warnings(clean_content, false)
+    alert_items, regular_warns, whatever_items = partition_diagnostics(clean_content, raw_warns)
+
     errors = count_latex_errors(content, status)
-    warnings = count_latex_warnings(content)
-    out = @orig_stdout || $stdout
-    errors_str = errors > 0 ? Rainbow("Errors: #{errors}").red.bright : Rainbow("Errors: #{errors}").green.bright
-    warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
-    out.puts "#{errors_str}, #{warnings_str}"
+    alerts = alert_items.size
+    warnings = regular_warns.size
+    whatevers = whatever_items.size
+    suppress_alerts = @options[:suppress_alerts] == true
+    suppress_warnings = @options[:suppress_warnings] == true
+    suppress_whatevers = @options[:suppress_whatevers] != false
+
+    print_summary_line(
+      errors, alerts, warnings, whatevers,
+      suppressed_alerts: suppress_alerts && alerts > 0,
+      suppressed_warnings: suppress_warnings && warnings > 0,
+      suppressed_whatevers: suppress_whatevers && whatevers > 0
+    )
   end
 end
 
@@ -2573,6 +2902,13 @@ options = {
   verbose: false,
   emacs: cfg['emacs'] == true,
   werror: cfg['werror'] == true,
+  alert_overfull_pt: (cfg['alert_overfull_pt'] || 24.0).to_f,
+  whatever_overfull_pt: (cfg['whatever_overfull_pt'] || 2.5).to_f,
+  suppress_whatevers: cfg.key?('suppress_whatevers') ? (cfg['suppress_whatevers'] == true) : true,
+  suppress_warnings: cfg['suppress_warnings'] == true,
+  suppress_alerts: cfg['suppress_alerts'] == true,
+  all: false,
+  explain: false,
   deps: false,
   zip: false,
   verify: false,
@@ -2625,7 +2961,18 @@ parser = OptionParser.new do |opts|
     options[:fast] = true
   end
 
-  opts.on('-e', '--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex') do |v|
+  opts.on('-a', '--all', 'Show all diagnostics across all tiers (including Whatevers and Warnings)') do
+    options[:all] = true
+    options[:suppress_whatevers] = false
+    options[:suppress_warnings] = false
+    options[:suppress_alerts] = false
+  end
+
+  opts.on('-e', '--explain', 'Display boxed plain-English explanations for diagnostics on first occurrence') do
+    options[:explain] = true
+  end
+
+  opts.on('--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex') do |v|
     LaTeXUtils.check_engine!(v)
     options[:engine] = LaTeXUtils.normalize_engine(v)
   end
@@ -2725,6 +3072,14 @@ parser = OptionParser.new do |opts|
 
   opts.on('-M', '--deps', 'Print Makefile dependency rule for the document and exit') do
     options[:deps] = true
+  end
+
+  opts.on('--alert-hbox PT', Float, 'Overfull hbox threshold in pt to classify as Alert (default: 24.0)') do |v|
+    options[:alert_overfull_pt] = v.to_f
+  end
+
+  opts.on('--whatever-pt PT', Float, 'Overfull hbox threshold in pt to classify as Whatever (default: 2.5)') do |v|
+    options[:whatever_overfull_pt] = v.to_f
   end
 
   opts.separator ''

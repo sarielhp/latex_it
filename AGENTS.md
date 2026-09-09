@@ -50,10 +50,10 @@ This document provides architectural guidelines, core invariants, development wo
 
 Any modifications to compilation logic must honor the following invariants:
 
-1. **Deterministic Pass Model**:
-   - **Standard**: Pass 1 (LaTeX) $\rightarrow$ Bibliography (Biber/BibTeX) $\rightarrow$ Pass 2 (LaTeX) $\rightarrow$ Pass 3 (LaTeX).
-   - **Fast Incremental (`--fast` / `lw`)**: Checksums `.aux` files, checks `.bib` modification times, and inspects rerun requests in logs to bypass unnecessary passes.
-   - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled.
+1. **Intelligent Convergence Pass Model**:
+   - **Default**: Tracks source dependencies via `-recorder` (`.fls`) and SHA256 build state. Exits in 0 passes if targets are up to date; runs 1 pass if citations/labels are stable; runs pre-primary BibTeX/Biber if `.bib` changed; and only executes extra passes (up to `-n`, default 3) when `.aux` changes or rerun is requested in logs.
+   - **Fast Incremental (`--fast` / `lw`)**: Aliased to reuse build state cache and avoid redundant recompilations.
+   - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled (forces rebuild when targets are up to date).
 2. **Bibliography Safety**:
    - Detect tool automatically: Biber (via `.bcf` / `.run.xml`) or BibTeX (via `\bibdata` and `\citation` in `.aux`).
    - Root `.bbl` is only overwritten if the generated `junk/*.bbl` contains valid bibliography entries (`\bibitem` or `\entry`).

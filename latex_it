@@ -14,7 +14,9 @@
 # - Clean pre-builds and timing diagnostics
 # ==============================================================================
 
+require 'digest'
 require 'fileutils'
+require 'json'
 require 'open3'
 require 'optparse'
 require 'shellwords'
@@ -255,7 +257,8 @@ module LaTeXUtils
         '*.{aux,bbl,bbl.bak,blg,bcf,run.xml}',
         '*.{log,out,toc,lof,lot,thm,idx,ind,ilg}',
         '*.{nav,snm,vrb,synctex.gz,synctex,dvi,ps}',
-        '*.{fls,fdb_latexmk,rel,vtc,axp,dpth,md5,soc}',
+        '*.{fls,fdb_latexmk,rel,vtc,axp,dpth,md5,soc,build_state.json}',
+        '.build_state.json',
         'log.txt', 'log.txt.1', 'texput.log',
         'missfont.log', 'mfput.log',
         '*.err*', 'err_*',
@@ -313,6 +316,10 @@ class LatexBuilder
     @bfilename = File.basename(@target_base, '.*')
     @filename = "#{@bfilename}.tex"
     @orig_stdout = $stdout
+    @engine_name = LaTeXUtils.normalize_engine(@options[:engine] || 'xelatex')
+    @pdferr = "junk/err_#{@engine_name}"
+    @biberrbase = 'err_bib'
+    @biberr = "junk/#{@biberrbase}"
   end
 
   def run!
@@ -345,71 +352,33 @@ class LatexBuilder
       exit 1
     end
 
+    if @options[:deps]
+      export_dependencies
+      return
+    end
+
     with_lock do
       setup_environment
       deep_clean if @options[:clean]
       paper_cleanup
-      junk_dir_create
 
-      total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
-
-      if @options[:single_pass]
-        print "      #{Rainbow(@engine_name).bright}"
-        run_latex_pass('_1')
-      elsif @options[:fast]
-        print "      #{Rainbow(@engine_name).bright} (1)"
-        aux_hash1 = compute_aux_hash
-        run_latex_pass('_1')
-
-        bib_tool = detect_bib_tool
-        bib_needed = bib_tool && needs_bib_pass?(bib_tool, "#{@pdferr}_1")
-        if bib_needed
-          print ", #{Rainbow(bib_tool).bright}"
-          run_bib_pass(bib_tool)
-        end
-
-        rerun_needed = bib_needed || needs_latex_rerun?("#{@pdferr}_1", aux_hash1)
-        if rerun_needed && @options[:passes] >= 2
-          print ", #{Rainbow(@engine_name).bright} (2)"
-          aux_hash2 = compute_aux_hash
-          run_latex_pass('_2')
-
-          if needs_latex_rerun?("#{@pdferr}_2", aux_hash2) && @options[:passes] >= 3
-            print ", #{Rainbow(@engine_name).bright} (3)"
-            run_latex_pass('_3')
-          end
-        end
-      else
-        max_passes = @options[:passes]
-        print "      #{Rainbow(@engine_name).bright} (1/#{max_passes})"
-        run_latex_pass('_1')
-
-        # Bibliography pass
-        bib_tool = detect_bib_tool
-        if bib_tool && @options[:passes] >= 2
-          print ", #{Rainbow(bib_tool).bright}"
-          run_bib_pass(bib_tool)
-        end
-
-        # Pass 2: Resolve citations
-        if @options[:passes] >= 2
-          print ", #{Rainbow(@engine_name).bright} (2/#{max_passes})"
-          run_latex_pass('_2')
-        end
-
-        # Pass 3: Final references & layout
-        if @options[:passes] >= 3
-          print ", #{Rainbow(@engine_name).bright} (3/#{max_passes})"
-          run_latex_pass('_3')
-        end
+      if targets_up_to_date?
+        puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -u' to force rebuild)"
+        return
       end
 
+      junk_dir_create
+      total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
+
+      run_convergence_loop
       puts ''
 
       # Update output files
       update_target_file("junk/#{@bfilename}.pdf", "#{@bfilename}.pdf", update_on_diff: @options[:update_on_diff])
       update_target_file("junk/#{@bfilename}.bbl", "#{@bfilename}.bbl") if LaTeXUtils.bbl_has_entries?("junk/#{@bfilename}.bbl")
       update_target_file("junk/#{@bfilename}.synctex.gz", "#{@bfilename}.synctex.gz")
+
+      save_build_state!
 
       if @options[:time]
         total_t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -418,6 +387,173 @@ class LatexBuilder
 
       analyze_output
     end
+  end
+
+  def targets_up_to_date?
+    return false if @options[:clean] || @options[:single_pass] || @options[:score] || @options[:werror]
+
+    target_pdf = "#{@bfilename}.pdf"
+    return false unless File.exist?(target_pdf) && File.size(target_pdf) > 0
+
+    state_file = 'junk/.build_state.json'
+    return false unless File.exist?(state_file)
+
+    state = JSON.parse(File.read(state_file)) rescue nil
+    return false unless state.is_a?(Hash) && state['target'] == target_pdf
+
+    sources = state['sources']
+    return false unless sources.is_a?(Hash) && !sources.empty?
+
+    pdf_mtime = File.mtime(target_pdf)
+    root_files = Dir['*.tex', '*.bib', 'refs/*.bib'].select { |f| File.file?(f) }
+    return false if root_files.any? { |f| File.mtime(f) > pdf_mtime }
+
+    sources.all? do |path, meta|
+      next false unless File.exist?(path)
+
+      if meta['mtime'] && File.mtime(path).to_i == meta['mtime']
+        true
+      else
+        meta['sha'] && Digest::SHA256.file(path).hexdigest == meta['sha']
+      end
+    end
+  end
+
+  def run_convergence_loop
+    if @options[:single_pass]
+      print "      #{Rainbow(@engine_name).bright}"
+      run_latex_pass('_1')
+      return
+    end
+
+    max_passes = @options[:passes]
+    pass = 0
+    bib_ran = false
+
+    bib_tool = detect_bib_tool
+    if bib_tool && bib_files_newer_than_bbl?
+      print "      #{Rainbow(bib_tool).bright}"
+      run_bib_pass(bib_tool)
+      bib_ran = true
+    end
+
+    loop do
+      pass += 1
+      prefix = (pass == 1 && !bib_ran) ? '      ' : ', '
+      print "#{prefix}#{Rainbow(@engine_name).bright} (#{pass})"
+
+      aux_before = compute_aux_hash
+      run_latex_pass("_#{pass}")
+
+      break if pass >= max_passes
+
+      bib_tool ||= detect_bib_tool
+      if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}")
+        print ", #{Rainbow(bib_tool).bright}"
+        run_bib_pass(bib_tool)
+        bib_ran = true
+        next
+      end
+
+      break unless needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before)
+    end
+  end
+
+  def bib_files_newer_than_bbl?
+    fnbbl = "junk/#{@bfilename}.bbl"
+    return false unless File.exist?(fnbbl) && File.size(fnbbl) > 0
+    return false unless File.exist?("junk/#{@bfilename}.aux") || File.exist?("junk/#{@bfilename}.bcf")
+
+    bbl_mtime = File.mtime(fnbbl)
+    bib_files = Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }
+    bib_files.any? { |b| File.mtime(b) > bbl_mtime }
+  end
+
+  def extract_fls_dependencies(fls_path)
+    return [] unless File.exist?(fls_path)
+
+    root_abs = File.expand_path('.')
+    deps = []
+
+    File.foreach(fls_path) do |line|
+      next unless line.start_with?('INPUT ')
+
+      path = line.sub(/\AINPUT\s+/, '').strip
+      next if path.empty?
+
+      abs = File.expand_path(path)
+      if abs.start_with?(root_abs) && File.file?(abs)
+        rel = abs.sub(%r{\A#{Regexp.escape(root_abs)}/?}, '')
+        next if rel.start_with?('junk/') || rel.empty?
+
+        deps << rel
+      end
+    end
+
+    deps.uniq
+  end
+
+  def save_build_state!
+    return unless File.exist?("junk/#{@bfilename}.pdf") && File.size("junk/#{@bfilename}.pdf") > 0
+
+    fls_path = "junk/#{@bfilename}.fls"
+    deps = extract_fls_dependencies(fls_path)
+    deps << @filename if File.exist?(@filename)
+    Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }.each { |b| deps << b }
+    deps.uniq!
+
+    sources = {}
+    deps.each do |dep|
+      next unless File.file?(dep)
+
+      sources[dep] = {
+        'mtime' => File.mtime(dep).to_i,
+        'sha' => Digest::SHA256.file(dep).hexdigest
+      }
+    end
+
+    state = {
+      'target' => "#{@bfilename}.pdf",
+      'engine' => @engine_name,
+      'saved_at' => Time.now.to_i,
+      'sources' => sources
+    }
+
+    File.write('junk/.build_state.json', JSON.generate(state))
+  rescue StandardError => e
+    warn "Warning: Could not save build state: #{e.message}" if @options[:verbose]
+  end
+
+  def export_dependencies
+    deps = []
+    if File.exist?('junk/.build_state.json')
+      state = JSON.parse(File.read('junk/.build_state.json')) rescue nil
+      deps = state['sources'].keys if state.is_a?(Hash) && state['sources'].is_a?(Hash)
+    end
+
+    if deps.empty? && File.exist?("junk/#{@bfilename}.fls")
+      deps = extract_fls_dependencies("junk/#{@bfilename}.fls")
+    end
+
+    if deps.empty?
+      with_lock do
+        setup_environment
+        junk_dir_create
+        run_latex_pass('_1')
+        save_build_state!
+      end
+      if File.exist?('junk/.build_state.json')
+        state = JSON.parse(File.read('junk/.build_state.json')) rescue nil
+        deps = state['sources'].keys if state.is_a?(Hash) && state['sources'].is_a?(Hash)
+      end
+    end
+
+    deps << @filename if File.exist?(@filename)
+    Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }.each { |b| deps << b }
+    deps.uniq!
+    deps.sort!
+
+    puts "#{@bfilename}.pdf: #{deps.join(' ')}"
   end
 
   def with_lock
@@ -456,7 +592,7 @@ class LatexBuilder
     LaTeXUtils.check_engine!(@engine_name)
     LaTeXUtils.check_program(@engine_name)
 
-    @latex_flags = ['-interaction=nonstopmode', '-synctex=1', '-no-mktex=tfm', '-output-directory=junk', '-file-line-error']
+    @latex_flags = ['-interaction=nonstopmode', '-synctex=1', '-no-mktex=tfm', '-recorder', '-output-directory=junk', '-file-line-error']
 
     @pdferr = "junk/err_#{@engine_name}"
     @biberrbase = 'err_bib'
@@ -471,27 +607,6 @@ class LatexBuilder
     FileUtils.mkdir_p('junk/figs')
     FileUtils.mkdir_p('junk/junk')
     FileUtils.mkdir_p('junk/fragment')
-
-    return if @options[:fast]
-
-    FileUtils.mkdir_p('junk/old')
-    Dir['junk/*'].each do |f|
-      next if %w[old figs junk fragment].include?(File.basename(f))
-
-      dest = File.join('junk/old', File.basename(f))
-      FileUtils.rm_rf(dest)
-      FileUtils.mv(f, 'junk/old/')
-    end
-    FileUtils.mv('junk/old/num.tex', 'junk/') if File.exist?('junk/old/num.tex')
-
-    # Copy .aux, .bbl, and .out files between runs so cross-references, citations,
-    # and bookmark outlines are preserved
-    Dir.glob('junk/old/**/*.{aux,bbl,out}').each do |f|
-      rel = f.sub(%r{\Ajunk/old/}, '')
-      dest = File.join('junk', rel)
-      FileUtils.mkdir_p(File.dirname(dest))
-      FileUtils.cp(f, dest)
-    end
   end
 
   def deep_clean
@@ -681,9 +796,11 @@ class LatexBuilder
   end
 
   def needs_latex_rerun?(loga, prev_aux_hash = nil)
-    if prev_aux_hash
-      curr_aux_hash = compute_aux_hash
+    curr_aux_hash = compute_aux_hash
+    if prev_aux_hash && !prev_aux_hash.empty?
       return true if curr_aux_hash != prev_aux_hash
+    elsif prev_aux_hash && prev_aux_hash.empty?
+      return true if aux_has_cross_references?(curr_aux_hash)
     end
 
     log_content = LaTeXUtils.safe_read(loga)
@@ -696,6 +813,10 @@ class LatexBuilder
     return true if log_content =~ /Package ocgx2 Warning: Rerun/i
 
     false
+  end
+
+  def aux_has_cross_references?(aux_hash)
+    aux_hash.match?(/\\(?:newlabel|citation|@writefile)/)
   end
 
   def count_errors_in_log(st, loga)
@@ -851,102 +972,110 @@ class LatexBuilder
     end
   end
 
-  def extract_warnings(content, verbose = false)
-    raw_warnings = []
-    seen_warnings = {}
-    lines = content.lines
-    i = 0
-    while i < lines.size
-      l = lines[i]
-      if l =~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/
-        if l.include?('multiply defined')
-          i += 1
-          next
-        end
-        warn_block = [l.strip]
-        start_idx = i
-        i += 1
-        while i < lines.size && !lines[i].strip.empty? &&
-              lines[i] !~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/ &&
-              lines[i] !~ /^(Overfull|Underfull)/ &&
-              lines[i] !~ /^\[\d+\]/ &&
-              lines[i] !~ /^!\s+/ &&
-              lines[i] !~ /^.+:\d+:/ &&
-              lines[i] !~ /^Runaway argument\?/
-          warn_block << lines[i].strip
-          i += 1
-        end
-        warn_text = warn_block.join(' ')
-        unless seen_warnings[warn_text]
-          seen_warnings[warn_text] = true
-          clean_text = warn_text.gsub(/\([a-zA-Z0-9_\-]+\)\s*/, '')
-          clean_text = clean_text.gsub(/line (\d+)\s+(\d+)\b/, 'line \1\2')
-          line_no = 0
-          line_str = ''
-          if clean_text =~ /(?:at|on|in)?\s*(?:input\s+)?lines?\s*(\d+)/i
-            line_no = $1.to_i
-            line_str = $1
-          elsif clean_text =~ /:(\d+):/
-            line_no = $1.to_i
-            line_str = $1
-          end
-          formatted = format_diagnostic_line(line_str, warn_text, :yellow)
-          raw_warnings << { type: :warn, line: line_no, line_str: line_str, text: warn_text, base_color: :yellow, formatted: formatted, index: start_idx }
-        end
-        next
-      elsif l =~ /^(Overfull|Underfull) \\(hbox|vbox)/
-        start_idx = i
-        box_type = "#{$1} \\#{$2}"
-        box_line = l.strip
-        color_m = box_line.start_with?('Overfull') ? :magenta : :cyan
-        i += 1
-        extra_lines = []
-        if i < lines.size && !lines[i].strip.empty? &&
-           lines[i] !~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/ &&
-           lines[i] !~ /^(Overfull|Underfull)/ &&
-           lines[i] !~ /^\[\d+\]/ &&
-           lines[i] !~ /^!\s+/ &&
-           lines[i] !~ /^.+:\d+:/ &&
-           lines[i] !~ /^Runaway argument\?/ &&
-           lines[i] !~ /^l\.\d+/
-          extra_lines << lines[i].strip
-          i += 1
-        end
+  def track_log_file(line, file_stack)
+    return if line =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/
+    return if line =~ /^(?:Overfull|Underfull)/ || line =~ /^!\s+/
 
-        line_no = 0
-        line_str = ''
-        if box_line =~ /lines?\s+(\d+(?:--\d+)?)/i
-          line_str = $1
-          line_no = $1.split('--').first.to_i
-        end
+    file_pattern = /\((?:"([^"]+)"|(\.[\\\/][^\s\(\)]+|[a-zA-Z0-9_\-\.\/]+?\.(?:tex|sty|cls|aux|bbl|bib|dtx|def|ldf|cfg|clo|toc|lof|lot|png|pdf|jpg|eps))\b)/
+    opened = line.scan(file_pattern).map { |m| m.compact.first }
+    opened.each { |f| file_stack << f }
 
-        formatted = format_diagnostic_line(line_str, box_line, color_m)
-        if verbose && !extra_lines.empty?
-          formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : highlight_line_numbers(line, color_m) }.join("\n")
-        end
+    closes = line.scan(/\)/).size
+    opens = line.scan(/\(/).size
+    (closes - opens).times { file_stack.pop if file_stack.size > 1 }
+  end
 
-        severity = extract_box_severity(box_line)
-        raw_warnings << {
-          type: box_type,
-          line: line_no,
-          line_str: line_str,
-          text: box_line,
-          base_color: color_m,
-          extra_lines: extra_lines,
-          severity: severity,
-          formatted: formatted,
-          index: start_idx
-        }
-        next
-      end
+  def diagnostic_boundary_line?(line)
+    return true if line.strip.empty?
+    return true if line =~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/
+    return true if line =~ /^(Overfull|Underfull)/
+    return true if line =~ /^\[\d+\]/
+    return true if line =~ /^!\s+/
+    return true if line =~ /^.+:\d+:/
+    return true if line =~ /^Runaway argument\?/
+    return true if line =~ /^\s*\)/
+    return true if line =~ /^\s*\((?:\.[\\\/]|[a-zA-Z0-9_\-\.\/]+?\.(?:tex|sty|cls|aux|bbl|bib))/
+
+    false
+  end
+
+  def parse_package_warning(lines, i, file_stack)
+    l = lines[i]
+    return [nil, i + 1] if l.include?('multiply defined')
+
+    warn_block = [l.strip]
+    start_idx = i
+    i += 1
+    while i < lines.size && !diagnostic_boundary_line?(lines[i])
+      warn_block << lines[i].strip
       i += 1
     end
 
+    warn_text = warn_block.join(' ')
+    clean_text = warn_text.gsub(/\([a-zA-Z0-9_\-]+\)\s*/, '')
+    clean_text = clean_text.gsub(/line (\d+)\s+(\d+)\b/, 'line \1\2')
+    line_no = 0
+    line_str = ''
+    file_name = file_stack.last || "./#{@filename}"
+    if clean_text =~ /^([^\s:]+):(\d+):/
+      file_name = $1
+      line_no = $2.to_i
+      line_str = $2
+    elsif clean_text =~ /(?:at|on|in)?\s*(?:input\s+)?lines?\s*(\d+)/i
+      line_no = $1.to_i
+      line_str = $1
+    elsif clean_text =~ /:(\d+):/
+      line_no = $1.to_i
+      line_str = $1
+    end
+
+    formatted = format_diagnostic_line(line_str, warn_text, :yellow)
+    item = { type: :warn, file: file_name, line: line_no, line_str: line_str, text: warn_text, base_color: :yellow, formatted: formatted, index: start_idx }
+    [item, i]
+  end
+
+  def parse_box_warning(lines, i, file_stack, verbose)
+    l = lines[i]
+    start_idx = i
+    box_type = "#{$1} \\#{$2}" if l =~ /^(Overfull|Underfull) \\(hbox|vbox)/
+    box_type ||= 'Overfull \\hbox'
+    box_line = l.strip
+    color_m = box_line.start_with?('Overfull') ? :magenta : :cyan
+    i += 1
+    extra_lines = []
+    while i < lines.size && !diagnostic_boundary_line?(lines[i]) && lines[i] !~ /^l\.\d+/
+      extra_lines << lines[i].strip
+      i += 1
+    end
+
+    line_no = 0
+    line_str = ''
+    if box_line =~ /lines?\s+(\d+(?:--\d+)?)/i
+      line_str = $1
+      line_no = $1.split('--').first.to_i
+    end
+
+    file_name = file_stack.last || "./#{@filename}"
+    formatted = format_diagnostic_line(line_str, box_line, color_m)
+    if verbose && !extra_lines.empty?
+      formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : highlight_line_numbers(line, color_m) }.join("\n")
+    end
+
+    severity = extract_box_severity(box_line)
+    item = {
+      type: box_type, file: file_name, line: line_no, line_str: line_str,
+      text: box_line, base_color: color_m, extra_lines: extra_lines,
+      severity: severity, formatted: formatted, index: start_idx
+    }
+    [item, i]
+  end
+
+  def deduplicate_box_warnings(raw_warnings)
     filtered_warnings = []
     box_groups = {}
     raw_warnings.each do |w|
       if w[:type].is_a?(String) && w[:type] =~ /^(Overfull|Underfull)/ && !w[:line_str].empty?
-        key = [w[:type], w[:line_str]]
+        key = [w[:file], w[:type], w[:line_str]]
         box_groups[key] ||= []
         box_groups[key] << w
       else
@@ -962,13 +1091,44 @@ class LatexBuilder
     filtered_warnings
   end
 
+  def extract_warnings(content, verbose = false)
+    raw_warnings = []
+    seen_warnings = {}
+    lines = content.lines
+    file_stack = ["./#{@filename}"]
+    i = 0
+    while i < lines.size
+      l = lines[i]
+      track_log_file(l, file_stack)
+
+      if l =~ /^(LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/
+        item, next_i = parse_package_warning(lines, i, file_stack)
+        if item && !seen_warnings[item[:text]]
+          seen_warnings[item[:text]] = true
+          raw_warnings << item
+        end
+        i = next_i
+      elsif l =~ /^(Overfull|Underfull) \\(hbox|vbox)/
+        item, next_i = parse_box_warning(lines, i, file_stack, verbose)
+        raw_warnings << item if item
+        i = next_i
+      else
+        i += 1
+      end
+    end
+
+    deduplicate_box_warnings(raw_warnings)
+  end
+
   def extract_errors(content)
     errors = []
     clean_content = LaTeXUtils.filter_subcommand_noise(content)
     lines = clean_content.lines
+    file_stack = ["./#{@filename}"]
     i = 0
     while i < lines.size
       line = lines[i]
+      track_log_file(line, file_stack)
 
       if line =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i
         i += 1
@@ -976,11 +1136,14 @@ class LatexBuilder
       end
 
       is_err = false
-      if line =~ /^.+:\d+:\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use|.*error)/i ||
-         line =~ /^!\s+\S+/ ||
-         line =~ /^Runaway argument\?/ ||
-         line =~ /^Error:\s+/i ||
-         (line.include?('multiply defined') && line.include?('LaTeX Warning'))
+      err_file = nil
+      if line =~ /^([^\s:]+):(\d+):\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use|.*error)/i
+        is_err = true
+        err_file = $1
+      elsif line =~ /^!\s+\S+/ ||
+            line =~ /^Runaway argument\?/ ||
+            line =~ /^Error:\s+/i ||
+            (line.include?('multiply defined') && line.include?('LaTeX Warning'))
         is_err = true
       end
 
@@ -996,6 +1159,8 @@ class LatexBuilder
           break if curr =~ /^Runaway argument\?/
           break if curr =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/
           break if curr =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/
+          break if curr =~ /^\s*\)/
+          break if curr =~ /^\s*\((?:\.[\\\/]|[a-zA-Z0-9_\-\.\/]+?\.(?:tex|sty|cls|aux|bbl|bib))/
 
           err_block << curr
           i += 1
@@ -1006,7 +1171,8 @@ class LatexBuilder
         err_text = err_block.join("\n")
         line_no = extract_error_line(err_text)
         formatted = format_error_block(err_block, line_no)
-        errors << { line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''), text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: start_idx }
+        file_name = err_file || file_stack.last || "./#{@filename}"
+        errors << { file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''), text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: start_idx }
       else
         i += 1
       end
@@ -1023,35 +1189,42 @@ class LatexBuilder
   def print_diagnostics_body(warnings, errors, fallback_lines: [])
     overfull_warnings, other_warnings = warnings.partition { |w| overfull_hbox?(w) }
 
-    sorted_other = other_warnings.sort_by { |w| [w[:line] || 0, w[:index] || 0] }
+    sorted_other = other_warnings.sort_by { |w| [w[:file] || "./#{@filename}", w[:line] || 0, w[:index] || 0] }
     sorted_overfull = overfull_warnings.sort_by do |w|
       sev = w[:severity] || extract_box_severity(w[:text].to_s)
-      [sev.to_f, w[:line] || 0, w[:index] || 0]
+      [w[:file] || "./#{@filename}", sev.to_f, w[:line] || 0, w[:index] || 0]
     end
-    sorted_errors = errors.sort_by { |e| [e[:line] || 0, e[:index] || 0] }
+    sorted_errors = errors.sort_by { |e| [e[:file] || "./#{@filename}", e[:line] || 0, e[:index] || 0] }
 
     all_items = sorted_other + sorted_overfull + sorted_errors
     max_width = all_items.map { |item| item[:line_str].to_s.length }.max || 0
 
-    blocks = []
-
-    unless sorted_other.empty?
-      blocks << sorted_other.map { |w| render_diagnostic_item(w, width: max_width).rstrip }.reject(&:empty?).join("\n")
+    all_sorted = all_items.sort_by do |item|
+      [item[:file] || "./#{@filename}", item[:line] || 0, item[:index] || 0]
     end
 
-    unless sorted_overfull.empty?
-      blocks << sorted_overfull.map { |w| render_diagnostic_item(w, width: max_width).rstrip }.reject(&:empty?).join("\n")
+    current_file = nil
+    all_sorted.each do |item|
+      item_file = item[:file] || "./#{@filename}"
+      if item_file != current_file
+        puts ')' if current_file
+        puts "(#{item_file}"
+        current_file = item_file
+      end
+      rendered = render_diagnostic_item(item, width: max_width).rstrip
+      puts rendered unless rendered.empty?
     end
 
-    if sorted_errors.empty? && !fallback_lines.empty?
-      clean_fallback = fallback_lines.map(&:rstrip).reject(&:empty?)
-      clean_fallback = clean_fallback.map { |l| @options[:emacs] ? l : highlight_line_numbers(l, :red, bright: true) }
-      blocks << clean_fallback.join("\n") unless clean_fallback.empty?
-    elsif !sorted_errors.empty?
-      blocks << sorted_errors.map { |e| render_diagnostic_item(e, width: max_width).rstrip }.reject(&:empty?).join("\n")
+    if all_sorted.empty? && !fallback_lines.empty?
+      puts "(./#{@filename}"
+      fallback_lines.each do |l|
+        next if l.strip.empty?
+        puts @options[:emacs] ? l.strip : highlight_line_numbers(l.strip, :red, bright: true)
+      end
+      puts ')'
+    elsif current_file
+      puts ')'
     end
-
-    puts blocks.join("\n\n") unless blocks.empty?
 
     [sorted_other.size + sorted_overfull.size, sorted_errors.size]
   end
@@ -1063,7 +1236,6 @@ class LatexBuilder
     puts Rainbow("\n===============================================================").red.bright
     puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
     puts Rainbow('===============================================================').red.bright
-    puts "(./#{@filename}"
 
     warnings = extract_warnings(content, @options[:verbose])
     errors = extract_errors(content)
@@ -1071,7 +1243,6 @@ class LatexBuilder
     fallback = errors.empty? ? content.lines.last(15) : []
     num_warnings, num_errors = print_diagnostics_body(warnings, errors, fallback_lines: fallback)
 
-    puts ')'
     puts Rainbow('===============================================================').red.bright
     puts "See #{loga} for full error details."
     errors = [num_errors, count_latex_errors(raw, 1)].max
@@ -1099,25 +1270,15 @@ class LatexBuilder
     puts "  Updated target: #{dst}" if update_on_diff
   end
 
-  def analyze_output
-    pdferr = find_last_latex_log
-
-    if @options[:score]
-      output_score(pdferr, 0)
-      return
-    end
-
-    new_content = LaTeXUtils.safe_read(pdferr)
-
+  def collect_diagnostic_counts(new_content)
     cnt_overfull = new_content.scan(/overfull/i).size
     cnt_underfull = new_content.scan(/underfull/i).size
-
     cnt_bibtex = 0
     cnt_bibtexa = 0
     cnt_bibtexb = 0
     cnt_biberr = 0
 
-    if File.exist?(@biberr)
+    if @biberr && File.exist?(@biberr)
       bib_content = LaTeXUtils.safe_read(@biberr)
       cnt_bibtex = bib_content.scan(/Warning--/i).size
       cnt_bibtexa = bib_content.scan(/Repeated entry---/i).size
@@ -1128,7 +1289,6 @@ class LatexBuilder
     cnt_undef_cite = 0
     cnt_undef_ref = 0
     cnt_mult_def = 0
-
     new_content.each_line do |line|
       cnt_undef_cite += 1 if line =~ /citation/i && line =~ /undefined/i
       cnt_undef_ref += 1 if line =~ /reference/i && line =~ /undefined/i && line =~ /page/i
@@ -1136,47 +1296,65 @@ class LatexBuilder
     end
 
     cbib = cnt_bibtex + cnt_bibtexa + cnt_bibtexb + cnt_biberr
-    errs = cbib + cnt_undef_cite + cnt_undef_ref + cnt_mult_def + cnt_overfull + cnt_underfull
+    {
+      overfull: cnt_overfull, underfull: cnt_underfull,
+      cbib: cbib, biberr: cnt_biberr,
+      undef_cite: cnt_undef_cite, undef_ref: cnt_undef_ref, mult_def: cnt_mult_def,
+      bib_warns: cnt_bibtex + cnt_bibtexa + cnt_bibtexb
+    }
+  end
 
-    errors = count_latex_errors(new_content, 0) + cnt_biberr
-    warnings = count_latex_warnings(new_content) + cnt_bibtex + cnt_bibtexa + cnt_bibtexb
+  def print_diagnostic_banner(counts)
+    puts '----------------------------------------------------------'
+    overfull_s = counts[:overfull] > 0 ? Rainbow("Overfull: #{counts[:overfull]}").magenta : "Overfull: #{counts[:overfull]}"
+    underfull_s = counts[:underfull] > 0 ? Rainbow("Underfull: #{counts[:underfull]}").cyan : "Underfull: #{counts[:underfull]}"
+    bib_s = counts[:cbib] > 0 ? Rainbow("Bibtex warns/errors: #{counts[:cbib]}").yellow.bright : "Bibtex warns/errors: #{counts[:cbib]}"
+    cite_s = counts[:undef_cite] > 0 ? Rainbow("Undef cite: #{counts[:undef_cite]}").red.bright : "Undef cite: #{counts[:undef_cite]}"
+    refs_s = counts[:undef_ref] > 0 ? Rainbow("Undef refs: #{counts[:undef_ref]}").red.bright : "Undef refs: #{counts[:undef_ref]}"
+    mult_s = counts[:mult_def] > 0 ? Rainbow("Lab multi-def: #{counts[:mult_def]}").red.bright : "Lab multi-def: #{counts[:mult_def]}"
+    puts "#{overfull_s} | #{underfull_s} | #{bib_s} | #{cite_s} | #{refs_s} | #{mult_s}"
+    puts '----------------------------------------------------------'
+  end
 
-    if errs > 0 || errors > 0
-      puts '----------------------------------------------------------'
-      overfull_s = cnt_overfull > 0 ? Rainbow("Overfull: #{cnt_overfull}").magenta : "Overfull: #{cnt_overfull}"
-      underfull_s = cnt_underfull > 0 ? Rainbow("Underfull: #{cnt_underfull}").cyan : "Underfull: #{cnt_underfull}"
-      bib_s = cbib > 0 ? Rainbow("Bibtex warns/errors: #{cbib}").yellow.bright : "Bibtex warns/errors: #{cbib}"
-      cite_s = cnt_undef_cite > 0 ? Rainbow("Undef cite: #{cnt_undef_cite}").red.bright : "Undef cite: #{cnt_undef_cite}"
-      refs_s = cnt_undef_ref > 0 ? Rainbow("Undef refs: #{cnt_undef_ref}").red.bright : "Undef refs: #{cnt_undef_ref}"
-      mult_s = cnt_mult_def > 0 ? Rainbow("Lab multi-def: #{cnt_mult_def}").red.bright : "Lab multi-def: #{cnt_mult_def}"
-      print "#{overfull_s} | #{underfull_s} | #{bib_s} | #{cite_s} | #{refs_s} | #{mult_s}\n"
-      puts '----------------------------------------------------------'
+  def append_bib_diagnostics!(warn_items, err_items)
+    return unless @biberr && File.exist?(@biberr)
 
-      puts "(./#{@filename}"
+    bib_content = LaTeXUtils.safe_read(@biberr)
+    bib_content.each_line.with_index do |bl, bidx|
+      if bl =~ /Repeated entry---/i || bl =~ /Warning--/i || bl =~ /WARN - /
+        line_str = bl =~ /line\s+(\d+)/i ? $1 : ''
+        formatted = format_diagnostic_line(line_str, bl.strip, :yellow)
+        warn_items << { file: './bibliography', line: line_str.to_i, line_str: line_str, text: bl.strip, formatted: formatted, index: 100000 + bidx }
+      elsif bl =~ /couldn't open/i || bl =~ /error/i
+        formatted = @options[:emacs] ? bl.strip : highlight_line_numbers(bl.strip, :red, bright: true)
+        err_items << { file: './bibliography', line: 0, text: bl.strip, formatted: formatted, index: 100000 + bidx }
+      end
+    end
+  end
 
+  def analyze_output
+    pdferr = find_last_latex_log
+    if @options[:score]
+      output_score(pdferr, 0)
+      return
+    end
+
+    new_content = LaTeXUtils.safe_read(pdferr)
+    counts = collect_diagnostic_counts(new_content)
+    total_diag = counts[:cbib] + counts[:undef_cite] + counts[:undef_ref] + counts[:mult_def] + counts[:overfull] + counts[:underfull]
+
+    errors = count_latex_errors(new_content, 0) + counts[:biberr]
+    warnings = count_latex_warnings(new_content) + counts[:bib_warns]
+
+    if total_diag > 0 || errors > 0
+      print_diagnostic_banner(counts)
       clean_content = LaTeXUtils.filter_subcommand_noise(new_content)
       warn_items = extract_warnings(clean_content, @options[:verbose])
       err_items = extract_errors(clean_content)
 
-      if cbib > 0 && File.exist?(@biberr)
-        bib_content = LaTeXUtils.safe_read(@biberr)
-        bib_content.each_line.with_index do |bl, bidx|
-          if bl =~ /Repeated entry---/i || bl =~ /Warning--/i || bl =~ /WARN - /
-            line_str = ''
-            line_str = $1 if bl =~ /line\s+(\d+)/i
-            formatted = format_diagnostic_line(line_str, bl.strip, :yellow)
-            warn_items << { line: line_str.to_i, line_str: line_str, text: bl.strip, formatted: formatted, index: 100000 + bidx }
-          elsif bl =~ /couldn't open/i || bl =~ /error/i
-            formatted = @options[:emacs] ? bl.strip : highlight_line_numbers(bl.strip, :red, bright: true)
-            err_items << { line: 0, text: bl.strip, formatted: formatted, index: 100000 + bidx }
-          end
-        end
-      end
+      append_bib_diagnostics!(warn_items, err_items) if counts[:cbib] > 0
 
       num_warnings, num_errors = print_diagnostics_body(warn_items, err_items)
-
-      puts ')'
-
       warnings = num_warnings
       errors = [num_errors, errors].max
     end
@@ -1187,6 +1365,11 @@ class LatexBuilder
     warnings_str = warnings > 0 ? Rainbow("Warnings: #{warnings}").yellow.bright : Rainbow("Warnings: #{warnings}").green.bright
     puts ''
     puts "#{errors_str}, #{warnings_str}"
+
+    if @options[:werror] && warnings > 0
+      puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
+      exit 1
+    end
   end
 
   def find_last_latex_log
@@ -1291,7 +1474,9 @@ options = {
   color: nil,
   no_env: is_env_free,
   verbose: false,
-  emacs: false
+  emacs: false,
+  werror: false,
+  deps: false
 }
 
 ARGV.map! do |arg|
@@ -1301,6 +1486,8 @@ ARGV.map! do |arg|
   when '-env-free' then '--env-free'
   when '-envfree' then '--envfree'
   when '-emacs' then '--emacs'
+  when '-deps' then '--deps'
+  when '-werror', '-Werror' then '--werror'
   else arg
   end
 end
@@ -1396,6 +1583,14 @@ parser = OptionParser.new do |opts|
 
   opts.on('-v', '--verbose', 'Verbose output (e.g. show box text snippets)') do
     options[:verbose] = true
+  end
+
+  opts.on('-W', '--werror', '[-Werror] Treat compilation warnings as fatal errors and exit with non-zero code') do
+    options[:werror] = true
+  end
+
+  opts.on('-M', '--deps', 'Print Makefile dependency rule for the document and exit') do
+    options[:deps] = true
   end
 
   opts.on('-V', '--version', 'Show version') do

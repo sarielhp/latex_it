@@ -22,6 +22,8 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout, 'Usage: l [options]'
     assert_includes stdout, '--engine'
     assert_includes stdout, '--fast'
+    assert_includes stdout, '-Werror'
+    assert_includes stdout, '--deps'
   end
 
   def test_pdflatex_rejected
@@ -71,6 +73,28 @@ class TestLatexItCLI < Minitest::Test
         refute File.exist?(File.join(dir, 'junk'))
         refute File.exist?(File.join(dir, 'test.aux'))
         refute File.exist?(File.join(dir, 'test.log'))
+      end
+    end
+  end
+
+  def test_deps_flag_cli
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\begin{document}\\end{document}\n")
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      state = {
+        'target' => 'paper.pdf',
+        'sources' => { 'paper.tex' => {}, 'extra.tex' => {} }
+      }
+      File.write(File.join(dir, 'junk', '.build_state.json'), JSON.generate(state))
+
+      Dir.chdir(dir) do
+        stdout, status = Open3.capture2(BIN, '-M', 'paper.tex')
+        assert status.success?
+        assert_equal "paper.pdf: extra.tex paper.tex\n", stdout
+
+        stdout_long, status_long = Open3.capture2(BIN, '--deps', 'paper.tex')
+        assert status_long.success?
+        assert_equal "paper.pdf: extra.tex paper.tex\n", stdout_long
       end
     end
   end
@@ -149,5 +173,167 @@ class TestLatexItCLI < Minitest::Test
     assert_equal 10, f_range.index(':')
     assert_equal 10, f_short.index(':')
     assert_equal 10, f_empty.index(':')
+  end
+
+  def test_extract_fls_dependencies
+    Dir.mktmpdir do |dir|
+      fls_content = <<~FLS
+        PWD #{dir}
+        INPUT /usr/share/texmf/base.cls
+        INPUT #{dir}/main.tex
+        INPUT #{dir}/sections/intro.tex
+        INPUT #{dir}/junk/main.aux
+        OUTPUT #{dir}/junk/main.pdf
+      FLS
+
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      FileUtils.mkdir_p(File.join(dir, 'sections'))
+      File.write(File.join(dir, 'main.tex'), 'test')
+      File.write(File.join(dir, 'sections', 'intro.tex'), 'intro')
+      fls_path = File.join(dir, 'junk', 'main.fls')
+      File.write(fls_path, fls_content)
+
+      builder = LatexBuilder.new('main.tex', {})
+      Dir.chdir(dir) do
+        deps = builder.send(:extract_fls_dependencies, fls_path)
+        assert_includes deps, 'main.tex'
+        assert_includes deps, 'sections/intro.tex'
+        refute_includes deps, 'junk/main.aux'
+        refute deps.any? { |d| d.include?('/usr/share') }
+      end
+    end
+  end
+
+  def test_aux_has_cross_references
+    builder = LatexBuilder.new('main.tex', {})
+    refute builder.send(:aux_has_cross_references?, "\\relax\n\\@abspage@last{1}\n")
+    assert builder.send(:aux_has_cross_references?, "\\newlabel{sec:one}{{1}{1}}\n")
+    assert builder.send(:aux_has_cross_references?, "\\citation{knuth1984}\n")
+    assert builder.send(:aux_has_cross_references?, "\\@writefile{toc}{\\contentsline {section}}\n")
+  end
+
+  def test_targets_up_to_date_logic
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), 'content')
+      File.write(File.join(dir, 'paper.pdf'), 'mock pdf')
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+
+      sha = Digest::SHA256.file(File.join(dir, 'paper.tex')).hexdigest
+      mtime = File.mtime(File.join(dir, 'paper.tex')).to_i
+      state = {
+        'target' => 'paper.pdf',
+        'sources' => { 'paper.tex' => { 'mtime' => mtime, 'sha' => sha } }
+      }
+      File.write(File.join(dir, 'junk', '.build_state.json'), JSON.generate(state))
+
+      builder = LatexBuilder.new('paper.tex', {})
+      Dir.chdir(dir) do
+        assert builder.send(:targets_up_to_date?), 'Expected build to be up to date'
+
+        # Test single_pass forces rebuild
+        single_builder = LatexBuilder.new('paper.tex', single_pass: true)
+        refute single_builder.send(:targets_up_to_date?)
+
+        # Test clean forces rebuild
+        clean_builder = LatexBuilder.new('paper.tex', clean: true)
+        refute clean_builder.send(:targets_up_to_date?)
+
+        # Test modified source triggers rebuild
+        sleep 0.05
+        File.write(File.join(dir, 'paper.tex'), 'modified content')
+        refute builder.send(:targets_up_to_date?), 'Expected modified file to trigger rebuild'
+      end
+    end
+  end
+
+  def test_werror_forces_rebuild
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), 'content')
+      File.write(File.join(dir, 'paper.pdf'), 'mock pdf')
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      sha = Digest::SHA256.file(File.join(dir, 'paper.tex')).hexdigest
+      mtime = File.mtime(File.join(dir, 'paper.tex')).to_i
+      state = {
+        'target' => 'paper.pdf',
+        'sources' => { 'paper.tex' => { 'mtime' => mtime, 'sha' => sha } }
+      }
+      File.write(File.join(dir, 'junk', '.build_state.json'), JSON.generate(state))
+
+      builder = LatexBuilder.new('paper.tex', werror: true)
+      Dir.chdir(dir) do
+        refute builder.send(:targets_up_to_date?), 'Expected werror to force rebuild'
+      end
+    end
+  end
+
+  def test_export_dependencies
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), 'content')
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      state = {
+        'target' => 'paper.pdf',
+        'sources' => { 'paper.tex' => {}, 'figures/fig1.pdf' => {} }
+      }
+      File.write(File.join(dir, 'junk', '.build_state.json'), JSON.generate(state))
+
+      builder = LatexBuilder.new('paper.tex', deps: true)
+      Dir.chdir(dir) do
+        out, = capture_io { builder.send(:export_dependencies) }
+        assert_equal "paper.pdf: figures/fig1.pdf paper.tex\n", out
+      end
+    end
+  end
+
+  def test_multi_file_diagnostics
+    log_content = <<~LOG
+      This is XeTeX, Version 3.141592653-2.6-0.999996
+      (./main.tex
+      (./chapters/ch1.tex
+      LaTeX Warning: Reference `sec:unknown' on page 1 undefined on input line 42.
+      )
+      (./chapters/ch2.tex
+      Overfull \\hbox (15.0pt too wide) in paragraph at lines 10--15
+      )
+      ! LaTeX Error: File `missing.sty' not found.
+      )
+    LOG
+
+    builder = LatexBuilder.new('main.tex', {})
+    warnings = builder.send(:extract_warnings, log_content)
+    errors = builder.send(:extract_errors, log_content)
+
+    ch1_warn = warnings.find { |w| w[:text].include?('sec:unknown') }
+    assert ch1_warn
+    assert_equal './chapters/ch1.tex', ch1_warn[:file]
+    assert_equal 42, ch1_warn[:line]
+
+    ch2_warn = warnings.find { |w| w[:text].include?('Overfull') }
+    assert ch2_warn
+    assert_equal './chapters/ch2.tex', ch2_warn[:file]
+    assert_equal 10, ch2_warn[:line]
+
+    assert_equal 1, errors.size
+    assert_equal './main.tex', errors.first[:file]
+
+    out, = capture_io { builder.send(:print_diagnostics_body, warnings, errors) }
+    assert_includes out, '(./chapters/ch1.tex'
+    assert_includes out, '(./chapters/ch2.tex'
+  end
+
+  def test_werror_aborts_on_warnings
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_content = <<~LOG
+        LaTeX Warning: Reference `sec:foo' on page 1 undefined on input line 10.
+      LOG
+      File.write(File.join(dir, 'junk', 'err_xelatex'), log_content)
+
+      builder = LatexBuilder.new('paper.tex', werror: true)
+      Dir.chdir(dir) do
+        assert_raises(SystemExit) do
+          capture_io { builder.send(:analyze_output) }
+        end
+      end
+    end
   end
 end

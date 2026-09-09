@@ -33,13 +33,17 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
 - Copies local `.bib` files and style dependencies (`styles/`) into `junk/` before invocation.
 - Validates `.bbl` output: preserves `.bbl.bak` backups and only updates root `.bbl` if entries (`\bibitem` or `\entry`) were generated.
 
-### 5. Flexible Compilation Modes
-- **Standard Mode (Default: 3 Passes)**:
-  `Pass 1 (LaTeX) -> Bibliography (Biber/BibTeX) -> Pass 2 (LaTeX) -> Pass 3 (LaTeX)`
-- **Fast Incremental Mode (`--fast` / `lw`)**:
-  Computes checksums on `.aux` files, checks `.bib` file timestamps, and scans logs for rerun requests. Skips bibliography and extra LaTeX passes unless changes require them.
+### 5. Intelligent Convergence & Compilation Modes
+- **Intelligent Pass Model (Default)**:
+  Dynamically tracks source dependencies (via `-recorder` / `.fls`) and checksums to eliminate redundant compiler passes:
+  - **Zero Passes**: If all source files are unchanged and targets are up to date, exits immediately in milliseconds (`All targets are up-to-date. (Use 'l -u' to force rebuild)`).
+  - **1 Pass**: For simple documents or edits that do not alter cross-references or citations.
+  - **Pre-primary Bibliography**: Runs BibTeX/Biber before LaTeX if only `.bib` changed, updating the document in a single LaTeX pass.
+  - **2–3 Passes**: Only executed when `.aux` changes, new citations are introduced, or rerun requests appear in compiler logs.
 - **Single-Pass Mode (`-u` / `--single-pass` / `--quick`)**:
-  Runs exactly one LaTeX pass without bibliography or extra iterations.
+  Forces exactly one LaTeX pass without bibliography or extra iterations (also useful to force a rebuild).
+- **Fast Incremental Mode (`--fast` / `lw`)**:
+  Explicit alias ensuring incremental caching behavior.
 
 ### 6. PDF Text Diff Protection (`-d` / `--diff`)
 - When enabled, runs `pdftotext -layout` to compare newly compiled PDF text against the existing target PDF.
@@ -103,6 +107,8 @@ Compilation Options:
                                      [-no-env, -env-free] Reset environment variables used by LaTeX/BibTeX/Biber
         --emacs                      Format warnings/errors for Emacs AUCTeX integration (suppress line/W: prefixes)
     -v, --verbose                    Verbose output (e.g. show box text snippets)
+    -W, --werror                     [-Werror] Treat compilation warnings as fatal errors and exit with non-zero code
+    -M, --deps                       Print Makefile dependency rule for the document and exit
     -V, --version                    Show version
     -h, --help                       Show this help message
 ```

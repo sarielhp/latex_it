@@ -976,13 +976,19 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_brace_checker_reproduces_occupancy_reviewed_error
-    path = '/home/sariel/papers/teach/26/fa26_rand_alg/notes/07_occupancy/occupancy_reviewed.tex'
-    skip 'occupancy_reviewed.tex fixture not available' unless File.file?(path)
-
-    errs = LaTeXBraceChecker.check_file(path)
+    snippet = <<~LATEX
+      \\begin{equation*}
+          \\ExCond{Y_{i}}{Y_{i-1}}
+          \\LEQ
+          Y_{i-1} (1 -\\tfrac{1}{e})
+          \\LT
+          \\frac{Y_{i-1}{2}.
+      \\end{equation*}
+    LATEX
+    errs = LaTeXBraceChecker.new('occupancy_reviewed.tex', snippet).scan
     assert_equal 1, errs.size
     err = errs.first
-    assert_equal 385, err[:line]
+    assert_equal 6, err[:line]
     assert_equal 10, err[:col]
     assert_includes err[:text], "inside environment 'equation*'"
     assert_includes err[:text], '\\frac{Y_{i-1}{2}.'

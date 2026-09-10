@@ -6,7 +6,7 @@
 # Robust, high-performance LaTeX compilation manager with:
 # - Automatic main file detection (.mainfile or directory scan)
 # - Isolated junk directory output (`junk/`)
-# - Multi-engine support (xelatex [default], lualatex; pdflatex rejected)
+# - Multi-engine support (xelatex [default], lualatex, pdflatex)
 # - BibTeX and Biber bibliography generation
 # - Single-pass compilation mode (-u)
 # - PDF text diff-based update mode (-d / --diff)
@@ -55,6 +55,7 @@ rescue LoadError
 end
 VERSION_FILE = File.expand_path('VERSION', __dir__)
 VERSION = (File.file?(VERSION_FILE) ? File.read(VERSION_FILE).strip : '0.9.6')
+LATEX_IT_EXECUTABLE = File.expand_path(__FILE__).freeze
 
 module LaTeXConfig
   CONFIG_DIR = File.expand_path('~/.config/latex_it')
@@ -71,7 +72,7 @@ module LaTeXConfig
       // CLI flags always override settings defined here.
       // =========================================================================
 
-      // LaTeX engine: "xelatex" (default) or "lualatex"
+      // LaTeX engine: "xelatex" (default), "lualatex", or "pdflatex"
       "engine": "xelatex",
 
       // Fast incremental mode: reuse .aux and skip redundant passes
@@ -136,6 +137,9 @@ module LaTeXConfig
 
         // Verify package in isolated /tmp sandbox before completing
         "verify": true,
+
+        // Render and compare every PDF page during arXiv verification
+        "visual_verify": true,
 
         // Default comments string for submission (e.g. page count, conference details)
         "comments": null
@@ -243,26 +247,6 @@ module LaTeXConfig
 end
 
 module LaTeXUtils
-  PDFLATEX_ERROR = 'PDFLatex by now is outdated. It does not support utf8, and should probably be avoided.'
-
-  def self.pdflatex?(name)
-    return false if name.nil?
-
-    eng = name.to_s.strip.downcase
-    first_token = eng.split.first || ''
-    base = File.basename(first_token, '.*')
-    %w[pdflatex pdf pdftex].include?(base) || eng == 'pdflatex' || eng.start_with?('pdflatex')
-  end
-
-  def self.check_engine!(name)
-    return unless name
-
-    if pdflatex?(name)
-      warn PDFLATEX_ERROR
-      exit 1
-    end
-  end
-
   def self.normalize_engine(engine)
     return 'xelatex' if engine.nil? || engine.to_s.strip.empty?
 
@@ -488,6 +472,16 @@ module LaTeXUtils
       TEXPOOL
       INDEXSTYLE
       BIBTEX_PREFIX
+      TEXMFHOME
+      TEXMFVAR
+      TEXMFCONFIG
+      TEXMFLOCAL
+      TEXMFSYSCONFIG
+      TEXMFSYSVAR
+      TEXMFCNF
+      TEXMF
+      TEXMFDBS
+      TEXMFCACHE
     ]
     vars.each { |var| ENV.delete(var) }
     ENV.keys.each do |key|
@@ -556,6 +550,11 @@ class LatexBuilder
       fix: 'Harmless recap; individual items are already reported above.'
     }
   }.freeze
+  CACHE_ENV_KEYS = %w[
+    LATEXOPTS LATEXOPTIONS TEXINPUTS PDFTEXINPUTS XETEXINPUTS LUATEXINPUTS
+    LUAINPUTS BIBINPUTS BSTINPUTS TEXMFHOME TEXMFCONFIG TEXMFVAR TEXMFCNF
+    TEXMF TEXMFDBS TEXMFCACHE
+  ].freeze
 
   def initialize(target, options)
     @options = options
@@ -572,22 +571,21 @@ class LatexBuilder
   end
 
   def run!
+    build_dir = File.expand_path(@bdir)
+    puts "      cd #{build_dir}" if !@options[:score] && build_dir != File.expand_path('.')
+    Dir.chdir(build_dir) { run_in_current_directory! }
+  end
+
+  def run_in_current_directory!
     if @options[:score]
       @orig_stdout = $stdout
       $stdout = File.open(File::NULL, 'w')
       begin
-        if @bdir != '.'
-          Dir.chdir(@bdir) { compile_target }
-        else
-          compile_target
-        end
+        compile_target
       ensure
         $stdout.close rescue nil
         $stdout = @orig_stdout
       end
-    elsif @bdir != '.'
-      puts "      cd #{@bdir}"
-      Dir.chdir(@bdir) { compile_target }
     else
       compile_target
     end
@@ -603,7 +601,7 @@ class LatexBuilder
 
     if @options[:deps]
       export_dependencies
-      return
+      return true
     end
 
     with_lock do
@@ -613,13 +611,14 @@ class LatexBuilder
 
       if targets_up_to_date?
         puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -u' to force rebuild)"
-        return
+        return true
       end
 
+      FileUtils.rm_f('junk/.build_state.json')
       junk_dir_create
       total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
 
-      run_convergence_loop
+      return false unless run_convergence_loop
       puts ''
 
       # Update output files
@@ -627,19 +626,20 @@ class LatexBuilder
       update_target_file("junk/#{@bfilename}.bbl", "#{@bfilename}.bbl") if LaTeXUtils.bbl_has_entries?("junk/#{@bfilename}.bbl")
       update_target_file("junk/#{@bfilename}.synctex.gz", "#{@bfilename}.synctex.gz")
 
-      save_build_state!
-
       if @options[:time]
         total_t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         printf("Total Build Time: %s seconds\n", Rainbow(format('%.2f', total_t1 - total_t0)).green.bright)
       end
 
       analyze_output
+      save_build_state!
     end
+    true
   end
 
   def targets_up_to_date?
     return false if @options[:clean] || @options[:single_pass] || @options[:score] || @options[:werror]
+    return false if @options[:bib] == true
 
     target_pdf = "#{@bfilename}.pdf"
     return false unless File.exist?(target_pdf) && File.size(target_pdf) > 0
@@ -649,6 +649,7 @@ class LatexBuilder
 
     state = JSON.parse(File.read(state_file)) rescue nil
     return false unless state.is_a?(Hash) && state['target'] == target_pdf
+    return false unless state['signature'] == build_signature
 
     sources = state['sources']
     return false unless sources.is_a?(Hash) && !sources.empty?
@@ -660,19 +661,16 @@ class LatexBuilder
     sources.all? do |path, meta|
       next false unless File.exist?(path)
 
-      if meta['mtime'] && File.mtime(path).to_i == meta['mtime']
-        true
-      else
-        meta['sha'] && Digest::SHA256.file(path).hexdigest == meta['sha']
-      end
+      meta['sha'] && Digest::SHA256.file(path).hexdigest == meta['sha']
     end
   end
 
   def run_convergence_loop
+    @cacheable_build = true
     if @options[:single_pass]
       print "      #{Rainbow(@engine_name).bright}"
-      run_latex_pass('_1')
-      return
+      @cacheable_build = false
+      return run_latex_pass('_1')
     end
 
     max_passes = @options[:passes]
@@ -682,7 +680,7 @@ class LatexBuilder
     bib_tool = detect_bib_tool
     if bib_tool && bib_files_newer_than_bbl?
       print "      #{Rainbow(bib_tool).bright}"
-      run_bib_pass(bib_tool)
+      return false unless run_bib_pass(bib_tool)
       bib_ran = true
     end
 
@@ -692,20 +690,25 @@ class LatexBuilder
       print "#{prefix}#{Rainbow(@engine_name).bright} (#{pass})"
 
       aux_before = compute_aux_hash
-      run_latex_pass("_#{pass}")
+      return false unless run_latex_pass("_#{pass}")
 
-      break if pass >= max_passes
+      rerun_needed = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before)
+      if pass >= max_passes
+        @cacheable_build = false if rerun_needed
+        break
+      end
 
       bib_tool ||= detect_bib_tool
       if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}")
         print ", #{Rainbow(bib_tool).bright}"
-        run_bib_pass(bib_tool)
+        return false unless run_bib_pass(bib_tool)
         bib_ran = true
         next
       end
 
-      break unless needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before)
+      break unless rerun_needed
     end
+    true
   end
 
   def bib_files_newer_than_bbl?
@@ -743,6 +746,7 @@ class LatexBuilder
   end
 
   def save_build_state!
+    return if @cacheable_build == false
     return unless File.exist?("junk/#{@bfilename}.pdf") && File.size("junk/#{@bfilename}.pdf") > 0
 
     fls_path = "junk/#{@bfilename}.fls"
@@ -764,6 +768,7 @@ class LatexBuilder
     state = {
       'target' => "#{@bfilename}.pdf",
       'engine' => @engine_name,
+      'signature' => build_signature,
       'saved_at' => Time.now.to_i,
       'sources' => sources
     }
@@ -771,6 +776,19 @@ class LatexBuilder
     File.write('junk/.build_state.json', JSON.generate(state))
   rescue StandardError => e
     warn "Warning: Could not save build state: #{e.message}" if @options[:verbose]
+  end
+
+  def build_signature
+    values = CACHE_ENV_KEYS.to_h { |key| [key, ENV[key].to_s] }
+    payload = {
+      engine: @engine_name,
+      bib: @options[:bib],
+      passes: @options[:passes],
+      single_pass: @options[:single_pass] == true,
+      no_env: @options[:no_env] == true,
+      environment: values
+    }
+    Digest::SHA256.hexdigest(JSON.generate(payload))
   end
 
   def export_dependencies
@@ -789,11 +807,7 @@ class LatexBuilder
         setup_environment
         junk_dir_create
         run_latex_pass('_1')
-        save_build_state!
-      end
-      if File.exist?('junk/.build_state.json')
-        state = JSON.parse(File.read('junk/.build_state.json')) rescue nil
-        deps = state['sources'].keys if state.is_a?(Hash) && state['sources'].is_a?(Hash)
+        deps = extract_fls_dependencies("junk/#{@bfilename}.fls")
       end
     end
 
@@ -835,10 +849,7 @@ class LatexBuilder
                        ENV['LATEX_ENGINE'] ||
                        'xelatex'
 
-    LaTeXUtils.check_engine!(candidate_engine)
-
     @engine_name = LaTeXUtils.normalize_engine(candidate_engine)
-    LaTeXUtils.check_engine!(@engine_name)
     LaTeXUtils.check_program(@engine_name)
 
     @latex_flags = ['-interaction=nonstopmode', '-synctex=1', '-no-mktex=tfm', '-recorder', '-output-directory=junk', '-file-line-error']
@@ -935,6 +946,7 @@ class LatexBuilder
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
     end
+    status.success?
   end
 
   def detect_bib_tool
@@ -999,44 +1011,74 @@ class LatexBuilder
   def run_bib_pass(tool)
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     fnbbl = "junk/#{@bfilename}.bbl"
-    fnbblbak = "junk/#{@bfilename}.bbl.bak"
-
-    Dir['*.bib'].each { |b| FileUtils.cp(b, 'junk/') }
-
-    if tool == :biber
-      biber_out, = Dir.chdir('junk') do
-        Open3.capture2e('biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename)
-      end
-      File.write(@biberr, biber_out)
-      Dir['junk/*.bbl'].each { |b| FileUtils.cp(b, '.') if LaTeXUtils.bbl_has_entries?(b) }
-      FileUtils.cp(fnbbl, fnbblbak) if File.exist?(fnbbl) && File.size(fnbbl) > 0
-    elsif tool == :bibtex
-      bib_out, = Dir.chdir('junk') do
-        FileUtils.mkdir_p('styles')
-        Dir['../styles/*'].each do |s|
-          if File.directory?(s)
-            FileUtils.cp_r(s, 'styles/')
-          else
-            FileUtils.cp(s, 'styles/')
-          end
-        end
-        Open3.capture2e('bibtex', @bfilename)
-      end
-
-      File.write(@biberr, bib_out)
-      Dir['junk/*.bbl'].each { |b| FileUtils.cp(b, '.') if LaTeXUtils.bbl_has_entries?(b) }
-      FileUtils.cp(fnbbl, fnbblbak) if File.exist?(fnbbl) && File.size(fnbbl) > 0
-
-      bbl_content = LaTeXUtils.safe_read(fnbbl)
-      bbl = bbl_content.scan(/\\bibitem/).size
-      bblx = bbl_content.scan(/biblatex/i).size
-
-      puts "\nEmpty bibliography." if bbl == 0 && bblx == 0
+    root_bbl = "#{@bfilename}.bbl"
+    previous = bibliography_source(fnbbl, root_bbl)
+    preserve_bibliography_backup(previous, root_bbl)
+    FileUtils.rm_f(fnbbl)
+    begin
+      bib_out, status = execute_bibliography(tool)
+    rescue Errno::ENOENT => e
+      File.write(@biberr, e.message)
+      restore_bibliography(fnbbl, previous)
+      warn "\nBibliography tool unavailable: #{e.message}"
+      return false
     end
+    File.write(@biberr, bib_out)
+
+    valid = status.success? && LaTeXUtils.bbl_has_entries?(fnbbl)
+    unless valid
+      restore_bibliography(fnbbl, previous)
+      warn "\nBibliography process failed or produced no valid entries. See #{@biberr}."
+      return false
+    end
+
+    FileUtils.cp(fnbbl, root_bbl)
 
     if @options[:time]
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
+    end
+    true
+  end
+
+  def bibliography_source(junk_bbl, root_bbl)
+    return root_bbl if LaTeXUtils.bbl_has_entries?(root_bbl)
+    return junk_bbl if LaTeXUtils.bbl_has_entries?(junk_bbl)
+
+    nil
+  end
+
+  def preserve_bibliography_backup(previous, root_bbl)
+    return unless previous
+
+    backup = "#{root_bbl}.bak"
+    FileUtils.cp(previous, backup)
+    FileUtils.cp(previous, "junk/#{File.basename(backup)}")
+  end
+
+  def restore_bibliography(junk_bbl, previous)
+    unless previous
+      FileUtils.rm_f(junk_bbl)
+      return
+    end
+
+    backup = "#{@bfilename}.bbl.bak"
+    source = File.file?(backup) ? backup : previous
+    FileUtils.cp(source, junk_bbl) unless source == junk_bbl
+  end
+
+  def execute_bibliography(tool)
+    Dir['*.bib'].each { |b| FileUtils.cp(b, 'junk/') }
+    if tool == :biber
+      Dir.chdir('junk') do
+        Open3.capture2e('biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename)
+      end
+    else
+      Dir.chdir('junk') do
+        FileUtils.mkdir_p('styles')
+        Dir['../styles/*'].each { |s| FileUtils.cp_r(s, 'styles/') }
+        Open3.capture2e('bibtex', @bfilename)
+      end
     end
   end
 
@@ -1971,11 +2013,7 @@ class LatexPackager
   end
 
   def package!
-    if @bdir != '.'
-      Dir.chdir(@bdir) { do_package }
-    else
-      do_package
-    end
+    Dir.chdir(File.expand_path(@bdir)) { do_package }
   end
 
   private
@@ -1984,17 +2022,17 @@ class LatexPackager
     fls_path = "junk/#{@bfilename}.fls"
     unless File.exist?(fls_path)
       puts "==> Compiling #{@filename} to collect dependencies for zip..."
-      @builder.run!
+      return false unless @builder.run_in_current_directory!
     end
 
     deps = collect_fls_dependencies(fls_path)
     fig_sources = discover_figure_sources(deps[:figures])
     zip_filename = @options[:zip_name] || "#{@bfilename}.zip"
 
-    stage_and_create_zip(zip_filename, deps, fig_sources)
+    return false unless stage_and_create_zip(zip_filename, deps, fig_sources)
     puts Rainbow("==> Created portable zip: #{zip_filename}").green.bright
 
-    verify_archive!(zip_filename) if @options[:verify]
+    return false if @options[:verify] && !verify_archive!(zip_filename)
     zip_filename
   end
 
@@ -2106,9 +2144,9 @@ class LatexPackager
   end
 
   def stage_and_create_zip(zip_filename, deps, fig_sources)
-    unless system('which zip > /dev/null 2>&1')
+    unless LaTeXUtils.command_available?('zip')
       warn Rainbow("[ERROR] 'zip' command not found in PATH! Cannot create archive.").red.bright
-      return
+      return false
     end
 
     Dir.mktmpdir('latex_it_stage_') do |stage_dir|
@@ -2133,10 +2171,15 @@ class LatexPackager
 
       zip_abs = File.expand_path(zip_filename)
       FileUtils.rm_f(zip_abs)
-      Dir.chdir(stage_dir) do
-        system('zip', '-q', '-r', zip_abs, '.')
+      zip_out, zip_status = Dir.chdir(stage_dir) do
+        Open3.capture2e('zip', '-q', '-r', zip_abs, '.')
+      end
+      unless zip_status.success? && File.file?(zip_abs) && File.size(zip_abs).positive?
+        warn Rainbow("[FAIL] Failed to create #{zip_filename}: #{zip_out}").red.bright
+        return false
       end
     end
+    true
   end
 
   def copy_target_outputs(stage_dir)
@@ -2203,7 +2246,7 @@ class LatexPackager
     zip_abs = File.expand_path(zip_filename)
     puts Rainbow("==> Verifying archive portability in isolated sandbox...").cyan.bright
 
-    unless system('which unzip > /dev/null 2>&1')
+    unless LaTeXUtils.command_available?('unzip')
       warn Rainbow("[ERROR] 'unzip' command not found in PATH! Cannot verify archive.").red.bright
       return false
     end
@@ -2220,14 +2263,14 @@ class LatexPackager
       FileUtils.mv(bundled_pdf, backup_pdf) if File.file?(bundled_pdf)
 
       ruby_bin = RbConfig.ruby
-      script_bin = File.expand_path($PROGRAM_NAME)
-      cmd = [ruby_bin, script_bin, '--env-free', @filename]
+      script_bin = LATEX_IT_EXECUTABLE
+      cmd = [ruby_bin, script_bin, '--env-free', '--engine', @builder.engine_name, @filename]
 
-      compile_out, compile_stat = Open3.capture2e(*cmd, chdir: tmpdir)
+      compile_out, compile_stat = Open3.capture2e(sandbox_environment(tmpdir), *cmd, chdir: tmpdir)
       new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
 
       if compile_stat.success? && File.file?(new_pdf)
-        verify_pdf_diff(backup_pdf, new_pdf)
+        return false unless verify_pdf_diff(backup_pdf, new_pdf)
         puts Rainbow("[VERIFIED] Archive successfully verified: self-contained and compiles in clean environment.").green.bright
         true
       else
@@ -2239,14 +2282,46 @@ class LatexPackager
   end
 
   def verify_pdf_diff(orig_pdf, new_pdf)
-    return unless File.file?(orig_pdf) && File.file?(new_pdf)
-    return unless system('which pdftotext > /dev/null 2>&1')
+    unless LaTeXUtils.command_available?('pdftotext')
+      puts Rainbow(" -- PDF text comparison skipped: 'pdftotext' is unavailable.").yellow
+      return true
+    end
 
-    t1, = Open3.capture2('pdftotext', '-layout', orig_pdf, '-')
-    t2, = Open3.capture2('pdftotext', '-layout', new_pdf, '-')
+    unless File.file?(orig_pdf) && File.file?(new_pdf)
+      warn Rainbow(' -- PDF text comparison failed: bundled or rebuilt PDF is missing.').red.bright
+      return false
+    end
+
+    t1, s1 = Open3.capture2e('pdftotext', '-layout', orig_pdf, '-')
+    t2, s2 = Open3.capture2e('pdftotext', '-layout', new_pdf, '-')
+    return false unless s1.success? && s2.success?
     if t1 == t2
       puts Rainbow(" -- Text layout exact match confirmed between bundled PDF and test build.").green
+      return true
     end
+
+    warn Rainbow(' -- PDF text layout differs between bundled PDF and test build.').red.bright
+    false
+  end
+
+  def sandbox_environment(tmpdir)
+    home = File.join(tmpdir, 'home')
+    texmf_home = File.join(tmpdir, 'texmf-home')
+    texmf_var = File.join(tmpdir, 'texmf-var')
+    texmf_config = File.join(tmpdir, 'texmf-config')
+    texmf_cache = File.join(tmpdir, 'texmf-cache')
+    xdg_config = File.join(tmpdir, 'config')
+    xdg_cache = File.join(tmpdir, 'cache')
+    [home, texmf_home, texmf_var, texmf_config, texmf_cache, xdg_config, xdg_cache].each { |dir| FileUtils.mkdir_p(dir) }
+    ENV.to_h.merge(
+      'HOME' => home,
+      'TEXMFHOME' => texmf_home,
+      'TEXMFVAR' => texmf_var,
+      'TEXMFCONFIG' => texmf_config,
+      'TEXMFCACHE' => texmf_cache,
+      'XDG_CONFIG_HOME' => xdg_config,
+      'XDG_CACHE_HOME' => xdg_cache
+    )
   end
 end
 
@@ -2325,6 +2400,11 @@ module LaTeXMetaExtractor
     str.gsub!(/\\\\(\[[^\]]*\])?/, ' ')
     str.gsub!(/\\newline/, ' ')
     str.gsub!(/~/, ' ')
+    # Turn common TeX accent forms (for example Jos\'{e}) into their
+    # printable letter before comparing metadata with extracted PDF text.
+    str.gsub!(/\\(?:['"`^~=\.])\s*\{([^{}]*)\}/, '\\1')
+    str.gsub!(/\\(?:['"`^~=\.])\s*([A-Za-z])/, '\\1')
+    str.gsub!(/\\[c]\s*\{([^{}]*)\}/, '\\1')
     str
   end
 
@@ -2381,6 +2461,14 @@ module LaTeXMetaExtractor
   end
 
   def self.extract_authors(content)
+    names = extract_author_names(content)
+    names.empty? ? 'Unknown' : names.join(', ')
+  end
+
+  # Returns the individual author names used by arXiv verification.  A comma
+  # in a single \author block is retained as part of that name: LaTeX uses
+  # \\and (or an explicit line break) to separate authors.
+  def self.extract_author_names(content)
     raw_blocks = []
     content.scan(/\\author(?:\[[^\]]*\])?\s*\{/) do
       idx = Regexp.last_match.begin(0)
@@ -2388,7 +2476,7 @@ module LaTeXMetaExtractor
       raw = extract_balanced_braces(content, brace_start)
       raw_blocks << raw if raw
     end
-    return 'Unknown' if raw_blocks.empty?
+    return [] if raw_blocks.empty?
 
     authors = []
     raw_blocks.each do |raw|
@@ -2420,7 +2508,7 @@ module LaTeXMetaExtractor
       end
     end
 
-    authors.empty? ? 'Unknown' : authors.join(', ')
+    authors
   end
 
   def self.extract_abstract(content)
@@ -2521,76 +2609,101 @@ module LaTeXMetaExtractor
 end
 
 module LaTeXFlattener
+  LITERAL_TEX = /\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|lstlisting|minted)\}.*?\\end\{\1\}|\\verb\*?([^\s]).*?\2/m.freeze
+
+  def self.transform_tex(content)
+    output = +''
+    offset = 0
+    content.to_enum(:scan, LITERAL_TEX).each do
+      literal = Regexp.last_match
+      output << yield(content[offset...literal.begin(0)])
+      output << literal[0]
+      offset = literal.end(0)
+    end
+    output << yield(content[offset..])
+  end
+
   def self.flatten(main_tex, base_dir = '.')
-    visited = Set.new
-    inlined = inline_file(main_tex, base_dir, visited)
+    inlined = inline_file(main_tex, base_dir, [])
     cleaned = clean_host_specific(inlined)
     strip_comments(cleaned)
   end
 
-  def self.inline_file(filepath, base_dir, visited)
+  def self.inline_file(filepath, base_dir, stack)
     real_path = File.expand_path(filepath, base_dir)
-    return '' if visited.include?(real_path)
+    if stack.include?(real_path)
+      chain = (stack + [real_path]).map { |path| File.basename(path) }.join(' -> ')
+      raise "Cyclic LaTeX input detected: #{chain}"
+    end
 
-    visited.add(real_path)
     return '' unless File.file?(real_path)
 
+    stack << real_path
+    entered = true
     content = LaTeXUtils.safe_read(real_path)
     file_dir = File.dirname(real_path)
 
-    out_lines = []
-    content.each_line do |line|
-      if line =~ /^\s*%/
-        out_lines << line
-        next
-      end
-
-      if line =~ /^\s*\\(?:input|include)\{([^}]+)\}(.*)$/
-        target = Regexp.last_match(1).strip
-        rest = Regexp.last_match(2)
-
-        target_with_ext = target.end_with?('.tex') ? target : "#{target}.tex"
-        candidate_path = File.expand_path(target_with_ext, file_dir)
-
-        if File.file?(candidate_path)
-          inlined = inline_file(candidate_path, file_dir, visited)
-          out_lines << inlined
-          out_lines << rest unless rest.strip.empty?
-        else
-          out_lines << line
-        end
-      else
-        out_lines << line
-      end
+    transform_tex(content) do |chunk|
+      chunk.lines.map { |line| inline_line(line, file_dir, stack) }.join
     end
+  ensure
+    stack.pop if entered
+  end
 
-    out_lines.join
+  def self.inline_line(line, file_dir, stack)
+    match = line.match(/^\s*\\(?:input|include)\{([^}]+)\}(.*)$/)
+    return line unless match
+
+    target, rest = match.captures
+    target = target.strip
+    target += '.tex' unless target.end_with?('.tex')
+    candidate = File.expand_path(target, file_dir)
+    return line unless File.file?(candidate)
+
+    inlined = inline_file(candidate, file_dir, stack)
+    return inlined if rest.strip.empty?
+
+    inlined + rest + (line.end_with?("\n") ? "\n" : '')
   end
 
   def self.clean_host_specific(content)
-    content.gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}\{[^}]*\}/m, '')
+    transform_tex(content) do |chunk|
+      chunk.gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}\{[^}]*\}/m, '')
            .gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}/m, '')
+    end
   end
 
   def self.strip_comments(content)
-    lines = []
+    transform_tex(content) { |chunk| strip_comment_chunk(chunk) }
+  end
+
+  def self.strip_comment_chunk(content)
+    output = +''
     content.each_line do |raw_line|
       line = raw_line.chomp
       if line =~ /^%!TEX\s+TS-program/i
-        lines << line
+        output << line << "\n"
         next
       end
 
-      next if line =~ /^\s*%/
+      comment_idx = inline_comment_index(line)
+      clean_line = comment_idx ? line[0...comment_idx] : line
+      next if clean_line.nil?
 
-      clean_line = strip_inline_comment(line)
-      lines << clean_line unless clean_line.nil?
+      output << clean_line
+      output << '%' if comment_idx
+      output << "\n" if raw_line.end_with?("\n")
     end
 
-    lines.join("\n").gsub(/\n{3,}/, "\n\n") + "\n"
+    output
   end
 
   def self.strip_inline_comment(line)
+    idx = inline_comment_index(line)
+    idx ? line[0...idx] : line
+  end
+
+  def self.inline_comment_index(line)
     in_url = false
     i = 0
     len = line.length
@@ -2607,11 +2720,11 @@ module LaTeXFlattener
           bs_count += 1
           k -= 1
         end
-        return line[0...i].rstrip if bs_count.even?
+        return i if bs_count.even?
       end
       i += 1
     end
-    line
+    nil
   end
 end
 
@@ -2627,42 +2740,52 @@ class LatexArxivPackager
   end
 
   def package!
-    if @bdir != '.'
-      Dir.chdir(@bdir) { do_package }
-    else
-      do_package
-    end
+    Dir.chdir(File.expand_path(@bdir)) { do_package }
   end
 
   private
 
   def do_package
-    ensure_compiled!
+    return false unless ensure_compiled!
 
     zip_filename = @options[:arxiv_name] || "arxiv_#{@bfilename}.zip"
     meta_filename = "arxiv_#{@bfilename}_meta.txt"
 
     Dir.mktmpdir('latex_it_arxiv_stage_') do |stage_dir|
       stage_arxiv_files(stage_dir)
-      build_arxiv_zip(stage_dir, zip_filename)
+      return false unless build_arxiv_zip(stage_dir, zip_filename)
       write_arxiv_metadata(meta_filename)
 
-      verify_arxiv_sandbox!(zip_filename) unless @options[:arxiv_verify] == false
+      reference_pdf = arxiv_reference_pdf
+      verified = verify_arxiv_sandbox!(zip_filename, reference_pdf) unless @options[:arxiv_verify] == false
+      return false if @options[:arxiv_verify] != false && !verified
       file_count = count_zip_entries(zip_filename)
       announce_arxiv_completion(zip_filename, meta_filename, file_count)
+      true
     end
   end
 
   def ensure_compiled!
-    fls_path = "junk/#{@bfilename}.fls"
-    bbl_path = "#{@bfilename}.bbl"
-    bbl_junk = "junk/#{@bfilename}.bbl"
-    has_bbl = File.file?(bbl_path) || File.file?(bbl_junk)
+    puts Rainbow("==> Pre-flight compilation of #{@filename} for arXiv submission...").cyan.bright
+    return false unless @builder.run_in_current_directory!
 
-    unless File.file?(fls_path) && has_bbl
-      puts Rainbow("==> Pre-flight compilation of #{@filename} for arXiv submission...").cyan.bright
-      @builder.run!
+    fls_path = "junk/#{@bfilename}.fls"
+    pdf_path = arxiv_reference_pdf
+    unless File.file?(fls_path) && pdf_path
+      warn Rainbow('[FAIL] Pre-flight compilation did not produce a usable PDF and recorder file.').red.bright
+      return false
     end
+    true
+  end
+
+  def arxiv_reference_pdf
+    junk_pdf = "junk/#{@bfilename}.pdf"
+    return File.expand_path(junk_pdf) if File.file?(junk_pdf) && File.size(junk_pdf).positive?
+
+    root_pdf = "#{@bfilename}.pdf"
+    return File.expand_path(root_pdf) if File.file?(root_pdf) && File.size(root_pdf).positive?
+
+    nil
   end
 
   def stage_arxiv_files(stage_dir)
@@ -2775,11 +2898,20 @@ class LatexArxivPackager
   end
 
   def build_arxiv_zip(stage_dir, zip_filename)
+    unless LaTeXUtils.command_available?('zip')
+      warn Rainbow("[ERROR] 'zip' command not found in PATH! Cannot create archive.").red.bright
+      return false
+    end
+
     zip_abs = File.expand_path(zip_filename)
     FileUtils.rm_f(zip_abs)
-    Dir.chdir(stage_dir) do
-      system('zip', '-q', '-r', zip_abs, '.')
+    zip_out, status = Dir.chdir(stage_dir) do
+      Open3.capture2e('zip', '-q', '-r', zip_abs, '.')
     end
+    return true if status.success? && File.file?(zip_abs) && File.size(zip_abs).positive?
+
+    warn Rainbow("[FAIL] Failed to create #{zip_filename}: #{zip_out}").red.bright
+    false
   end
 
   def write_arxiv_metadata(meta_filename)
@@ -2793,9 +2925,14 @@ class LatexArxivPackager
     LaTeXMetaExtractor.write_meta_file(meta_filename, meta_txt)
   end
 
-  def verify_arxiv_sandbox!(zip_filename)
+  def verify_arxiv_sandbox!(zip_filename, reference_pdf = arxiv_reference_pdf)
     zip_abs = File.expand_path(zip_filename)
     puts Rainbow("==> Verifying arXiv archive in isolated /tmp sandbox...").cyan.bright
+
+    unless LaTeXUtils.command_available?('unzip')
+      warn Rainbow("[ERROR] 'unzip' command not found in PATH! Cannot verify archive.").red.bright
+      return false
+    end
 
     Dir.mktmpdir('latex_it_arxiv_verify_') do |tmpdir|
       unzip_out, unzip_stat = Open3.capture2e('unzip', '-q', zip_abs, '-d', tmpdir)
@@ -2805,13 +2942,22 @@ class LatexArxivPackager
       end
 
       ruby_bin = RbConfig.ruby
-      script_bin = File.expand_path($PROGRAM_NAME)
-      cmd = [ruby_bin, script_bin, '--env-free', @filename]
-      compile_out, compile_stat = Open3.capture2e(*cmd, chdir: tmpdir)
+      script_bin = LATEX_IT_EXECUTABLE
+      cmd = [ruby_bin, script_bin, '--env-free', '--engine', @builder.engine_name, @filename]
+      compile_out, compile_stat = Open3.capture2e(sandbox_environment(tmpdir), *cmd, chdir: tmpdir)
       new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
 
       if compile_stat.success? && File.file?(new_pdf)
-        puts Rainbow("[VERIFIED] arXiv package compiles cleanly in isolated environment.").green.bright
+        return false unless verify_arxiv_pdf_match(reference_pdf, new_pdf)
+        return false unless verify_arxiv_authors_match(new_pdf)
+
+        if @options[:arxiv_visual_verify] == false
+          puts Rainbow('[VERIFIED] arXiv package matches the original PDF text; visual comparison skipped.').green.bright
+        else
+          return false unless verify_arxiv_pdf_visual_match(reference_pdf, new_pdf)
+
+          puts Rainbow('[VERIFIED] arXiv package compiles cleanly and matches the original PDF text and page visuals.').green.bright
+        end
         true
       else
         warn Rainbow("[FAIL] Sandbox verification failed for arXiv package!").red.bright
@@ -2821,12 +2967,214 @@ class LatexArxivPackager
     end
   end
 
+  def verify_arxiv_pdf_match(reference_pdf, rebuilt_pdf)
+    unless LaTeXUtils.command_available?('pdftotext')
+      warn Rainbow("[FAIL] arXiv verification requires 'pdftotext' to compare PDF text.").red.bright
+      return false
+    end
+
+    unless reference_pdf && File.file?(reference_pdf) && File.size(reference_pdf).positive?
+      warn Rainbow('[FAIL] arXiv verification could not find the fresh original PDF.').red.bright
+      return false
+    end
+    unless File.file?(rebuilt_pdf) && File.size(rebuilt_pdf).positive?
+      warn Rainbow('[FAIL] arXiv verification could not find the rebuilt PDF.').red.bright
+      return false
+    end
+
+    original_text, original_err, original_status = Open3.capture3('pdftotext', '-layout', reference_pdf, '-')
+    rebuilt_text, rebuilt_err, rebuilt_status = Open3.capture3('pdftotext', '-layout', rebuilt_pdf, '-')
+    unless original_status.success? && rebuilt_status.success?
+      warn Rainbow('[FAIL] arXiv verification could not extract PDF text with pdftotext.').red.bright
+      warn original_err unless original_status.success? || original_err.empty?
+      warn rebuilt_err unless rebuilt_status.success? || rebuilt_err.empty?
+      return false
+    end
+
+    if original_text == rebuilt_text
+      puts Rainbow(' -- Original and rebuilt PDF text layout exactly matches.').green
+      return true
+    end
+
+    warn Rainbow(' -- Original and rebuilt PDF text layout differs.').red.bright
+    false
+  end
+
+  def verify_arxiv_authors_match(rebuilt_pdf)
+    source = LaTeXUtils.safe_read(@filename)
+    authors = LaTeXMetaExtractor.extract_author_names(source)
+    if authors.empty?
+      warn Rainbow('[FAIL] arXiv verification could not extract any authors from the original source. Add a non-empty \\author declaration.').red.bright
+      return false
+    end
+
+    invalid = authors.select { |name| arxiv_placeholder_author?(name) || name.include?('\\') }
+    unless invalid.empty?
+      warn Rainbow("[FAIL] arXiv verification found unusable or unextractable author name(s): #{invalid.join(', ')}. Replace Unknown/Anonymous with real names and check author formatting.").red.bright
+      return false
+    end
+
+    first_page, error, status = Open3.capture3('pdftotext', '-f', '1', '-l', '1', '-layout', rebuilt_pdf, '-')
+    unless status.success?
+      warn Rainbow('[FAIL] arXiv verification could not extract the rebuilt PDF first page for author verification.').red.bright
+      warn error unless error.to_s.empty?
+      return false
+    end
+
+    missing = authors.reject { |name| arxiv_author_in_text?(name, first_page) }
+    unless missing.empty?
+      details = missing.map do |name|
+        suggestion = arxiv_author_suggestion(name, first_page)
+        suggestion ? "#{name} (near match: #{suggestion})" : name
+      end
+      warn Rainbow("[FAIL] arXiv verification could not find author name(s) on the PDF first page: #{details.join(', ')}.").red.bright
+      return false
+    end
+
+    puts Rainbow(' -- All extracted author names appear on the rebuilt PDF first page.').green
+    true
+  rescue StandardError => e
+    warn Rainbow("[FAIL] arXiv author verification failed while reading the original source: #{e.message}").red.bright
+    false
+  end
+
+  def arxiv_placeholder_author?(name)
+    normalized = arxiv_normalize_name(name)
+    normalized.empty? || normalized.match?(/\A(?:unknown|anonymous|anonymous authors|author|authors|author name|author names)\z/)
+  end
+
+  def arxiv_author_in_text?(name, text)
+    normalized_name = arxiv_normalize_name(name)
+    normalized_text = arxiv_normalize_name(text)
+    return false if normalized_name.empty? || normalized_text.empty?
+
+    escaped = Regexp.escape(normalized_name).gsub('\\ ', '\\s+')
+    normalized_text.match?(Regexp.new("(?<![\\p{L}\\p{N}])#{escaped}(?![\\p{L}\\p{N}])"))
+  end
+
+  def arxiv_author_suggestion(name, text)
+    expected = arxiv_normalize_name(name)
+    return nil if expected.empty? || expected.length < 5
+
+    bound = [2, [1, expected.length / 8].max].min
+    words = arxiv_normalize_name(text).split
+    count = expected.split.size
+    return nil if count.zero?
+
+    candidates = words.each_cons(count).map { |window| window.join(' ') }
+    candidates.select! { |item| (expected.length - item.length).abs <= bound }
+    candidate = candidates.min_by { |item| arxiv_edit_distance(expected, item) }
+    return nil unless candidate && (expected.length - candidate.length).abs <= bound
+
+    arxiv_edit_distance(expected, candidate) <= bound ? candidate : nil
+  end
+
+  def arxiv_edit_distance(left, right)
+    previous = (0..right.length).to_a
+    left.each_char.with_index(1) do |left_char, row|
+      current = [row]
+      right.each_char.with_index(1) do |right_char, column|
+        cost = left_char == right_char ? 0 : 1
+        current << [current[column - 1] + 1, previous[column] + 1,
+                    previous[column - 1] + cost].min
+      end
+      previous = current
+    end
+    previous.last
+  end
+
+  def arxiv_normalize_name(value)
+    utf8 = value.to_s.dup.force_encoding(Encoding::UTF_8).scrub
+    utf8.unicode_normalize(:nfkd).gsub(/\p{Mn}/, '').unicode_normalize(:nfkc).downcase
+      .gsub(/[^\p{L}\p{N}]+/, ' ').strip.gsub(/\s+/, ' ')
+  end
+
+  def verify_arxiv_pdf_visual_match(reference_pdf, rebuilt_pdf)
+    unless LaTeXUtils.command_available?('pdftoppm')
+      warn Rainbow("[FAIL] arXiv visual verification requires 'pdftoppm'.").red.bright
+      return false
+    end
+
+    paths = [reference_pdf, rebuilt_pdf]
+    unless paths.all? { |path| path && File.file?(path) && File.size(path).positive? }
+      warn Rainbow('[FAIL] arXiv visual verification could not find both PDFs.').red.bright
+      return false
+    end
+    paths.map! { |path| File.expand_path(path) }
+
+    Dir.mktmpdir('latex_it_arxiv_visual_') do |tmpdir|
+      rendered = paths.each_with_index.map do |pdf, index|
+        render_arxiv_pdf_pages(pdf, File.join(tmpdir, index.to_s))
+      end
+      return false unless rendered.all?
+
+      original_pages, rebuilt_pages = rendered
+      unless original_pages.size == rebuilt_pages.size
+        warn Rainbow("[FAIL] arXiv visual verification page count differs (#{original_pages.size} vs #{rebuilt_pages.size}).").red.bright
+        return false
+      end
+      return false if original_pages.empty?
+
+      original_pages.each_with_index do |original, index|
+        rebuilt = rebuilt_pages[index]
+        next if FileUtils.compare_file(original, rebuilt)
+
+        warn Rainbow("[FAIL] arXiv visual verification differs on page #{index + 1}.").red.bright
+        return false
+      end
+      true
+    end
+  end
+
+  def render_arxiv_pdf_pages(pdf, directory)
+    FileUtils.mkdir_p(directory)
+    prefix = File.join(directory, 'page')
+    output, status = Open3.capture2e('pdftoppm', '-r', '150', pdf, prefix)
+    unless status.success?
+      detail = output.to_s.strip
+      detail = ": #{detail}" unless detail.empty?
+      warn Rainbow("[FAIL] arXiv visual verification could not render #{File.basename(pdf)} with pdftoppm#{detail}.").red.bright
+      return nil
+    end
+
+    pages = Dir.glob("#{prefix}-*.ppm").select { |path| File.file?(path) }
+    pages.sort_by! { |path| path[/-(\d+)\.ppm\z/, 1].to_i }
+    if pages.empty? || pages.any? { |path| File.size(path).zero? }
+      warn Rainbow("[FAIL] arXiv visual verification rendered no pages for #{File.basename(pdf)}.").red.bright
+      return nil
+    end
+    pages
+  rescue SystemCallError => e
+    warn Rainbow("[FAIL] arXiv visual verification could not run pdftoppm: #{e.message}").red.bright
+    nil
+  end
+
   def count_zip_entries(zip_filename)
     out, stat = Open3.capture2('unzip', '-l', zip_filename)
     return 0 unless stat.success?
 
     lines = out.lines[3..-3] || []
     lines.size
+  end
+
+  def sandbox_environment(tmpdir)
+    home = File.join(tmpdir, 'home')
+    texmf_home = File.join(tmpdir, 'texmf-home')
+    texmf_var = File.join(tmpdir, 'texmf-var')
+    texmf_config = File.join(tmpdir, 'texmf-config')
+    texmf_cache = File.join(tmpdir, 'texmf-cache')
+    xdg_config = File.join(tmpdir, 'config')
+    xdg_cache = File.join(tmpdir, 'cache')
+    [home, texmf_home, texmf_var, texmf_config, texmf_cache, xdg_config, xdg_cache].each { |dir| FileUtils.mkdir_p(dir) }
+    ENV.to_h.merge(
+      'HOME' => home,
+      'TEXMFHOME' => texmf_home,
+      'TEXMFVAR' => texmf_var,
+      'TEXMFCONFIG' => texmf_config,
+      'TEXMFCACHE' => texmf_cache,
+      'XDG_CONFIG_HOME' => xdg_config,
+      'XDG_CACHE_HOME' => xdg_cache
+    )
   end
 
   def announce_arxiv_completion(zip_filename, meta_filename, file_count)
@@ -2872,7 +3220,7 @@ end
 symlink_engine = if %w[ll llua lualatex_l].include?(prog_name)
                    'lualatex'
                  elsif %w[lp pdflatex_l pdflatex].include?(prog_name)
-                   LaTeXUtils.check_engine!('pdflatex')
+                   'pdflatex'
                  end
 
 is_lw = (File.basename($PROGRAM_NAME) == 'lw')
@@ -2920,6 +3268,7 @@ options = {
   arxiv_name: nil,
   meta_only: false,
   arxiv_verify: cfg.dig('arxiv', 'verify') != false,
+  arxiv_visual_verify: cfg.dig('arxiv', 'visual_verify') != false,
   biblatex_shield: cfg.dig('arxiv', 'bundle_biblatex') != false,
   comments: cfg.dig('arxiv', 'comments')
 }
@@ -2972,8 +3321,7 @@ parser = OptionParser.new do |opts|
     options[:explain] = true
   end
 
-  opts.on('--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex') do |v|
-    LaTeXUtils.check_engine!(v)
+  opts.on('--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex, or pdflatex') do |v|
     options[:engine] = LaTeXUtils.normalize_engine(v)
   end
 
@@ -2989,8 +3337,8 @@ parser = OptionParser.new do |opts|
     # No-op: output is already PDF using the default engine (xelatex)
   end
 
-  opts.on('--pdflatex', 'Shortcut for --engine=pdflatex (rejected)') do
-    LaTeXUtils.check_engine!('pdflatex')
+  opts.on('--pdflatex', 'Shortcut for --engine=pdflatex') do
+    options[:engine] = 'pdflatex'
   end
 
   opts.on('-u', '--single-pass', '--quick', 'Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)') do
@@ -3098,8 +3446,12 @@ parser = OptionParser.new do |opts|
     options[:meta_only] = true
   end
 
-  opts.on('--[no-]arxiv-verify', 'Enable or disable isolated /tmp sandbox verification pass for arXiv package (default: true)') do |v|
+  opts.on('--[no-]arxiv-verify', 'Enable/disable sandbox compile plus exact PDF text verification (default: true)') do |v|
     options[:arxiv_verify] = v
+  end
+
+  opts.on('--[no-]arxiv-visual-verify', 'Enable/disable rendered PDF page verification (default: true; requires pdftoppm)') do |v|
+    options[:arxiv_visual_verify] = v
   end
 
   opts.on('--[no-]biblatex-shield', 'Enable or disable bundling local biblatex distribution files (default: true)') do |v|
@@ -3147,13 +3499,13 @@ targets.each do |target|
   elsif options[:arxiv]
     builder = LatexBuilder.new(target, options)
     arxiv_packager = LatexArxivPackager.new(builder, options)
-    arxiv_packager.package!
+    exit 1 unless arxiv_packager.package!
   else
     builder = LatexBuilder.new(target, options)
-    builder.run!
+    exit 1 unless builder.run!
     if options[:zip] || options[:verify]
       packager = LatexPackager.new(builder)
-      packager.package!
+      exit 1 unless packager.package!
     end
   end
 end

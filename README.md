@@ -1,6 +1,6 @@
 # latex_it (Unified LaTeX Builder)
 
-`latex_it` (commonly symlinked as `l` or `lw`) is a high-performance, robust Ruby-based wrapper and build manager for modern LaTeX workflows (`xelatex` and `lualatex`). It simplifies LaTeX document compilation by providing clean directory management, automatic main file detection, intelligent multi-pass scheduling, smart bibliography tooling (Biber/BibTeX), PDF diffing, and structured diagnostic error/warning analysis.
+`latex_it` (commonly symlinked as `l` or `lw`) is a high-performance, robust Ruby-based wrapper and build manager for LaTeX workflows (`xelatex`, `lualatex`, and `pdflatex`). It simplifies LaTeX document compilation by providing clean directory management, automatic main file detection, intelligent multi-pass scheduling, smart bibliography tooling (Biber/BibTeX), PDF diffing, and structured diagnostic error/warning analysis.
 
 ---
 
@@ -19,10 +19,10 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
 4. **Document Marker Inspection**: Checks candidate files for `\begin{document}` or `\documentclass`.
 5. **Existing Output Match**: Checks if a matching `<name>.pdf` or `junk/<name>.pdf` exists.
 
-### 3. Modern Engine First (XeLaTeX & LuaLaTeX)
+### 3. Multiple LaTeX Engines (XeLaTeX, LuaLaTeX & pdfLaTeX)
 - Default engine is **`xelatex`**.
 - Full support for **`lualatex`** via CLI flag or automatic detection.
-- **`pdflatex` is rejected by default**: Rejects compilation with an explanatory notice recommending modern UTF-8 capable engines.
+- Full support for **`pdflatex`** via CLI flag, configuration, or symlink personality.
 - **Engine Auto-Detection**:
   - TeX magic comments: `% !TEX TS-program = <engine>` or `% !TEX program = <engine>`
   - AUCTeX / Emacs file local variables: `TeX-engine: <engine>`
@@ -87,17 +87,21 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
     - Pass arbitrary supplementary files or globs after `--` to bundle them directly (e.g. `l -z -- notes.txt code/*.py`).
 - **Sandbox Portability Verification (`-t` / `--verify`)**:
   - Unpacks the zip in an isolated `/tmp` directory.
-  - Runs `latex_it --env-free` with no ambient environment variables.
-  - Compares the test build against the bundled PDF using `pdftotext -layout`.
+  - Runs `latex_it --env-free` with an isolated HOME and TeX configuration tree.
+  - Compares the test build against the bundled PDF using `pdftotext -layout` when available; otherwise reports that comparison was skipped.
+  - Archive creation, extraction, compilation, and PDF comparison failures produce a nonzero exit status.
 
 ### 10. Complete arXiv Submission Preparation (`--arxiv` and `--meta`)
 - **Submission Packaging (`--arxiv`)**:
   - Automatically compiles and bundles a sanitized, self-contained `arxiv_<document>.zip` package ready for immediate upload to [arXiv.org](https://arxiv.org).
   - **Monolithic Flattening**: Inlines all subfiles referenced via `\input{...}` and `\include{...}` into a single unified `<document>.tex`.
   - **Sanitization**: Strips private `%` draft comments (preserving `\%`, TeX magic directives, and URLs) and removes private/machine-specific style imports.
+    Empty `%` markers retain TeX whitespace semantics. Repeated inputs remain repeated, input cycles are reported, and standard verbatim/listing environments and `\verb` examples are preserved literally.
   - **Active Figures Only**: Consults compiler recorder (`.fls`) to bundle only active `.pdf`/`.png` graphic files, strictly excluding raw figure sources (`.fig`, `.ipe`, `.svg`, etc.) and target PDF.
   - **BibLaTeX Version Shielding**: Detects `biblatex` and automatically bundles local distribution files (`biblatex.sty`, `biblatex.cfg`, `*.bbx`, `*.cbx`, `*.lbx`) to shield against arXiv's `wrong format version` compilation mismatch.
-  - **Verification Sandbox**: Automatically extracts the archive to `/tmp` and compiles with `latex_it --env-free` to guarantee clean compilation on arXiv servers.
+  - **Verification Sandbox**: Automatically extracts the archive to `/tmp`, compiles with the selected engine and `latex_it --env-free`, and requires exact `pdftotext -layout` equality with the fresh local build plus exact equality of every corresponding page rendered by `pdftoppm` at 150 DPI. Missing `pdftotext`/`pdftoppm`, failed extraction or rendering, missing PDFs, changed text layout, or changed rendered pages fail verification. Use `--no-arxiv-verify` to bypass all checks, or `--no-arxiv-visual-verify` to keep text-only verification. Visual verification requires the `pdftoppm` command from Poppler.
+  - **Author Verification**: Extracts all author names from the original source and requires every name to appear on the rebuilt PDF's first page. Missing, malformed, or placeholder (`Unknown`/`Anonymous`) authors fail verification before visual comparison.
+    Matching tolerates case, whitespace, punctuation, and normalized accents/umlauts. Small spelling differences produce edit-distance suggestions but still fail verification. This check also runs with `--no-arxiv-visual-verify`; only `--no-arxiv-verify` bypasses it.
 - **Metadata Extraction (`--meta`)**:
   - Extracts `Title`, `Authors`, and `Abstract` from source TeX and converts TeX math/formatting macros into clean, readable Unicode plaintext.
   - Automatically derives page count and figure count for submission comments.
@@ -114,7 +118,7 @@ The script inspects `$PROGRAM_NAME` and changes default behavior based on the ex
 | `latex_it`, `l` | Default compilation mode (`xelatex`, 3 passes, auto-bib). |
 | `lw` | Fast incremental mode (`--fast`). |
 | `ll`, `llua`, `lualatex_l` | Sets engine to `lualatex`. |
-| `lp`, `pdflatex_l`, `pdflatex` | Triggers pdflatex rejection check. |
+| `lp`, `pdflatex_l`, `pdflatex` | Sets engine to `pdflatex`. |
 | `latex_file_in_dir` | Prints detected main `.tex` file in directory and exits. |
 | `latex_clean`, `clean_latex`, `latex-clean` | Cleans auxiliary and junk files in directory and exits. |
 | `latex_env_free`, `bibtex_env_free`, `pdflatex_env_free` | Enables `--no-env` to reset TeX environment variables. |
@@ -132,11 +136,11 @@ Compilation Options:
         --fast                       Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed
     -a, --all                        Show all diagnostics across all tiers (including Whatevers and Warnings)
     -e, --explain                    Display boxed plain-English explanations for diagnostics on first occurrence
-        --engine ENGINE              LaTeX compiler: xelatex (default), lualatex
+        --engine ENGINE              LaTeX compiler: xelatex (default), lualatex, or pdflatex
         --lua, --lualatex            Shortcut for --engine=lualatex
         --xe, --xelatex              Shortcut for --engine=xelatex (default)
         --pdf                        Generate PDF output (default behavior)
-        --pdflatex                   Shortcut for --engine=pdflatex (rejected)
+        --pdflatex                   Shortcut for --engine=pdflatex
     -u, --single-pass, --quick       Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)
     -d, --diff, --update-on-diff     Only replace target PDF if text content changed
     -c, --clean                      Clean temporary build files (junk/, .bbl, .aux) before building
@@ -164,7 +168,8 @@ arXiv Preparation Options:
         --arxiv                      Prepare sanitized, flattened, submission-ready arXiv zip package
         --arxiv-name NAME            Specify custom output name for arXiv zip archive
         --meta                       Extract and display sanitized paper metadata and write arxiv_<file>_meta.txt
-        --[no-]arxiv-verify          Enable/disable isolated /tmp sandbox verification pass for arXiv package
+        --[no-]arxiv-verify          Enable/disable sandbox compile plus exact PDF text verification
+        --[no-]arxiv-visual-verify   Enable/disable rendered PDF page verification (requires pdftoppm)
         --[no-]biblatex-shield       Enable/disable bundling local biblatex distribution files
 
     -V, --version                    Show version
@@ -179,7 +184,7 @@ The script [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) is organize
 
 - [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L56-L306):
   Utility module containing helper methods for:
-  - Engine normalization & validation ([`check_engine!`](file:///home/sariel/prog/26/latex_it/latex_it#L68-L75), [`normalize_engine`](file:///home/sariel/prog/26/latex_it/latex_it#L77-L93))
+  - Engine normalization ([`normalize_engine`](file:///home/sariel/prog/26/latex_it/latex_it#L77-L93))
   - File inspection & magic comment parsing ([`detect_engine_from_file`](file:///home/sariel/prog/26/latex_it/latex_it#L95-L128))
   - Safe binary-safe file reading ([`safe_read`](file:///home/sariel/prog/26/latex_it/latex_it#L130-L136))
   - Output noise reduction ([`filter_subcommand_noise`](file:///home/sariel/prog/26/latex_it/latex_it#L138-L143))
@@ -222,12 +227,106 @@ The script [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) is organize
 ## Requirements & Dependencies
 
 - **Ruby**: 2.7+ (tested with Ruby 3.x).
-- **TeX System**: TeX Live, MacTeX, or compatible distribution with `xelatex`, `lualatex`, `bibtex`, or `biber`.
+- **TeX System**: TeX Live, MacTeX, or compatible distribution with `xelatex`, `lualatex`, or `pdflatex`, plus `bibtex` or `biber` as needed.
 - **Optional Tools**:
   - `pdftotext` (from `poppler-utils`) for diff-based updates (`-d`).
+  - `pdftotext` and `pdftoppm` (from `poppler-utils`) are required by default for arXiv verification; use `--no-arxiv-visual-verify` for arXiv text-only verification when `pdftoppm` is unavailable.
   - `rainbow` gem for colored terminal diagnostic output (automatic plain-text fallback included).
 
 ---
+
+## Sampling External Papers
+
+To sample a random arXiv paper and retain its source archive (when available):
+
+```bash
+tools/sample_arxiv --output examples/arxiv --attempts 10
+```
+
+The sampler chooses a completed calendar month uniformly from April 2007 onward,
+then a random paper in that month. This favors papers in quieter months; it is
+not a uniform sample of all arXiv papers. Months exceeding 30,000 results are
+skipped because of the API paging limit.
+
+Each download goes into `examples/arxiv/<versioned-paper-id>/` by default, with
+`source.tar.gz`, `source.tex.gz`, `source.tar`, or `source.tex` and `metadata.json`.
+Metadata records the title, authors, categories, source URL, checksum, and sampled
+month/offset. Existing samples are preserved, and the entire `examples/`
+directory is ignored by Git. Use `--output DIR` to choose another location, `--attempts N` to bound
+candidate attempts (default 10), or `--seed N` to repeat random choices while the
+date range and API results remain unchanged. `--help` lists these options.
+
+Review a retained sample's arXiv metadata against the current TeX extractor:
+
+```bash
+tools/check_arxiv_metadata examples/arxiv/1510.00949v1
+tools/check_arxiv_metadata examples/arxiv/1510.00949v1 --main paper.tex --pdf paper.pdf
+```
+
+The command reads the retained source in memory, verifies `metadata.json`'s
+SHA256 checksum, detects a single main TeX member, and writes
+`metadata-report.json`. Use `--main MEMBER.tex` for ambiguous archives.
+`--pdf FILE` optionally checks expected arXiv author names on PDF page one with
+`pdftotext`. Metadata mismatches are review findings and exit successfully;
+malformed input, checksum errors, and extraction failures exit nonzero.
+Raw values and normalized comparisons are retained, including missing/extra
+authors, author order differences, and near-match suggestions. Near matches
+remain mismatches. Only the selected main file is passed to the existing
+extractor; included files and custom macros are not expanded. The report does
+not compile or execute downloaded TeX. Its optional PDF check uses an existing
+PDF and the independent arXiv author list.
+
+The sampler retains source bytes without extracting or compiling them. It skips
+missing or unrecognized TeX sources, limits downloads and decompressed data to
+100 MiB each, and stops on HTTP service errors. Requests are sequential and spaced
+at least three seconds apart; run only one sampler at a time. The download check
+recognizes TeX files but does not establish whether a project compiles.
+
+## Offline LaTeX builds with bws
+
+`tools/bws_run` stages a source tree into a retained disposable workspace and
+launches a command through the local `bws` executable. The generated local
+profile ([profiles/bws-latex-write.json](profiles/bws-latex-write.json)) composes
+`latex`, `offline`, and `no-ssh`. Existing TeX caches, the fontconfig cache, and
+`~/.local/share/fonts` are writable, matching the installed LaTeX profile.
+The original paper directory and repository are not mounted. `bws` reads an
+empty global configuration from a temporary home; programs receive an empty
+`XDG_CONFIG_HOME`, and your real `~/.config` and SSH files are not mounted.
+Network, SSH forwarding, X11, D-Bus, and proxy access are disabled.
+
+The copy excludes `.git` directories and worktree `.git` files at every depth,
+`junk/`, and source-provided `.bws` configuration. Symlinks and special files
+are rejected. Other source files, including local `latex_it` configuration
+and supplied bibliography files, are preserved. Use an already extracted paper
+directory; this runner does not unpack source archives.
+
+Prepare and inspect the staged configuration without launching a sandbox:
+
+```bash
+tools/bws_run /path/to/paper --prepare-only
+```
+
+The command prints the retained workspace path. To build, pass a command and
+its arguments after `--`:
+
+```bash
+tools/bws_run /path/to/paper -- latex_it paper.tex
+tools/bws_run /path/to/paper --timeout 60 -- ruby -e 'puts Dir.pwd'
+```
+
+Use `--output DIR` to choose a new retained workspace outside the source tree
+(default: a unique directory under `/tmp`). Existing output directories are
+never overwritten. The runner stages this repository's `latex_it` on the
+sandbox's `PATH`; other commands must be available inside the sandbox.
+`--bws PATH` (or `BWS_BIN`) selects the host launcher, and `--latex-it PATH`
+selects the executable to stage. With no command, the staged `latex_it` runs.
+
+`--timeout SECONDS` defaults to 300 seconds and must be positive. On expiry,
+the runner terminates the sandbox, escalates to killing remaining processes
+after a two-second grace period, and exits with status 124. Otherwise it
+returns the command's exit status. Command output is printed and saved in
+`bws-run.log`; build files and logs remain available after success or failure.
+The timeout covers sandbox execution, not copying the source tree.
 
 ## Installation
 

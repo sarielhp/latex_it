@@ -1,0 +1,31 @@
+{
+  "name": "bws-latex-write",
+  "description": "Offline paper builds with writable TeX and font caches",
+  "requires": ["latex", "offline", "no-ssh"],
+  "features": {
+    "enable_ssh": false,
+    "enable_x11": false,
+    "enable_dbus": false,
+    "enable_wsl": false,
+    "enable_proxy": false,
+    "enable_etc_auto_bind": false,
+    "auto_init": "never",
+    "no_net": true,
+    "unshare_net": true
+  },
+  "binds_ro": [
+    ["/bin", "/bin"],
+    ["/usr", "/usr"],
+    ["/lib", "/lib"],
+    ["/lib64", "/lib64"],
+    ["/sbin", "/sbin"],
+    ["/etc/fonts", "/etc/fonts"],
+    ["/etc/texmf", "/etc/texmf"],
+    ["/etc/paperspecs", "/etc/paperspecs"],
+    ["/etc/papersize", "/etc/papersize"],
+    ["/etc/ghostscript", "/etc/ghostscript"],
+    ["/usr/share/texmf", "/usr/share/texmf"],
+    ["/var/lib/texmf", "/var/lib/texmf"],
+    ["/var/cache/fontconfig", "/var/cache/fontconfig"]
+  ]
+}

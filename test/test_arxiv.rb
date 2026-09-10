@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "minitest/mock"
 require "tmpdir"
 require "fileutils"
 require "open3"
@@ -90,6 +91,29 @@ class TestArxivSupport < Minitest::Test
     end
   end
 
+  def test_flattener_repeats_inputs_and_preserves_comment_newlines
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'part.tex'), "\\advance\\count0 by 1\n")
+      File.write(File.join(dir, 'main.tex'), "\\def\\word{foo% hidden\nbar}\n\\input{part}\n\\input{part}\n")
+
+      flattened = LaTeXFlattener.flatten('main.tex', dir)
+      assert_equal 2, flattened.scan('\\advance\\count0 by 1').size
+      assert_includes flattened, "\\def\\word{foo%\nbar}"
+      refute_includes flattened, 'hidden'
+    end
+  end
+
+  def test_flattener_reports_input_cycles
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'a.tex'), "\\input{b}\n")
+      File.write(File.join(dir, 'b.tex'), "\\input{a}\n")
+
+      error = assert_raises(RuntimeError) { LaTeXFlattener.flatten('a.tex', dir) }
+      assert_includes error.message, 'Cyclic LaTeX input detected'
+      assert_includes error.message, 'a.tex -> b.tex -> a.tex'
+    end
+  end
+
   def test_arxiv_packaging_and_dual_announcement
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "figs"))
@@ -114,7 +138,9 @@ class TestArxivSupport < Minitest::Test
       packager = LatexArxivPackager.new(builder, { arxiv_verify: false })
 
       Dir.chdir(dir) do
-        out, = capture_io { packager.package! }
+        out, = capture_io do
+          builder.stub(:run_in_current_directory!, true) { assert packager.package! }
+        end
 
         assert File.file?("arxiv_paper.zip")
         assert File.file?("arxiv_paper_meta.txt")
@@ -164,10 +190,10 @@ class TestArxivSupport < Minitest::Test
         \\title{E2E Paper}
         \\author{Alice One \\and Bob Two}
         \\begin{document}
+        \\maketitle
         \\begin{abstract}
           Sample abstract with $\\alpha \\le \\beta$.
         \\end{abstract}
-        \\maketitle
         Hello world!
         \\end{document}
       TEX

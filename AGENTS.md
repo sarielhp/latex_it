@@ -41,8 +41,8 @@ This document provides architectural guidelines, core invariants, development wo
   Maintain a minimal, well-documented CLI hierarchy. Do not add undocumented switches or unadvertised legacy aliases without updating [README.md](file:///home/sariel/prog/26/latex_it/README.md).
 - **Isolated Build Output (`junk/`)**:
   All intermediate build artifacts must remain confined to `junk/`. Only final targets (`<file>.pdf`, `<file>.bbl`, `<file>.synctex.gz`) are exported to the project root. Cache preservation happens exclusively via `junk/old/`.
-- **Modern Engine Guard**:
-  Modern UTF-8 engines (`xelatex` as default, `lualatex` as supported alternative). `pdflatex` must be rejected with an explicit deprecation message.
+- **Engine Support**:
+  `xelatex` is the default engine, with `lualatex` and `pdflatex` supported as alternatives.
 - **Dependency Minimalism**:
   Rely on Ruby standard library modules (`fileutils`, `open3`, `optparse`, `tmpdir`, `shellwords`) and minimal mature gems (`rainbow`, `minitest`).
 

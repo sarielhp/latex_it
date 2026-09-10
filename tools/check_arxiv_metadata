@@ -1,0 +1,303 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'digest'
+require 'json'
+require 'open3'
+require 'optparse'
+require 'rubygems/package'
+require 'stringio'
+require 'tempfile'
+require 'zlib'
+
+load File.expand_path('../latex_it', __dir__)
+
+module ArxivMetadataReport
+  MAX_BYTES = 100 * 1024 * 1024
+  PLACEHOLDERS = ['unknown', 'anonymous', 'anonymous authors', 'author', 'authors', 'author name'].freeze
+  class Error < StandardError; end
+
+  def self.run!(dir, main: nil, pdf: nil)
+    metadata = load_metadata(dir)
+    source_name = metadata.fetch('source_filename')
+    path = safe_source_path(dir, source_name)
+    raise Error, "source exceeds #{MAX_BYTES} bytes" if File.size(path) > MAX_BYTES
+
+    bytes = File.binread(path)
+    verify_checksum!(metadata, source_name, bytes)
+    files = source_files(bytes, source_name)
+    main_name = choose_main(files, main)
+    content = utf8(files.fetch(main_name))
+    reference = reference_metadata(metadata)
+    extracted = { title: LaTeXMetaExtractor.extract_title(content),
+                  authors: LaTeXMetaExtractor.extract_author_names(content) }
+    comparisons = compare_metadata(reference, extracted)
+    pdf_result = pdf ? check_pdf(pdf, reference[:authors]) : { status: 'skipped' }
+    report = build_report(dir, source_name, metadata, main_name, reference, extracted,
+                          comparisons, pdf_result, bytes)
+    report_path = File.join(dir, 'metadata-report.json')
+    Tempfile.create(['metadata-report-', '.json'], dir) do |temporary|
+      temporary.write(JSON.pretty_generate(report) + "\n")
+      temporary.close
+      File.rename(temporary.path, report_path)
+    end
+    print_summary(main_name, comparisons, pdf_result)
+    report
+  rescue KeyError => e
+    raise Error, "metadata.json is missing required field #{e.message}"
+  end
+
+  def self.load_metadata(dir)
+    path = File.join(dir, 'metadata.json')
+    raise Error, "missing #{path}" unless File.file?(path)
+
+    value = JSON.parse(File.read(path))
+    raise Error, 'metadata.json must contain an object' unless value.is_a?(Hash)
+
+    value
+  rescue JSON::ParserError => e
+    raise Error, "invalid metadata.json: #{e.message}"
+  end
+
+  def self.safe_source_path(dir, name)
+    unless name.is_a?(String) && File.basename(name) == name && safe_name?(name) &&
+           File.file?(File.join(dir, name)) &&
+           !File.symlink?(File.join(dir, name))
+      raise Error, "source_filename is missing or unsafe: #{name.inspect}"
+    end
+
+    File.join(dir, name)
+  end
+
+  def self.verify_checksum!(metadata, name, bytes)
+    expected = metadata['source_sha256'].to_s
+    raise Error, "metadata source_sha256 is missing for #{name}" if expected.empty?
+
+    actual = Digest::SHA256.hexdigest(bytes)
+    raise Error, "source checksum mismatch for #{name}: expected #{expected}, got #{actual}" unless expected == actual
+  end
+
+  def self.source_files(bytes, source_name)
+    raise Error, "source exceeds #{MAX_BYTES} bytes" if bytes.bytesize > MAX_BYTES
+
+    expanded = gzip?(bytes) ? inflate(bytes) : bytes
+    return { source_name => expanded } unless tar_bytes?(expanded)
+
+    files = {}
+    total = 0
+    Gem::Package::TarReader.new(StringIO.new(expanded)) do |tar|
+      tar.each do |entry|
+        name = entry.full_name.to_s
+        raise Error, "unsafe archive member #{name.inspect}" unless safe_name?(name)
+        next if entry.directory?
+        raise Error, "archive member is not a regular file: #{name}" unless entry.file?
+        raise Error, "archive member exceeds #{MAX_BYTES} bytes: #{name}" if entry.header.size > MAX_BYTES
+
+        data = entry.read
+        total += data.bytesize
+        raise Error, "archive expands beyond #{MAX_BYTES} bytes" if total > MAX_BYTES
+
+        files[name] = data if File.extname(name).casecmp('.tex').zero?
+      end
+    end
+    raise Error, "source archive #{source_name} contains no regular .tex files" if files.empty?
+
+    files
+  rescue Gem::Package::TarInvalidError, Zlib::Error, EOFError => e
+    raise Error, "invalid source archive #{source_name}: #{e.message}"
+  end
+
+  def self.gzip?(bytes)
+    bytes.start_with?("\x1f\x8b".b)
+  end
+
+  def self.inflate(bytes)
+    expanded = Zlib::GzipReader.new(StringIO.new(bytes)).read(MAX_BYTES + 1)
+    raise Error, "source expands beyond #{MAX_BYTES} bytes" if expanded.bytesize > MAX_BYTES
+
+    expanded
+  end
+
+  def self.tar_bytes?(bytes)
+    bytes.bytesize >= 262 && bytes.byteslice(257, 5) == 'ustar'
+  end
+
+  def self.choose_main(files, requested)
+    if requested
+      raise Error, "--main member is not a regular .tex file: #{requested}" unless files.key?(requested)
+
+      return requested
+    end
+    candidates = files.select { |_name, bytes| document_declaration?(bytes) }.keys
+    return candidates.first if candidates.length == 1
+    return files.keys.first if candidates.empty? && files.length == 1
+
+    detail = candidates.empty? ? 'no documentclass/documentstyle candidate' : candidates.join(', ')
+    raise Error, "ambiguous main TeX file (#{detail}); use --main MEMBER.tex"
+  end
+
+  def self.document_declaration?(bytes)
+    utf8(bytes).match?(/\\document(?:class|style)\b/)
+  end
+
+  def self.utf8(bytes)
+    bytes.dup.force_encoding(Encoding::UTF_8).scrub
+  end
+
+  def self.reference_metadata(metadata)
+    title = metadata['title']
+    authors = metadata['authors']
+    raise Error, 'metadata title is missing or empty' unless title.is_a?(String) && valid_title?(title)
+    raise Error, 'metadata authors are missing or empty' unless authors.is_a?(Array) && !authors.empty?
+    raise Error, 'metadata authors contain empty or placeholder names' unless authors.all? { |a| valid_author?(a) }
+
+    { title: title, authors: authors }
+  end
+
+  def self.compare_metadata(reference, extracted)
+    rt = normalize(reference[:title])
+    et = normalize(extracted[:title])
+    ra = reference[:authors].map { |a| normalize_author(a) }
+    ea = extracted[:authors].map { |a| normalize_author(a) }
+    missing = multiset_difference(ra, ea)
+    extra = multiset_difference(ea, ra)
+    { title: comparison(reference[:title], extracted[:title], rt == et),
+      authors: { status: missing.empty? && extra.empty? ? 'match' : 'mismatch',
+                 reference: reference[:authors], extracted: extracted[:authors],
+                 normalized_reference: ra, normalized_extracted: ea, missing: missing,
+                 extra: extra, order_mismatch: missing.empty? && extra.empty? && ra != ea,
+                 suggestions: suggestions(missing, ea) } }
+  end
+
+  def self.comparison(reference, extracted, matches)
+    { status: matches ? 'match' : 'mismatch', reference: reference, extracted: extracted,
+      normalized_reference: normalize(reference), normalized_extracted: normalize(extracted) }
+  end
+
+  def self.multiset_difference(left, right)
+    remaining = right.dup
+    left.each_with_object([]) do |item, result|
+      index = remaining.index(item)
+      index ? remaining.delete_at(index) : result << item
+    end
+  end
+
+  def self.suggestions(missing, available)
+    missing.filter_map do |wanted|
+      next if wanted.length < 5
+
+      bound = [2, [1, wanted.length / 8].max].min
+      candidate = available.select { |item| (wanted.length - item.length).abs <= bound }
+                           .min_by { |item| edit_distance(wanted, item) }
+      next unless candidate && edit_distance(wanted, candidate) <= bound
+
+      { expected: wanted, near: candidate }
+    end
+  end
+
+  def self.check_pdf(path, authors)
+    raise Error, "PDF is missing: #{path}" unless File.file?(path) && File.size(path).positive?
+
+    text, error, status = Open3.capture3('pdftotext', '-f', '1', '-l', '1', '-layout', path, '-')
+    raise Error, "pdftotext failed for #{path}: #{error.to_s.strip}" unless status.success?
+
+    expected = authors.map { |a| normalize_author(a) }
+    normalized_text = normalize_author(text)
+    missing = expected.reject { |name| pdf_name_present?(name, normalized_text) }
+    { status: missing.empty? ? 'match' : 'mismatch', file: path, expected: authors,
+      normalized_expected: expected, missing: missing, text_checked: true }
+  rescue Errno::ENOENT
+    raise Error, 'pdftotext is required when --pdf is supplied'
+  end
+
+  def self.pdf_name_present?(name, text)
+    return false if name.empty?
+
+    pattern = Regexp.escape(name).gsub('\\ ', '\\s+')
+    text.match?(Regexp.new("(?<![\\p{L}\\p{N}])#{pattern}(?![\\p{L}\\p{N}])"))
+  end
+
+  def self.build_report(dir, source_name, metadata, main_name, reference, extracted, comparisons, pdf, bytes)
+    { version: 1, sample_dir: File.expand_path(dir), source_filename: source_name,
+      checksum: { expected: metadata['source_sha256'], actual: Digest::SHA256.hexdigest(bytes), status: 'match' },
+      main: { member: main_name }, reference: reference, extracted: extracted,
+      comparisons: comparisons, pdf: pdf,
+      warnings: ['arXiv source metadata and TeX/PDF metadata can legitimately differ; review mismatches.'] }
+  end
+
+  def self.print_summary(main, comparisons, pdf)
+    puts "Metadata report: main=#{main}, title=#{comparisons[:title][:status]}, authors=#{comparisons[:authors][:status]}"
+    puts "PDF authors: #{pdf[:status]}" unless pdf[:status] == 'skipped'
+    unless comparisons[:authors][:missing].empty?
+      puts "  missing authors: #{comparisons[:authors][:missing].join(', ')}"
+    end
+    puts "  extra authors: #{comparisons[:authors][:extra].join(', ')}" unless comparisons[:authors][:extra].empty?
+    puts '  author order differs' if comparisons[:authors][:order_mismatch]
+    if comparisons[:title][:status] == 'mismatch'
+      puts "  expected title: #{comparisons[:title][:reference]}"
+      puts "  extracted title: #{comparisons[:title][:extracted]}"
+    end
+    puts "  PDF missing authors: #{pdf[:missing].join(', ')}" if pdf[:status] == 'mismatch'
+  end
+
+  def self.normalize(value)
+    text = LaTeXMetaExtractor.clean_latex_formatting(value.to_s)
+    text = LaTeXMetaExtractor.clean_latex_math(text)
+    text = text.gsub(/\\(?:bf|it|rm|sf|tt|up|normalfont|bfseries|itshape|rmfamily)\b/, '')
+    text.force_encoding(Encoding::UTF_8).scrub.unicode_normalize(:nfkd).gsub(/\p{Mn}/, '')
+        .unicode_normalize(:nfkc).downcase.gsub(/\s+/, ' ').strip
+  end
+
+  def self.valid_title?(value)
+    normalized = normalize(value)
+    !normalized.empty? && normalized != 'untitled'
+  end
+
+  def self.normalize_author(value)
+    normalize(value).gsub(/[^\p{L}\p{N}\\]+/, ' ').strip.gsub(/\s+/, ' ')
+  end
+
+  def self.valid_author?(value)
+    value.is_a?(String) && !normalize_author(value).empty? && !PLACEHOLDERS.include?(normalize_author(value))
+  end
+
+  def self.safe_name?(name)
+    name.is_a?(String) && !name.empty? && !name.start_with?('/') &&
+      !name.split('/').include?('..') && !name.include?("\0")
+  end
+
+  def self.edit_distance(left, right)
+    previous = (0..right.length).to_a
+    left.each_char.with_index(1) do |char, row|
+      current = [row]
+      right.each_char.with_index(1) do |other, column|
+        current << [current[column - 1] + 1, previous[column] + 1,
+                    previous[column - 1] + (char == other ? 0 : 1)].min
+      end
+      previous = current
+    end
+    previous.last
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME
+  begin
+    options = {}
+    parser = OptionParser.new do |opts|
+      opts.banner = 'Usage: tools/check_arxiv_metadata SAMPLE_DIR [options]'
+      opts.on('--main MEMBER.tex', 'select an explicit archive member as the main TeX file') { |v| options[:main] = v }
+      opts.on('--pdf FILE', 'check expected arXiv authors on PDF page one with pdftotext') { |v| options[:pdf] = v }
+      opts.on('-h', '--help', 'show this help') do
+        puts opts
+        exit
+      end
+    end
+    parser.parse!
+    raise OptionParser::InvalidArgument, 'SAMPLE_DIR is required' unless ARGV.length == 1
+
+    ArxivMetadataReport.run!(ARGV.first, **options)
+  rescue ArxivMetadataReport::Error, OptionParser::ParseError, SystemCallError => e
+    warn "check_arxiv_metadata: #{e.message}"
+    exit 1
+  end
+end

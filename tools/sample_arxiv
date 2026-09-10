@@ -1,0 +1,255 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Pick a paper from a randomly selected completed month and retain its arXiv
+# source archive.  This intentionally samples months uniformly, not papers.
+require 'date'
+require 'digest'
+require 'fileutils'
+require 'json'
+require 'net/http'
+require 'optparse'
+require 'rexml/document'
+require 'rubygems/package'
+require 'stringio'
+require 'tmpdir'
+require 'uri'
+require 'zlib'
+
+module ArxivSampler
+  API = 'https://export.arxiv.org/api/query'
+  SOURCE_HOSTS = %w[export.arxiv.org arxiv.org].freeze
+  MAX_COMPRESSED = 100 * 1024 * 1024
+  MAX_EXPANDED = 100 * 1024 * 1024
+
+  class Error < StandardError; end
+  class HttpError < Error; end
+
+  class Client
+    def initialize(min_interval: 3, http: Net::HTTP)
+      @min_interval = min_interval
+      @http = http
+      @last_request = nil
+    end
+
+    def get(uri)
+      response, body = request(uri, 0)
+      return body if response.is_a?(Net::HTTPSuccess)
+      return nil if response.code == '404'
+
+      raise HttpError, "arXiv returned HTTP #{response.code} for #{uri}"
+    end
+
+    private
+
+    def enforce_rate_limit
+      return unless @last_request
+
+      wait = @min_interval - (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_request)
+      sleep(wait) if wait.positive?
+    end
+
+    def request(uri, redirects)
+      raise Error, "too many redirects from #{uri}" if redirects > 5
+
+      parsed = URI(uri)
+      unless parsed.scheme == 'https' && SOURCE_HOSTS.include?(parsed.host)
+        raise Error,
+              'only HTTPS arXiv URLs are allowed'
+      end
+
+      request = Net::HTTP::Get.new(parsed)
+      request['User-Agent'] = 'latex_it/sample_arxiv'
+      request['Accept-Encoding'] = 'identity'
+      connection = @http.new(parsed.host, parsed.port)
+      connection.use_ssl = true
+      connection.open_timeout = 15
+      connection.read_timeout = 60
+      connection.max_retries = 0
+      enforce_rate_limit
+      body = nil
+      response = connection.start do |http|
+        @last_request = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        http.request(request) { |reply| body = read_body(reply) }
+      end
+      return request(URI.join(uri, response['location']).to_s, redirects + 1) if response.is_a?(Net::HTTPRedirection)
+
+      [response, body]
+    end
+
+    def read_body(response)
+      body = String.new(encoding: Encoding::BINARY)
+      response.read_body do |chunk|
+        body << chunk
+        raise Error, "download exceeds #{MAX_COMPRESSED} bytes" if body.bytesize > MAX_COMPRESSED
+      end
+      body
+    end
+  end
+
+  def self.parse_entries(xml)
+    document = REXML::Document.new(xml)
+    total_node = document.elements['feed/opensearch:totalResults']
+    raise Error, 'arXiv API response has no totalResults' unless total_node
+    raise Error, 'arXiv API returned invalid totalResults' unless total_node.text.to_s.match?(/\A\d+\z/)
+
+    total = total_node.text.to_i
+    entries = document.get_elements('feed/entry').map do |entry|
+      { id: entry.elements['id']&.text.to_s.split('/').last,
+        title: entry.elements['title']&.text.to_s.gsub(/\s+/, ' ').strip,
+        authors: entry.get_elements('author/name').map { |a| a.text.to_s.strip },
+        categories: entry.get_elements('category').filter_map { |c| c.attributes['term'] },
+        published: entry.elements['published']&.text,
+        updated: entry.elements['updated']&.text,
+        links: entry.get_elements('link').filter_map { |l| l.attributes['href'] } }
+    end
+    [total, entries]
+  rescue REXML::ParseException => e
+    raise Error, "invalid arXiv API XML: #{e.message}"
+  end
+
+  def self.validate_source!(bytes)
+    raise Error, 'source archive is empty' if bytes.nil? || bytes.empty?
+    raise Error, "source archive exceeds #{MAX_COMPRESSED} bytes" if bytes.bytesize > MAX_COMPRESSED
+
+    expanded = bytes.getbyte(0) == 31 && bytes.getbyte(1) == 139 ? inflate(bytes) : bytes
+    raise Error, "source exceeds #{MAX_EXPANDED} bytes after decompression" if expanded.bytesize > MAX_EXPANDED
+    return :tar if tar_with_tex?(expanded)
+    return :tex if tex_content?(expanded)
+
+    raise Error, 'download is not a LaTeX source archive (missing .tex file)'
+  end
+
+  def self.inflate(bytes)
+    Zlib::GzipReader.new(StringIO.new(bytes)).read(MAX_EXPANDED + 1)
+  rescue Zlib::Error, EOFError => e
+    raise Error, "invalid gzip source: #{e.message}"
+  end
+
+  def self.tar_with_tex?(bytes)
+    found = false
+    Gem::Package::TarReader.new(StringIO.new(bytes)) do |tar|
+      tar.each { |entry| found = true if entry.file? && File.extname(entry.full_name).downcase == '.tex' }
+    end
+    found
+  rescue StandardError
+    false
+  end
+
+  def self.tex_content?(bytes)
+    sample = bytes.byteslice(0, 4096).to_s.force_encoding(Encoding::UTF_8).scrub
+    return false if sample.lstrip.match?(/\A(?:%PDF|<!doctype\s+html|<html)/i) || sample.include?("\0")
+
+    sample.match?(/\\(?:documentclass|documentstyle|usepackage|input|include)(?:\s|\{|\[)|\\begin\s*\{document\}/)
+  end
+
+  class Sampler
+    def initialize(client: Client.new, random: Random.new, clock: Date)
+      @client = client
+      @random = random
+      @clock = clock
+    end
+
+    def run!(output:, attempts: 10)
+      raise Error, 'attempts must be positive' unless attempts.positive?
+
+      last_error = nil
+      attempts.times do |attempt|
+        month = random_month
+        total, = query(month, 0)
+        raise Error, "arXiv returned no papers for #{month}" if total.zero?
+        raise Error, "#{month} has #{total} papers; API paging limit is 30,000" if total > 30_000
+
+        offset = @random.rand(total)
+        _, entries = query(month, offset)
+        entry = entries.first || raise(Error, "arXiv returned no paper at offset #{offset}")
+        raise Error, 'arXiv returned an invalid paper identifier' unless valid_id?(entry[:id])
+
+        bytes = @client.get("https://export.arxiv.org/e-print/#{entry[:id]}")
+        kind = ArxivSampler.validate_source!(bytes)
+        return write_result(output, entry, bytes, kind, month, offset, attempt + 1)
+      rescue HttpError
+        raise
+      rescue Error => e
+        last_error = e
+        warn "Skipping candidate #{attempt + 1}: #{e.message}"
+      end
+      raise Error, "could not find a LaTeX source after #{attempts} attempts: #{last_error.message}"
+    end
+
+    private
+
+    def random_month
+      first = Date.new(2007, 4, 1)
+      last = Date.new(@clock.today.year, @clock.today.month, 1) << 1
+      first >> @random.rand((last.year * 12 + last.month) - (first.year * 12 + first.month) + 1)
+    end
+
+    def query(month, offset)
+      next_month = month >> 1
+      final_day = next_month - 1
+      range = "submittedDate:[#{month.strftime('%Y%m%d')}0000 TO #{final_day.strftime('%Y%m%d')}2359]"
+      uri = "#{API}?search_query=#{URI.encode_www_form_component(range)}&start=#{offset}&max_results=1&sortBy=submittedDate&sortOrder=ascending"
+      ArxivSampler.parse_entries(@client.get(uri).to_s)
+    end
+
+    def valid_id?(id)
+      id.to_s.match?(/\A\d{4}\.\d{4,5}v[1-9]\d*\z/)
+    end
+
+    def write_result(output, entry, bytes, kind, month, offset, attempts)
+      FileUtils.mkdir_p(output)
+      slug = entry[:id].to_s.gsub(/[^A-Za-z0-9._-]/, '_')
+      destination = File.join(output, slug)
+      stage = Dir.mktmpdir('arxiv-', output)
+      begin
+        filename = "source.#{kind}"
+        filename += '.gz' if bytes.getbyte(0) == 31 && bytes.getbyte(1) == 139
+        File.binwrite(File.join(stage, filename), bytes)
+        metadata = entry.merge(source_format: kind.to_s, source_sha256: Digest::SHA256.hexdigest(bytes),
+                               source_filename: filename,
+                               source_url: "https://export.arxiv.org/e-print/#{entry[:id]}",
+                               sampling: { month: month.strftime('%Y-%m'), offset: offset, attempts: attempts })
+        File.write(File.join(stage, 'metadata.json'), JSON.pretty_generate(metadata) + "\n")
+        File.open(File.join(output, '.sample_arxiv.lock'), File::RDWR | File::CREAT, 0o600) do |lock|
+          lock.flock(File::LOCK_EX)
+          if File.exist?(destination) || File.symlink?(destination)
+            raise Error,
+                  "refusing to overwrite existing directory #{destination}"
+          end
+
+          File.rename(stage, destination)
+        end
+      ensure
+        FileUtils.rm_rf(stage) if File.exist?(stage)
+      end
+      puts "Downloaded #{entry[:id]} to #{destination}"
+      destination
+    end
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME
+  begin
+    options = { output: 'examples/arxiv', attempts: 10 }
+    OptionParser.new do |opts|
+      opts.banner = 'Usage: tools/sample_arxiv [options]'
+      opts.on('-o', '--output DIR', 'destination directory (default: examples/arxiv)') { |v| options[:output] = v }
+      opts.on('-n', '--attempts N', Integer, 'maximum candidates (default: 10)') { |v| options[:attempts] = v }
+      opts.on('--seed N', Integer, 'seed random selection') { |v| options[:seed] = v }
+      opts.on('-h', '--help', 'show this help') do
+        puts opts
+        exit
+      end
+    end.parse!
+    raise OptionParser::InvalidArgument, "unexpected arguments: #{ARGV.join(' ')}" unless ARGV.empty?
+
+    ArxivSampler::Sampler.new(random: Random.new(options[:seed] || Random.new_seed)).run!(**options.reject do |k,|
+      k == :seed
+    end)
+  rescue ArxivSampler::Error, OptionParser::ParseError, SystemCallError, IOError, Timeout::Error,
+         OpenSSL::SSL::SSLError => e
+    warn "sample_arxiv: #{e.message}"
+    exit 1
+  end
+end

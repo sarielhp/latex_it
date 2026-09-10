@@ -35,7 +35,7 @@ module QualityGate
 
   def self.check_syntax!
     puts "--> #{CYAN}[1/2] Ruby syntax verification (ruby -cw)...#{RESET}"
-    files = ['latex_it', 'tools/setup_ruby_dev', 'tools/gate', 'test/test_latex_it.rb'].select { |f| File.exist?(f) }
+    files = ['latex_it', 'tools/setup_ruby_dev', 'tools/gate', 'tools/sample_arxiv', 'tools/check_arxiv_metadata', 'tools/bws_run', 'test/test_latex_it.rb'].select { |f| File.exist?(f) }
 
     files.each do |f|
       stdout_stderr, status = Open3.capture2e('ruby', '-cw', f)

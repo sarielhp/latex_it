@@ -30,10 +30,29 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout, '--deps'
   end
 
-  def test_pdflatex_rejected
-    _stdout, stderr, status = Open3.capture3(BIN, '--pdflatex')
-    refute status.success?, 'Expected pdflatex to be rejected with non-zero exit code'
-    assert_includes stderr, 'PDFLatex by now is outdated'
+  def test_pdflatex_is_supported_engine
+    assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdflatex')
+    assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdftex')
+  end
+
+  def test_pdflatex_symlink_personality_selects_engine
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'paper.tex'), <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        pdflatex personality
+        \\end{document}
+      TEX
+      launcher = File.join(dir, 'lp')
+      File.symlink(BIN, launcher)
+
+      Dir.chdir(dir) do
+        stdout, stderr, status = Open3.capture3(launcher, 'paper.tex')
+        assert status.success?, "pdflatex personality failed: #{stdout}\n#{stderr}"
+        assert File.file?(File.join(dir, 'paper.pdf'))
+        assert_includes stdout, 'pdflatex'
+      end
+    end
   end
 
   def test_find_main_flag_with_mainfile
@@ -221,16 +240,18 @@ class TestLatexItCLI < Minitest::Test
       File.write(File.join(dir, 'paper.tex'), 'content')
       File.write(File.join(dir, 'paper.pdf'), 'mock pdf')
       FileUtils.mkdir_p(File.join(dir, 'junk'))
+      builder = LatexBuilder.new('paper.tex', {})
 
       sha = Digest::SHA256.file(File.join(dir, 'paper.tex')).hexdigest
       mtime = File.mtime(File.join(dir, 'paper.tex')).to_i
       state = {
         'target' => 'paper.pdf',
+        'engine' => 'xelatex',
+        'signature' => builder.send(:build_signature),
         'sources' => { 'paper.tex' => { 'mtime' => mtime, 'sha' => sha } }
       }
       File.write(File.join(dir, 'junk', '.build_state.json'), JSON.generate(state))
 
-      builder = LatexBuilder.new('paper.tex', {})
       Dir.chdir(dir) do
         assert builder.send(:targets_up_to_date?), 'Expected build to be up to date'
 
@@ -532,6 +553,8 @@ class TestLatexItCLI < Minitest::Test
         assert File.file?('paper.zip')
         assert_includes stdout, 'Created portable zip: paper.zip'
         assert_includes stdout, 'Verifying archive portability in isolated sandbox'
+        assert_includes stdout, '[VERIFIED]'
+        assert_includes stdout, 'Text layout exact match confirmed'
       end
     end
   end
@@ -792,4 +815,3 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 end
-

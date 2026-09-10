@@ -59,7 +59,8 @@ vendor/bundle/
 reviews/archive/
 .review_state.json
 
-# Local tooling shim & arXiv archives
+# Local tooling shim and example corpus
 tools/rtk
+/examples/
 arxiv_*.zip
 arxiv_*_meta.txt

@@ -27,13 +27,13 @@ module VersionBumper
   VERSION_FILE = File.join(REPO_ROOT, 'VERSION')
   LATEX_IT_FILE = File.join(REPO_ROOT, 'latex_it')
 
-  def self.run!(dry_run: false, skip_gate: false)
+  def self.run!(dry_run: false)
     puts "#{BOLD}==> Version Bump Workflow (latex_it)#{RESET}"
 
     Dir.chdir(REPO_ROOT) do
       check_git_repo!
       check_clean_working_tree!
-      run_quality_gate! unless skip_gate
+      run_quality_gate!
 
       current_v = read_current_version
       new_v = compute_next_version(current_v)
@@ -158,8 +158,7 @@ module VersionBumper
 end
 
 options = {
-  dry_run: false,
-  skip_gate: false
+  dry_run: false
 }
 
 OptionParser.new do |opts|
@@ -171,14 +170,10 @@ OptionParser.new do |opts|
     options[:dry_run] = true
   end
 
-  opts.on('--skip-gate', 'Skip running tools/gate prior to bumping') do
-    options[:skip_gate] = true
-  end
-
   opts.on('-h', '--help', 'Show this help message') do
     puts opts
     exit 0
   end
 end.parse!
 
-VersionBumper.run!(dry_run: options[:dry_run], skip_gate: options[:skip_gate]) if __FILE__ == $PROGRAM_NAME
+VersionBumper.run!(dry_run: options[:dry_run]) if __FILE__ == $PROGRAM_NAME

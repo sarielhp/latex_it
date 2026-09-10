@@ -45,6 +45,10 @@ This document provides architectural guidelines, core invariants, development wo
   `xelatex` is the default engine, with `lualatex` and `pdflatex` supported as alternatives.
 - **Dependency Minimalism**:
   Rely on Ruby standard library modules (`fileutils`, `open3`, `optparse`, `tmpdir`, `shellwords`) and minimal mature gems (`rainbow`, `minitest`).
+- **Quality Gate Integrity — Strictly Never Skip**:
+  Skipping or bypassing the quality gate is strictly forbidden under any circumstances. Releases, bumps, and changes must pass the required gate tier without exception.
+- **Async Execution & Reactive Wait (Zero Polling)**:
+  When any command runs longer than 10s and is detached to the background as an async task, the agent **must not** enter a polling loop with `manage_task(action: 'status')` or set sleep timers with `schedule`. The agent must output a single concise notification and **stop calling tools** to yield the turn. The Antigravity environment will automatically wake up the agent via a `<SYSTEM_MESSAGE>` when the command finishes.
 
 ---
 
@@ -124,7 +128,7 @@ Always execute quality workflows through the provided scripts:
 
 ### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
 - Ensures working tree is completely clean (aborts if uncommitted changes exist).
-- Runs [`tools/gate --full`](file:///home/sariel/prog/26/latex_it/tools/gate).
+- Runs [`tools/gate --full`](file:///home/sariel/prog/26/latex_it/tools/gate) automatically. (Do not run `--full` manually before bumping to avoid duplicate gate runs).
 - Increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`.
 - Commits changes, creates a release git tag, and pushes to remote with `--follow-tags`.
 - **Trigger**:
@@ -188,3 +192,9 @@ When reviewing, refactoring, or evaluating changes to `latex_it`, evaluate acros
   ```bash
   rtk sg -p 'def $NAME($$$ARGS) $$$BODY end' -l ruby latex_it
   ```
+- **Async Background Tasks & Reactive Wait**:
+  `run_command` has a 10s synchronous timeout (`WaitMsBeforeAsync: 10000`). When a task runs in the background:
+  - **Never poll**: Do NOT call `manage_task(action: 'status')` or loop in turns.
+  - **Yield immediately**: Post a single concise update explaining the operation is running in the background, and invoke **zero tools** in that turn.
+  - **Await reactive wakeup**: The Antigravity platform automatically wakes the agent with a `<SYSTEM_MESSAGE>` containing the exit code and complete output as soon as the background task finishes.
+  - **Never skip quality gates**: Impatience or long execution time is never a justification to bypass `--full` or skip checks.

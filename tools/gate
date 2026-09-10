@@ -4,6 +4,7 @@
 # Tiered quality gate. The default is cheap enough to run after every edit.
 require 'open3'
 require 'optparse'
+require 'etc'
 
 module QualityGate
   COLORS = { green: "\e[32m", red: "\e[31m", cyan: "\e[36m", bold: "\e[1m", reset: "\e[0m" }.freeze
@@ -53,11 +54,26 @@ module QualityGate
 
   def self.run_tests!(files)
     puts "--> #{color(:cyan, '[2/2]')} #{files.length} test files..."
-    files.each do |name|
-      file = File.join('test', name)
-      output, status = run_test(file)
-      abort_failure("Test failure in #{file}", output) unless status.success?
+    queue = Queue.new
+    files.each { |name| queue << name }
+    failures = []
+    mutex = Mutex.new
+    max_workers = (Etc.nprocessors rescue 4)
+    worker_count = [max_workers, files.length, 4].min
+    threads = worker_count.times.map do
+      Thread.new do
+        while (name = (queue.pop(true) rescue nil))
+          file = File.join('test', name)
+          output, status = run_test(file)
+          mutex.synchronize { failures << [file, output] } unless status.success?
+        end
+      end
     end
+    threads.each(&:join)
+    return if failures.empty?
+
+    failures.each { |file, output| warn color(:red, "❌ Test failure in #{file}:\n") + output }
+    exit 1
   end
 
   def self.run_test(file)

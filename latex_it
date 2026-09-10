@@ -91,7 +91,7 @@ module LaTeXConfig
       "color": null,
 
       // Lockfile concurrency protection
-      "lock": false,
+      "lock": true,
 
       // Treat compilation warnings as fatal errors (-W / --werror)
       "werror": false,
@@ -580,6 +580,203 @@ module LaTeXUtils
   end
 end
 
+class LaTeXBraceChecker
+  VERBATIM_ENVS = %w[verbatim verbatim* lstlisting minted filecontents filecontents* comment alltt].freeze
+
+  def self.check_file(path)
+    return [] unless File.file?(path)
+
+    content = LaTeXUtils.safe_read(path)
+    new(path, content).scan
+  end
+
+  def initialize(path, content)
+    @path = path
+    @lines = content.lines
+    @env_stack = []
+    @brace_stack = []
+    @errors = []
+    @in_verbatim = false
+    @verbatim_end = nil
+  end
+
+  def scan
+    @lines.each_with_index do |raw_line, idx|
+      scan_line(raw_line, idx + 1)
+    end
+
+    check_eof_unclosed
+    @errors
+  end
+
+  private
+
+  def scan_line(raw_line, line_no)
+    if @in_verbatim
+      if raw_line =~ /\\end\{#{Regexp.escape(@verbatim_end)}\}/
+        @in_verbatim = false
+        @verbatim_end = nil
+      end
+      return
+    end
+
+    col = 0
+    len = raw_line.length
+    while col < len
+      ch = raw_line[col]
+      if ch == '\\'
+        col = process_backslash(raw_line, line_no, col, len)
+      elsif ch == '%'
+        break
+      elsif ch == '{'
+        @brace_stack << { line: line_no, col: col + 1, env_depth: @env_stack.size, mismatch: nil }
+        col += 1
+      elsif ch == '}'
+        process_closing_brace(raw_line, line_no, col)
+        col += 1
+      elsif ch == '['
+        process_bracket_open
+        col += 1
+      elsif ch == ']'
+        process_bracket_close(line_no, col)
+        col += 1
+      else
+        col += 1
+      end
+    end
+  end
+
+  def process_backslash(raw_line, line_no, col, len)
+    bs_start = col
+    col += 1 while col < len && raw_line[col] == '\\'
+    bs_count = col - bs_start
+
+    if bs_count.odd?
+      if col < len && '{}[%]'.include?(raw_line[col])
+        return col + 1
+      end
+
+      rest = raw_line[bs_start..-1]
+      if rest =~ /\A\\begin\{([a-zA-Z0-9_\*]+)\}/
+        name = $1
+        if VERBATIM_ENVS.include?(name)
+          @in_verbatim = true
+          @verbatim_end = name
+        else
+          @env_stack << { name: name, line: line_no, col: bs_start + 1, brace_depth: @brace_stack.size }
+        end
+        return bs_start + $&.length
+      elsif rest =~ /\A\\end\{([a-zA-Z0-9_\*]+)\}/
+        name = $1
+        process_env_end(name, line_no)
+        return bs_start + $&.length
+      elsif rest =~ /\A\\\[/
+        @env_stack << { name: '\\[', line: line_no, col: bs_start + 1, brace_depth: @brace_stack.size }
+        return bs_start + 2
+      elsif rest =~ /\A\\\]/
+        process_env_end('\\[', line_no)
+        return bs_start + 2
+      elsif rest =~ /\A\\verb([*|#+~\/!@^"'$])(.*?)\1/
+        return bs_start + $&.length
+      end
+    end
+    col
+  end
+
+  def process_bracket_open
+    if @brace_stack.any?
+      @brace_stack.last[:bracket_depth] = (@brace_stack.last[:bracket_depth] || 0) + 1
+    end
+  end
+
+  def process_bracket_close(line_no, col)
+    return unless @brace_stack.any?
+
+    curr = @brace_stack.last
+    depth = curr[:bracket_depth] || 0
+    if depth > 0
+      curr[:bracket_depth] = depth - 1
+    else
+      curr[:mismatch] ||= {
+        line: line_no,
+        col: col + 1,
+        open_line: curr[:line],
+        open_col: curr[:col]
+      }
+    end
+  end
+
+  def process_closing_brace(raw_line, line_no, col)
+    if @brace_stack.empty?
+      @errors << build_error(
+        line_no, col + 1,
+        "Extra closing brace '}' with no matching open brace",
+        raw_line.chomp
+      )
+    else
+      @brace_stack.pop
+    end
+  end
+
+  def process_env_end(name, end_line)
+    return if @env_stack.empty?
+
+    matching_idx = @env_stack.rindex { |e| e[:name] == name }
+    return unless matching_idx
+
+    target_env = @env_stack[matching_idx]
+    unclosed = @brace_stack.select { |b| b[:env_depth] >= matching_idx }
+    if unclosed.any?
+      culprit = unclosed.last
+      alert_msg = nil
+      if culprit[:mismatch]
+        m = culprit[:mismatch]
+        alert_msg = "Probable mistype at line #{m[:line]}:#{m[:col]} of '}' as ']'"
+      end
+
+      msg = "Unclosed open brace '{' (opened on line #{culprit[:line]}, col #{culprit[:col]}) inside environment '#{target_env[:name]}' (ended at line #{end_line})"
+      line_text = @lines[culprit[:line] - 1].to_s.chomp
+
+      @errors << build_error(culprit[:line], culprit[:col], msg, line_text, alert_msg: alert_msg)
+      @brace_stack.reject! { |b| b[:env_depth] >= matching_idx }
+    end
+
+    @env_stack.slice!(matching_idx..-1)
+  end
+
+  def check_eof_unclosed
+    @brace_stack.each do |unclosed|
+      alert_msg = nil
+      if unclosed[:mismatch]
+        m = unclosed[:mismatch]
+        alert_msg = "Probable mistype at line #{m[:line]}:#{m[:col]} of '}' as ']'"
+      end
+
+      msg = "Unclosed open brace '{' (opened on line #{unclosed[:line]}, col #{unclosed[:col]}) reached end of file"
+      line_text = @lines[unclosed[:line] - 1].to_s.chomp
+      @errors << build_error(unclosed[:line], unclosed[:col], msg, line_text, alert_msg: alert_msg)
+    end
+  end
+
+  def build_error(line_no, col_no, message, snippet, alert_msg: nil)
+    err_block = ["! #{message}"]
+    err_block << "  Alert: #{alert_msg}" if alert_msg
+    err_block << "l.#{line_no} #{snippet}"
+
+    {
+      file: @path,
+      line: line_no,
+      col: col_no,
+      line_str: line_no.to_s,
+      text: err_block.join("\n"),
+      err_block: err_block,
+      base_color: :red,
+      has_alert: !alert_msg.nil?,
+      index: -1000
+    }
+  end
+end
+
 class LatexBuilder
   attr_reader :options, :filename, :bfilename, :bdir, :engine_name
 
@@ -706,6 +903,7 @@ class LatexBuilder
 
       FileUtils.rm_f('junk/.build_state.json')
       junk_dir_create
+      snapshot_build_inputs!
       total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
 
       return false unless run_convergence_loop
@@ -835,6 +1033,24 @@ class LatexBuilder
     deps.uniq
   end
 
+  def snapshot_build_inputs!
+    @build_start_time = Time.now
+    @input_snapshots = {}
+    files_to_snapshot = [@filename]
+    files_to_snapshot.concat(Dir['*.tex', '*.bib', 'refs/*.bib'].select { |f| File.file?(f) })
+    if File.exist?("junk/#{@bfilename}.fls")
+      files_to_snapshot.concat(extract_fls_dependencies("junk/#{@bfilename}.fls"))
+    end
+    files_to_snapshot.uniq.each do |f|
+      next unless File.file?(f)
+
+      @input_snapshots[f] = {
+        mtime: File.mtime(f).to_f,
+        sha: (Digest::SHA256.file(f).hexdigest rescue nil)
+      }
+    end
+  end
+
   def save_build_state!
     return if @cacheable_build == false
     return unless File.exist?("junk/#{@bfilename}.pdf") && File.size("junk/#{@bfilename}.pdf") > 0
@@ -845,14 +1061,31 @@ class LatexBuilder
     Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }.each { |b| deps << b }
     deps.uniq!
 
+    tainted = false
     sources = {}
     deps.each do |dep|
       next unless File.file?(dep)
 
+      current_sha = Digest::SHA256.file(dep).hexdigest
+      current_mtime = File.mtime(dep).to_f
+
+      if @input_snapshots && @input_snapshots[dep]
+        snap = @input_snapshots[dep]
+        tainted = true if snap[:sha] && snap[:sha] != current_sha
+      elsif @build_start_time && current_mtime >= @build_start_time.to_f
+        tainted = true
+      end
+
       sources[dep] = {
         'mtime' => File.mtime(dep).to_i,
-        'sha' => Digest::SHA256.file(dep).hexdigest
+        'sha' => current_sha
       }
+    end
+
+    if tainted
+      FileUtils.rm_f('junk/.build_state.json')
+      puts "      #{Rainbow('Note: Source files modified during compilation; re-run required.').yellow}" unless @options[:score]
+      return
     end
 
     state = {
@@ -909,13 +1142,41 @@ class LatexBuilder
     puts "#{@bfilename}.pdf: #{deps.join(' ')}"
   end
 
+  def canonical_build_dir
+    target_dir = @bdir ? File.expand_path(@bdir) : Dir.pwd
+    File.realpath(target_dir) rescue target_dir
+  end
+
+  def path_hash
+    @path_hash ||= Digest::SHA256.hexdigest(canonical_build_dir)[0..15]
+  end
+
+  def project_tmp_dir
+    @project_tmp_dir ||= begin
+      dir = File.join(Dir.tmpdir, "latex_it_#{Process.uid}")
+      FileUtils.mkdir_p(dir, mode: 0o700)
+      dir
+    end
+  end
+
+  def project_tmp_file(suffix)
+    File.join(project_tmp_dir, "#{path_hash}_#{@bfilename}_#{suffix}")
+  end
+
   def with_lock
     return yield unless @options[:lock]
 
-    FileUtils.mkdir_p('/tmp/sariel/latex')
-    lock_file = "/tmp/sariel/latex/#{@bfilename}.lock"
-    File.open(lock_file, File::RDWR | File::CREAT, 0o644) do |f|
-      f.flock(File::LOCK_EX)
+    lock_file = project_tmp_file('build.lock')
+    File.open(lock_file, File::RDWR | File::CREAT, 0o600) do |f|
+      unless f.flock(File::LOCK_EX | File::LOCK_NB)
+        puts "      #{Rainbow("Another latex_it process is running for #{@bfilename}. Waiting for it to finish...").yellow}" unless @options[:score]
+        f.flock(File::LOCK_EX)
+      end
+
+      f.truncate(0) rescue nil
+      f.puts "pid: #{Process.pid}\nstarted: #{Time.now.iso8601}\ntarget: #{File.expand_path(@filename)}" rescue nil
+      f.flush rescue nil
+
       yield
     ensure
       f.flock(File::LOCK_UN) rescue nil
@@ -1249,8 +1510,7 @@ class LatexBuilder
     errcntmd = lines.count { |l| l.include?('multiply defined') && l.include?('LaTeX Warning') }
 
     begin
-      FileUtils.mkdir_p('/tmp/sariel')
-      File.write('/tmp/sariel/latex_multiply_defined', "#{errcntmd}\n")
+      File.write(project_tmp_file('multiply_defined'), "#{errcntmd}\n")
     rescue StandardError
       nil
     end
@@ -1617,7 +1877,9 @@ class LatexBuilder
     max_width = all_items.map { |item| item[:line_str].to_s.length }.max || 0
 
     all_sorted = all_items.sort_by do |item|
-      [item[:file] || "./#{@filename}", item[:line] || 0, item[:index] || 0]
+      idx = item[:index] || 0
+      priority = idx.negative? ? 0 : 1
+      [priority, item[:file] || "./#{@filename}", item[:line] || 0, idx]
     end
 
     current_file = nil
@@ -1863,6 +2125,8 @@ class LatexBuilder
     puts Rainbow('===============================================================').red.bright
 
     errors = extract_errors(content)
+    brace_errors = check_source_braces
+    errors = brace_errors + errors
 
     fallback = errors.empty? ? content.lines.last(15) : []
     _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback)
@@ -1872,17 +2136,46 @@ class LatexBuilder
     raw_warns = extract_warnings(content, false)
     alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
 
-    errors = [num_errors, count_latex_errors(raw, 1)].max
-    alerts = alert_items.size
-    warnings = regular_warns.size
-    whatevers = whatever_items.size
+    brace_alerts_count = brace_errors.count { |e| e[:has_alert] }
+    errors_count = [num_errors, count_latex_errors(raw, 1)].max
+    alerts_count = alert_items.size + brace_alerts_count
+    warnings_count = regular_warns.size
+    whatevers_count = whatever_items.size
     print_summary_line(
-      errors, alerts, warnings, whatevers,
-      suppressed_alerts: alerts > 0,
-      suppressed_warnings: warnings > 0,
-      suppressed_whatevers: whatevers > 0
+      errors_count, alerts_count, warnings_count, whatevers_count,
+      suppressed_alerts: alerts_count > 0,
+      suppressed_warnings: warnings_count > 0,
+      suppressed_whatevers: whatevers_count > 0
     )
     exit 1
+  end
+
+  def check_source_braces
+    if File.file?(@filename)
+      errs = LaTeXBraceChecker.check_file(@filename)
+      return errs unless errs.empty?
+    end
+
+    candidates = []
+    if File.exist?("junk/#{@bfilename}.fls")
+      candidates.concat(extract_fls_dependencies("junk/#{@bfilename}.fls").select { |f| f.end_with?('.tex') })
+    end
+    candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
+    candidates = candidates.uniq.reject do |f|
+      f == @filename ||
+        f.start_with?('styles/', 'macros/', 'pkg/', 'packages/') ||
+        f =~ %r{(?:prefix|preamble|macros|styles)\.tex\z}i
+    end
+
+    candidates.each do |f|
+      errs = LaTeXBraceChecker.check_file(f)
+      return errs unless errs.empty?
+    end
+
+    []
+  rescue StandardError => e
+    warn "Warning: Brace check failed: #{e.message}" if @options[:verbose]
+    []
   end
 
   def update_target_file(src, dst, update_on_diff: false)
@@ -3464,7 +3757,7 @@ options = {
   bib: cfg['bib'],
   passes: (cfg['passes'] || 3).to_i.clamp(1, 3),
   time: cfg['time'] == true,
-  lock: cfg['lock'] == true,
+  lock: cfg.key?('lock') ? (cfg['lock'] == true) : true,
   score: false,
   color: cfg['color'],
   no_env: is_env_free,
@@ -3620,8 +3913,8 @@ parser = OptionParser.new do |opts|
     options[:color] = v
   end
 
-  opts.on('--lock', 'Enable lockfile concurrency protection') do
-    options[:lock] = true
+  opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') do |v|
+    options[:lock] = v
   end
 
   opts.on('-s', '--score', '[-score] Suppress stdout and output error/warning count from the last LaTeX run') do

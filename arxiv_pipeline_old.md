@@ -34,7 +34,7 @@ All tools required by `kitit arxiv` were checked on the local machine. **All too
 
 ## 3. Pipeline Architecture: Step-by-Step Flow
 
-The pipeline operates across two temporary staging directories in `/tmp/sariel/kitit_arxiv/`:
+The pipeline operates across two temporary staging directories in `/tmp/latex_it_arxiv/`:
 - **Stage 1 (`sdir` = `latex/`)**: Dependency discovery, clean compile, and collection.
 - **Stage 2 (`sdir_b` = `latex_2/`)**: Flattening, macro sanitization, and packaging.
 
@@ -47,7 +47,7 @@ Project Root
     │     latexpand --empty-comments -> styles/*.sty
     │
     ├─► [Stage 1: Clean Compilation & Collection]
-    │     cmd_zip -> Unpack in /tmp/sariel/kitit_arxiv/latex/
+    │     cmd_zip -> Unpack in /tmp/latex_it_arxiv/latex/
     │     latexmk -f (cleared TEXINPUTS, BIBINPUTS)
     │     arxiv-collector main.tex -> arxiv.tar.gz
     │       • Tracks used figures/files
@@ -56,7 +56,7 @@ Project Root
     │       • Captures main.bbl
     │
     ├─► [Stage 2: Flattening & Sanitizing]
-    │     Unpack arxiv.tar.gz in /tmp/sariel/kitit_arxiv/latex_2/
+    │     Unpack arxiv.tar.gz in /tmp/latex_it_arxiv/latex_2/
     │     flatex -b main.tex -> inlines \input into single .tex
     │     Strip flatex markers, empty comments, sariel_computer.sty
     │     Clean intermediate artifacts

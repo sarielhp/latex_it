@@ -73,7 +73,7 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
   - Legacy `.config_latex` supported as fallback.
 - Supports custom macro injections via `LATEXOPTS` or `LATEXOPTIONS`.
 - Provides `--no-env` (`--env-free`) to sanitize TeX-related environment variables (`TEXINPUTS`, `BIBINPUTS`, etc.) to prevent environment pollution.
-- Supports concurrency control with file locking (`--lock`).
+- Automatic concurrency control with path-hashed lockfile protection (`--[no-]lock`, default: enabled).
 
 ### 9. Portable Paper Archive & Verification (`-z` and `-t`)
 - **Portable Zip Bundling (`-z` / `--zip`)**:
@@ -153,7 +153,7 @@ Compilation Options:
         --[no-]inject-styles         Enable/disable isolating styles into styles/ and injecting \input@path
         --init-config                Create a local .l.jsonc configuration template in the current directory
         --[no-]color                 Enable or disable colored terminal output (default: auto)
-        --lock                       Enable lockfile concurrency protection
+        --[no-]lock                  Enable or disable lockfile concurrency protection (default: enabled)
     -s, --score                      [-score] Suppress stdout and output error/warning count from the last LaTeX run
         --no-env, --env-free, --envfree
                                      [-no-env, -env-free] Reset environment variables used by LaTeX/BibTeX/Biber

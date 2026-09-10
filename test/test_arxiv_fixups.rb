@@ -9,7 +9,10 @@ load File.expand_path('../tools/test_arxiv', __dir__)
 
 class TestArxivFixups < Minitest::Test
   def test_matching_source_fixup_is_cataloged
-    metadata = JSON.parse(File.read(File.expand_path('../examples/arxiv/2501.02798v1/metadata.json', __dir__)))
+    path = File.expand_path('../examples/arxiv/2501.02798v1/metadata.json', __dir__)
+    skip 'examples/arxiv fixture not present' unless File.exist?(path)
+
+    metadata = JSON.parse(File.read(path))
     fixup = ArxivPaperTest.fixup_for(metadata)
     refute_nil fixup
     assert_equal '2501.02798v1', fixup['arxiv_id']

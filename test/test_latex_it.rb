@@ -871,4 +871,161 @@ class TestLatexItCLI < Minitest::Test
       assert_includes plain_custom, 'Whatevers: 1 (suppressed)'
     end
   end
+
+  def test_path_hash_and_project_tmp_file
+    Dir.mktmpdir do |dir1|
+      Dir.mktmpdir do |dir2|
+        b1 = LatexBuilder.new(File.join(dir1, 'main.tex'), {})
+        b2 = LatexBuilder.new(File.join(dir2, 'main.tex'), {})
+
+        refute_equal b1.send(:path_hash), b2.send(:path_hash)
+
+        lock1 = b1.send(:project_tmp_file, 'build.lock')
+        lock2 = b2.send(:project_tmp_file, 'build.lock')
+
+        refute_equal lock1, lock2
+        refute_includes lock1, '/tmp/sariel'
+        assert_includes lock1, "latex_it_#{Process.uid}"
+        assert_includes lock1, 'main_build.lock'
+      end
+    end
+  end
+
+  def test_with_lock_blocks_concurrent_runs
+    Dir.mktmpdir do |dir|
+      builder = LatexBuilder.new(File.join(dir, 'paper.tex'), lock: true)
+      executed = false
+
+      builder.send(:with_lock) do
+        executed = true
+        # While locked, another process or thread attempting non-blocking lock should fail
+        lock_file = builder.send(:project_tmp_file, 'build.lock')
+        assert File.exist?(lock_file)
+
+        File.open(lock_file, File::RDWR) do |f2|
+          assert_equal false, f2.flock(File::LOCK_EX | File::LOCK_NB)
+        end
+      end
+
+      assert executed
+    end
+  end
+
+  def test_save_build_state_detects_mutation_during_build
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        tex = 'paper.tex'
+        File.write(tex, "Original content\n")
+        FileUtils.mkdir_p('junk')
+        File.write('junk/paper.pdf', 'dummy pdf')
+        File.write('paper.pdf', 'dummy pdf')
+
+        builder = LatexBuilder.new(tex, lock: true)
+        builder.send(:snapshot_build_inputs!)
+
+        # User modifies paper.tex during compilation
+        File.write(tex, "Modified content with typo fix\n")
+
+        builder.send(:save_build_state!)
+
+        # Build state must be discarded because paper.tex was mutated!
+        refute File.exist?('junk/.build_state.json')
+        refute builder.send(:targets_up_to_date?)
+      end
+    end
+  end
+
+  def test_save_build_state_clean_enables_targets_up_to_date
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        tex = 'paper.tex'
+        File.write(tex, "Stable content\n")
+        FileUtils.mkdir_p('junk')
+        File.write('junk/paper.pdf', 'dummy pdf')
+        File.write('paper.pdf', 'dummy pdf')
+
+        builder = LatexBuilder.new(tex, lock: true)
+        builder.send(:snapshot_build_inputs!)
+
+        builder.send(:save_build_state!)
+
+        # Build state must be saved cleanly
+        assert File.exist?('junk/.build_state.json')
+        assert builder.send(:targets_up_to_date?)
+      end
+    end
+  end
+
+  def test_count_errors_in_log_uses_project_tmp_file
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        log_file = 'junk/test.log'
+        File.write(log_file, "LaTeX Warning: Label `foo' multiply defined.\n")
+
+        FileUtils.rm_f('/tmp/sariel/latex_multiply_defined')
+        builder = LatexBuilder.new('paper.tex', {})
+        builder.send(:count_errors_in_log, 0, log_file)
+
+        tmp_file = builder.send(:project_tmp_file, 'multiply_defined')
+        assert File.exist?(tmp_file)
+        assert_equal "1\n", File.read(tmp_file)
+        refute File.exist?('/tmp/sariel/latex_multiply_defined')
+      end
+    end
+  end
+
+  def test_brace_checker_reproduces_occupancy_reviewed_error
+    path = '/home/sariel/papers/teach/26/fa26_rand_alg/notes/07_occupancy/occupancy_reviewed.tex'
+    skip 'occupancy_reviewed.tex fixture not available' unless File.file?(path)
+
+    errs = LaTeXBraceChecker.check_file(path)
+    assert_equal 1, errs.size
+    err = errs.first
+    assert_equal 385, err[:line]
+    assert_equal 10, err[:col]
+    assert_includes err[:text], "inside environment 'equation*'"
+    assert_includes err[:text], '\\frac{Y_{i-1}{2}.'
+  end
+
+  def test_brace_checker_detects_mismatched_bracket_alert
+    snippet = "\\begin{equation*}\n  \\frac{Y_{i-1}{2].\n\\end{equation*}\n"
+    errs = LaTeXBraceChecker.new('test.tex', snippet).scan
+    assert_equal 1, errs.size
+    err = errs.first
+    assert_equal 2, err[:line]
+    assert err[:has_alert]
+    assert_includes err[:text], "Probable mistype at line 2:18 of '}' as ']'"
+    assert_includes err[:text], "inside environment 'equation*'"
+  end
+
+  def test_brace_checker_ignores_bourbaki_and_half_open_intervals
+    snippet = <<~LATEX
+      \\begin{theorem}
+        Let $x \\in [0, 1)$ and $y \\in ]0, 1]$. We have $\\mathbf{P}[ X \\in (0, 1] ] = 1$.
+      \\end{theorem}
+    LATEX
+    errs = LaTeXBraceChecker.new('test.tex', snippet).scan
+    assert_empty errs
+  end
+
+  def test_brace_checker_ignores_verbatim_blocks
+    snippet = <<~LATEX
+      \\begin{document}
+      \\begin{verbatim}
+        This is { unclosed in verbatim
+      \\end{verbatim}
+      Text with \\verb|{ unclosed| here.
+      \\end{document}
+    LATEX
+    errs = LaTeXBraceChecker.new('test.tex', snippet).scan
+    assert_empty errs
+  end
+
+  def test_brace_checker_detects_extra_closing_brace
+    snippet = "\\begin{document}\nhello}\n\\end{document}\n"
+    errs = LaTeXBraceChecker.new('test.tex', snippet).scan
+    assert_equal 1, errs.size
+    assert_includes errs.first[:text], "Extra closing brace '}'"
+  end
 end

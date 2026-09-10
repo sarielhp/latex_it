@@ -24,12 +24,12 @@ class TestArxivSupport < Minitest::Test
   def test_meta_extraction_authors
     tex = <<~TEX
       \\documentclass{article}
-      \\author{Sariel Har-Peled\\thanks{Supported by NSF}\\\\University of Illinois \\and Timothy M. Chan\\affil{UIUC}}
+      \\author{Alice Smith\\thanks{Supported by NSF}\\\\University of Illinois \\and Timothy M. Chan\\affil{UIUC}}
       \\begin{document}
       \\end{document}
     TEX
     authors = LaTeXMetaExtractor.extract_authors(tex)
-    assert_includes authors, "Sariel Har-Peled"
+    assert_includes authors, "Alice Smith"
     assert_includes authors, "Timothy M. Chan"
     refute_includes authors, "University of Illinois"
     refute_includes authors, "Supported by NSF"

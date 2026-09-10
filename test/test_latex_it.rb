@@ -884,8 +884,9 @@ class TestLatexItCLI < Minitest::Test
         lock2 = b2.send(:project_tmp_file, 'build.lock')
 
         refute_equal lock1, lock2
-        refute_includes lock1, '/tmp/sariel'
-        assert_includes lock1, "latex_it_#{Process.uid}"
+        user = ENV['USER'] || 'user'
+        refute_includes lock1, "/tmp/#{user}"
+        assert_equal File.join(Dir.tmpdir, "latex_it_#{Process.uid}"), File.dirname(lock1)
         assert_includes lock1, 'main_build.lock'
       end
     end
@@ -963,14 +964,16 @@ class TestLatexItCLI < Minitest::Test
         log_file = 'junk/test.log'
         File.write(log_file, "LaTeX Warning: Label `foo' multiply defined.\n")
 
-        FileUtils.rm_f('/tmp/sariel/latex_multiply_defined')
+        user = ENV['USER'] || 'user'
+        legacy_path = "/tmp/#{user}/latex_multiply_defined"
+        FileUtils.rm_f(legacy_path)
         builder = LatexBuilder.new('paper.tex', {})
         builder.send(:count_errors_in_log, 0, log_file)
 
         tmp_file = builder.send(:project_tmp_file, 'multiply_defined')
         assert File.exist?(tmp_file)
         assert_equal "1\n", File.read(tmp_file)
-        refute File.exist?('/tmp/sariel/latex_multiply_defined')
+        refute File.exist?(legacy_path)
       end
     end
   end

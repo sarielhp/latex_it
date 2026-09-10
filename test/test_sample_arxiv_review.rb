@@ -43,7 +43,7 @@ class TestSampleArxivReview < Minitest::Test
   def test_complete_download_preserves_bytes_and_provenance
     client = QueueClient.new([feed, feed, source])
     Dir.mktmpdir('sampler-review-') do |dir|
-      sampler = ArxivSampler::Sampler.new(client: client, random: Random.new(42))
+      sampler = ArxivSampler::Sampler.new(client: client, random: Random.new(42), cache_dir: nil)
       capture_io { sampler.run!(output: dir, attempts: 1) }
       result = File.join(dir, '1006.0038v3')
       metadata = JSON.parse(File.read(File.join(result, 'metadata.json')))
@@ -65,7 +65,7 @@ class TestSampleArxivReview < Minitest::Test
   def test_pdf_only_candidate_is_skipped_before_saving_valid_source
     client = QueueClient.new([feed, feed, '%PDF-1.7', feed('1006.0040v1'), feed('1006.0040v1'), source])
     Dir.mktmpdir('sampler-review-') do |dir|
-      sampler = ArxivSampler::Sampler.new(client: client, random: Random.new(42))
+      sampler = ArxivSampler::Sampler.new(client: client, random: Random.new(42), cache_dir: nil)
       capture_io { sampler.run!(output: dir, attempts: 2) }
       refute File.exist?(File.join(dir, '1006.0038v3'))
       assert File.file?(File.join(dir, '1006.0040v1', 'metadata.json'))
@@ -79,7 +79,7 @@ class TestSampleArxivReview < Minitest::Test
       existing = File.join(dir, '1006.0038v3')
       FileUtils.mkdir_p(existing)
       File.write(File.join(existing, 'marker'), 'keep')
-      sampler = ArxivSampler::Sampler.new(client: client, random: Random.new(42))
+      sampler = ArxivSampler::Sampler.new(client: client, random: Random.new(42), cache_dir: nil)
       capture_io do
         assert_raises(ArxivSampler::Error) { sampler.run!(output: dir, attempts: 1) }
       end

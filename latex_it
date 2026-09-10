@@ -96,6 +96,13 @@ module LaTeXConfig
       // Treat compilation warnings as fatal errors (-W / --werror)
       "werror": false,
 
+      // Legacy REVTeX 4.0 compatibility files. Installed files are used only
+      // for compiler subprocesses; project sources are never modified.
+      "revtex4": {
+        "enabled": true,
+        "texmf_dirs": []
+      },
+
       // Format warnings/errors for Emacs AUCTeX integration
       "emacs": false,
 
@@ -246,6 +253,50 @@ module LaTeXConfig
   end
 end
 
+module LaTeXCompatibility
+  REPO_TEXMF = File.expand_path('vendor/revtex4', __dir__).freeze
+  INSTALLED_TEXMF = File.expand_path('~/.local/share/latex_it/texmf').freeze
+
+  def self.texmf_dirs(options = {})
+    return [] if ENV['LATEX_IT_DISABLE_BUNDLED_REVTeX'] == '1'
+
+    cfg = options[:revtex4].is_a?(Hash) ? options[:revtex4] : {}
+    return [] if cfg['enabled'] == false
+
+    configured = Array(cfg['texmf_dirs']).map { |path| File.expand_path(path.to_s) }
+    candidates = [INSTALLED_TEXMF, REPO_TEXMF] + configured
+    candidates.select { |path| File.directory?(path) }.uniq
+  end
+
+  def self.compiler_environment(options, base = ENV.to_h)
+    dirs = texmf_dirs(options)
+    return base if dirs.empty?
+
+    input = dirs.map { |dir| File.join(dir, 'tex', 'latex', 'revtex4') }
+    old = base['TEXINPUTS'].to_s
+    input << old unless old.empty?
+    env = base.dup
+    env['TEXINPUTS'] = input.join(File::PATH_SEPARATOR) + File::PATH_SEPARATOR
+    env['BIBINPUTS'] = input.join(File::PATH_SEPARATOR) + File::PATH_SEPARATOR if base.key?('BIBINPUTS')
+    env
+  end
+
+  def self.files_used_by_fls(fls_path, options)
+    dirs = texmf_dirs(options)
+    return [] unless File.file?(fls_path) && !dirs.empty?
+
+    roots = dirs.map { |dir| File.expand_path(dir) }
+    File.read(fls_path).each_line.filter_map do |line|
+      next unless line.start_with?('INPUT ')
+
+      path = File.expand_path(line.delete_prefix('INPUT ').strip)
+      roots.any? { |root| path.start_with?(root + File::SEPARATOR) } ? path : nil
+    end.uniq
+  rescue StandardError
+    []
+  end
+end
+
 module LaTeXUtils
   def self.normalize_engine(engine)
     return 'xelatex' if engine.nil? || engine.to_s.strip.empty?
@@ -297,7 +348,46 @@ module LaTeXUtils
       return 'lualatex'
     end
 
+    # inputenc is incompatible with XeTeX and LuaTeX.  Keep the configured
+    # XeLaTeX default, but choose pdfLaTeX automatically for legacy sources.
+    if content =~ /\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{\s*inputenc\s*\}/i
+      return 'pdflatex'
+    end
+
     nil
+  end
+
+  def self.source_requires_pdflatex?(path)
+    !source_pdflatex_reasons(path).empty?
+  end
+
+  def self.source_pdflatex_reasons(path)
+    return [] unless path && File.file?(path)
+
+    content = strip_latex_comments(safe_read(path))
+    reasons = []
+    if content.match?(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{\s*inputenc\s*\}/i)
+      reasons << 'inputenc'
+    end
+    if content.match?(/\\includegraphics\s*(?:\[[^\]]*\])?\s*\{[^}\n]*\.eps(?:\s*\})/i) ||
+       content.match?(/\\epsfig\s*\{[^}\n]*\bfile\s*=\s*[^,}\n]*\.eps(?:\s*[,}])/i)
+      reasons << 'EPS graphics'
+    end
+    reasons
+  end
+
+  def self.strip_latex_comments(content)
+    content.lines.map do |line|
+      line.sub(/(?<!\\)%.*$/, '')
+    end.join
+  end
+
+  def self.compatible_engine(engine, path)
+    normalized = normalize_engine(engine)
+    return 'pdflatex' if %w[xelatex lualatex].include?(normalized) &&
+                         source_requires_pdflatex?(path)
+
+    normalized
   end
 
   def self.safe_read(path)
@@ -849,7 +939,18 @@ class LatexBuilder
                        ENV['LATEX_ENGINE'] ||
                        'xelatex'
 
-    @engine_name = LaTeXUtils.normalize_engine(candidate_engine)
+    requested_engine = LaTeXUtils.normalize_engine(candidate_engine)
+    pdflatex_reasons = LaTeXUtils.source_pdflatex_reasons(@filename)
+    incompatible = %w[xelatex lualatex].include?(requested_engine) &&
+                   !pdflatex_reasons.empty?
+    reason = pdflatex_reasons.join(' and ')
+    if incompatible && @options[:engine_explicit]
+      puts Rainbow(" -- Source uses #{reason}; #{requested_engine} may fail. Recommended: --pdflatex").yellow
+    else
+      requested_engine = LaTeXUtils.compatible_engine(requested_engine, @filename)
+      puts Rainbow(" -- Source uses #{reason}; selecting pdflatex automatically.").cyan if incompatible
+    end
+    @engine_name = requested_engine
     LaTeXUtils.check_program(@engine_name)
 
     @latex_flags = ['-interaction=nonstopmode', '-synctex=1', '-no-mktex=tfm', '-recorder', '-output-directory=junk', '-file-line-error']
@@ -921,7 +1022,7 @@ class LatexBuilder
       f.puts '========================================'
     end
 
-    stdout_stderr, status = Open3.capture2e(*cmd_args)
+    stdout_stderr, status = Open3.capture2e(LaTeXCompatibility.compiler_environment(@options), *cmd_args)
     st = status.exitstatus || 0
 
     File.open(lgx, 'a') { |f| f.write(stdout_stderr) }
@@ -2052,7 +2153,7 @@ class LatexPackager
       next if clean_path == @filename || clean_path == "#{@bfilename}.pdf"
 
       case File.extname(clean_path).downcase
-      when '.sty', '.cls', '.clo', '.def', '.bbx', '.cbx'
+      when '.sty', '.cls', '.clo', '.def', '.bbx', '.cbx', '.rtx'
         styles << clean_path
       when '.pdf', '.png', '.jpg', '.jpeg', '.eps', '.mps'
         figures << clean_path unless clean_path.end_with?("#{@bfilename}.pdf")
@@ -2320,12 +2421,30 @@ class LatexPackager
       'TEXMFCONFIG' => texmf_config,
       'TEXMFCACHE' => texmf_cache,
       'XDG_CONFIG_HOME' => xdg_config,
-      'XDG_CACHE_HOME' => xdg_cache
+      'XDG_CACHE_HOME' => xdg_cache,
+      'LATEX_IT_DISABLE_BUNDLED_REVTeX' => '1'
     )
   end
 end
 
 module LaTeXMetaExtractor
+  ARXIV_ABSTRACT_SYMBOLS = {
+    '–' => '-', '—' => '--', '−' => '-', '‐' => '-', '…' => '...',
+    '“' => '"', '”' => '"', '‘' => "'", '’' => "'", ' ' => ' ',
+    '≤' => '\\leq', '≥' => '\\geq', '≠' => '\\ne', '×' => '\\times',
+    '·' => '\\cdot', '∞' => '\\infty', '∈' => '\\in', '→' => '\\to',
+    'α' => '\\alpha', 'β' => '\\beta', 'γ' => '\\gamma', 'δ' => '\\delta',
+    'ε' => '\\epsilon', 'θ' => '\\theta', 'λ' => '\\lambda', 'μ' => '\\mu',
+    'π' => '\\pi', 'ρ' => '\\rho', 'σ' => '\\sigma', 'φ' => '\\phi',
+    'ω' => '\\omega'
+  }.freeze
+  ARXIV_ACCENTS = {
+    "\u0301" => "\\'", "\u0300" => "\\`", "\u0302" => "\\^",
+    "\u0308" => '\\"', "\u0303" => '\\~', "\u0327" => '\\c',
+    "\u030a" => '\\r', "\u0304" => '\\=', "\u0306" => '\\u',
+    "\u030c" => '\\v', "\u0328" => '\\k', "\u0307" => '\\.'
+  }.freeze
+
   def self.extract(main_tex, base_dir = '.', pdf_path = nil, fls_path = nil, log_path = nil, extra_comments = nil)
     raw_content = LaTeXUtils.safe_read(File.join(base_dir, main_tex))
     title = extract_title(raw_content)
@@ -2339,6 +2458,7 @@ module LaTeXMetaExtractor
       title: title,
       authors: authors,
       abstract: abstract,
+      abstract_form: extract_abstract_for_arxiv(raw_content),
       page_count: page_count,
       fig_count: fig_count,
       comments: comments
@@ -2400,6 +2520,7 @@ module LaTeXMetaExtractor
     str.gsub!(/\\\\(\[[^\]]*\])?/, ' ')
     str.gsub!(/\\newline/, ' ')
     str.gsub!(/~/, ' ')
+    str.gsub!(/\\%/, '%')
     # Turn common TeX accent forms (for example Jos\'{e}) into their
     # printable letter before comparing metadata with extracted PDF text.
     str.gsub!(/\\(?:['"`^~=\.])\s*\{([^{}]*)\}/, '\\1')
@@ -2521,8 +2642,7 @@ module LaTeXMetaExtractor
     end
     return '' if raw.nil?
 
-    lines = raw.lines.map { |l| l.sub(/(?<!\\)%.*$/, '') }
-    raw = lines.join
+    raw = strip_latex_comments(raw)
 
     raw.gsub!(/\\begin\{(?:itemize|enumerate)\}/, '')
     raw.gsub!(/\\end\{(?:itemize|enumerate)\}/, '')
@@ -2531,11 +2651,98 @@ module LaTeXMetaExtractor
     clean = clean_latex_formatting(raw)
     clean = clean_latex_math(clean)
 
-    paragraphs = clean.split(/\n\s*\n/).map do |p|
-      p.gsub(/\s+/, ' ').strip
+    paragraphs = clean.split(/\n[^\S\r\n]*\n+/).map do |p|
+      p.gsub(/[[:space:]]+/, ' ').strip
     end.reject(&:empty?)
 
     paragraphs.join("\n\n")
+  end
+
+  # Returns text suitable for the arXiv web form.  The form accepts a small
+  # MathJax subset, requires ASCII, and preserves a line break only when the
+  # following line starts with whitespace.  Therefore paragraphs are emitted
+  # as single physical lines separated by an indented line.
+  def self.extract_abstract_for_arxiv(content)
+    raw = abstract_source(content)
+    return '' if raw.nil?
+
+    raw = strip_latex_comments(raw)
+    raw.gsub!(/\\begin\{(?:itemize|enumerate)\}/, '')
+    raw.gsub!(/\\end\{(?:itemize|enumerate)\}/, '')
+    raw.gsub!(/\\item\s*/, '- ')
+    clean = protect_math(raw) do |text|
+      text = clean_latex_formatting(text)
+      text = clean_form_commands(text)
+      ascii_form_text(text)
+    end
+    clean = ascii_form_text(clean)
+    paragraphs = clean.split(/\n[^\S\r\n]*\n+/).filter_map do |paragraph|
+      value = paragraph.gsub(/[[:space:]]+/, ' ').strip
+      value.empty? ? nil : value
+    end
+    paragraphs.join("\n ")
+  end
+
+  def self.abstract_source(content)
+    if content =~ /\\begin\{abstract\}(.*?)\\end\{abstract\}/m
+      Regexp.last_match(1)
+    elsif (idx = content.index(/\\abstract\s*\{/))
+      extract_balanced_braces(content, content.index('{', idx))
+    end
+  end
+
+  def self.protect_math(text)
+    math = []
+    protected = text.gsub(/\$[^$\n]*\$|\\\([^\n]*?\\\)|\\\[[\s\S]*?\\\]/) do |value|
+      math << value
+      "\u0000M#{math.length - 1}\u0000"
+    end
+    result = yield(protected)
+    math.each_with_index { |value, index| result = result.gsub("\u0000M#{index}\u0000", value) }
+    result
+  end
+
+  def self.clean_form_commands(text)
+    text.gsub(/\\[A-Za-z@]+\*?(?:\s*\{([^{}]*)\})?/, '\\1')
+        .gsub(/[{}]/, '')
+  end
+
+  def self.ascii_form_text(text)
+    result = text.to_s.dup.force_encoding(Encoding::UTF_8).scrub
+    ARXIV_ABSTRACT_SYMBOLS.each { |character, replacement| result.gsub!(character, replacement) }
+    result = result.unicode_normalize(:nfkd)
+    result = result.gsub(/([A-Za-z])([\u0300-\u036f]+)/) do
+      base = Regexp.last_match(1)
+      accents = Regexp.last_match(2).each_char.filter_map { |mark| ARXIV_ACCENTS[mark] }
+      accents.empty? ? base : accents.join + base
+    end
+    result = result.gsub(/[\u0300-\u036f]/, '')
+    result.encode(Encoding::US_ASCII, invalid: :replace, undef: :replace, replace: '')
+  end
+
+  def self.strip_latex_comments(text)
+    text.gsub(/\r\n?/, "\n").lines.map do |line|
+      comment_at = latex_comment_start(line)
+      next line unless comment_at
+
+      prefix = line[0...comment_at]
+      prefix.strip.empty? ? '' : prefix + (line.end_with?("\n") ? "\n" : '')
+    end.join
+  end
+
+  def self.latex_comment_start(line)
+    line.each_char.with_index do |char, index|
+      next unless char == '%'
+
+      slashes = 0
+      cursor = index - 1
+      while cursor >= 0 && line[cursor] == '\\'
+        slashes += 1
+        cursor -= 1
+      end
+      return index if slashes.even?
+    end
+    nil
   end
 
   def self.extract_page_count(pdf_path, log_path)
@@ -2598,7 +2805,7 @@ module LaTeXMetaExtractor
       out << ''
     end
     out << 'Abstract:'
-    out << meta[:abstract]
+    out << (meta[:abstract_form] || meta[:abstract])
     out << ''
     out.join("\n")
   end
@@ -2795,7 +3002,20 @@ class LatexArxivPackager
     stage_bbl(stage_dir)
     stage_active_figures(stage_dir)
     stage_local_styles(stage_dir)
+    stage_revtex4_files(stage_dir)
     stage_biblatex_shield(stage_dir) unless @options[:biblatex_shield] == false
+  end
+
+  def stage_revtex4_files(stage_dir)
+    fls_path = "junk/#{@bfilename}.fls"
+    files = LaTeXCompatibility.files_used_by_fls(fls_path, @options)
+    files.each do |source|
+      destination = File.join(stage_dir, File.basename(source))
+      next if File.exist?(destination)
+
+      FileUtils.cp(source, destination)
+      puts Rainbow(" -- Bundled REVTeX compatibility file: #{File.basename(source)}").cyan
+    end
   end
 
   def stage_bbl(stage_dir)
@@ -2818,7 +3038,7 @@ class LatexArxivPackager
 
       p = Regexp.last_match(1)
       next if p.include?('/usr/share/texlive') || p.include?('texmf-dist')
-      next unless p =~ /\.(pdf|png|jpg|jpeg|mps)$/i
+      next unless p =~ /\.(pdf|png|jpg|jpeg|mps|eps)$/i
 
       figures << p
     end
@@ -3049,7 +3269,7 @@ class LatexArxivPackager
     return false if normalized_name.empty? || normalized_text.empty?
 
     escaped = Regexp.escape(normalized_name).gsub('\\ ', '\\s+')
-    normalized_text.match?(Regexp.new("(?<![\\p{L}\\p{N}])#{escaped}(?![\\p{L}\\p{N}])"))
+    normalized_text.match?(Regexp.new("(?<![\\p{L}\\p{N}])#{escaped}(?!\\p{L})"))
   end
 
   def arxiv_author_suggestion(name, text)
@@ -3236,6 +3456,7 @@ cfg = LaTeXConfig.load_merged_config
 
 options = {
   engine: symlink_engine || cfg['engine'],
+  engine_explicit: !symlink_engine.nil?,
   clean: false,
   single_pass: false,
   fast: is_lw || cfg['fast'] == true,
@@ -3250,6 +3471,7 @@ options = {
   verbose: false,
   emacs: cfg['emacs'] == true,
   werror: cfg['werror'] == true,
+  revtex4: cfg['revtex4'].is_a?(Hash) ? cfg['revtex4'] : {},
   alert_overfull_pt: (cfg['alert_overfull_pt'] || 24.0).to_f,
   whatever_overfull_pt: (cfg['whatever_overfull_pt'] || 2.5).to_f,
   suppress_whatevers: cfg.key?('suppress_whatevers') ? (cfg['suppress_whatevers'] == true) : true,
@@ -3323,14 +3545,17 @@ parser = OptionParser.new do |opts|
 
   opts.on('--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex, or pdflatex') do |v|
     options[:engine] = LaTeXUtils.normalize_engine(v)
+    options[:engine_explicit] = true
   end
 
   opts.on('--lua', '--lualatex', 'Shortcut for --engine=lualatex') do
     options[:engine] = 'lualatex'
+    options[:engine_explicit] = true
   end
 
   opts.on('--xe', '--xelatex', 'Shortcut for --engine=xelatex (default)') do
     options[:engine] = 'xelatex'
+    options[:engine_explicit] = true
   end
 
   opts.on('--pdf', 'Generate PDF output (default behavior)') do
@@ -3339,6 +3564,7 @@ parser = OptionParser.new do |opts|
 
   opts.on('--pdflatex', 'Shortcut for --engine=pdflatex') do
     options[:engine] = 'pdflatex'
+    options[:engine_explicit] = true
   end
 
   opts.on('-u', '--single-pass', '--quick', 'Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)') do

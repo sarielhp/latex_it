@@ -145,6 +145,12 @@ def stage_workspace(source, options, real_home)
   FileUtils.mkdir_p(File.dirname(staged_latex))
   FileUtils.cp(options[:latex_it], staged_latex)
   FileUtils.chmod(0o755, staged_latex)
+  vendor = File.expand_path('../vendor/revtex4', __dir__)
+  staged_vendor = File.join(File.dirname(staged_latex), 'vendor', 'revtex4')
+  if File.directory?(vendor)
+    FileUtils.mkdir_p(File.dirname(staged_vendor))
+    FileUtils.cp_r(vendor, staged_vendor)
+  end
   [workspace, sandbox_home, staged_latex]
 end
 

@@ -99,6 +99,50 @@ class TestMetadataReportReview < Minitest::Test
     end
   end
 
+  def test_abstract_comparison_is_review_only_and_keeps_extracted_text
+    source = document.sub('Example.', "\\begin{abstract}A TeX abstract with different wording.\\end{abstract}\nExample.")
+    sample(source) do |dir|
+      metadata = JSON.parse(File.read(File.join(dir, 'metadata.json')))
+      metadata['abstract'] = 'The API summary uses other wording.'
+      File.write(File.join(dir, 'metadata.json'), JSON.generate(metadata))
+      report = read_report(dir)
+      assert_equal 'review', report.dig('comparisons', 'abstract', 'status')
+      assert_equal 'The API summary uses other wording.', report.dig('reference', 'abstract')
+      assert_includes report.dig('extracted', 'abstract'), 'A TeX abstract'
+    end
+  end
+
+  def test_low_abstract_similarity_is_a_warning_only
+    source = document.sub('Example.', <<~TEX)
+      \\begin{abstract}
+      Alpha bravo charlie delta echo foxtrot golf hotel india juliet.
+      \\end{abstract}
+      Example.
+    TEX
+    sample(source) do |dir|
+      metadata = JSON.parse(File.read(File.join(dir, 'metadata.json')))
+      metadata['abstract'] = 'Kilo lima mike november oscar papa quebec romeo sierra tango.'
+      File.write(File.join(dir, 'metadata.json'), JSON.generate(metadata))
+      output, status = run_report(dir)
+      assert status.success?, output
+      report = JSON.parse(File.read(File.join(dir, 'metadata-report.json')))
+      abstract = report.dig('comparisons', 'abstract')
+      assert_equal 'review', abstract['status']
+      assert_equal 'available', abstract['availability']
+      assert_equal 'low_similarity', abstract.dig('warning', 'code')
+      assert report['warnings'].any? { |warning| warning.include?('very little text') }
+    end
+  end
+
+  def test_missing_source_abstract_is_reported_as_unavailable
+    sample(document) do |dir|
+      report = read_report(dir)
+      abstract = report.dig('comparisons', 'abstract')
+      assert_equal 'unavailable', abstract['availability']
+      assert_nil abstract['warning']
+    end
+  end
+
   def test_author_multiplicity_and_order_are_checked
     sample(document('Sample Title', 'Ada Lovelace'), authors: ['Ada Lovelace', 'Ada Lovelace']) do |dir|
       report = read_report(dir)

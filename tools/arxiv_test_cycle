@@ -1,0 +1,120 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'json'
+require 'fileutils'
+require 'open3'
+require 'optparse'
+require 'rbconfig'
+
+module ArxivTestCycle
+  ROOT = File.expand_path('..', __dir__)
+  DEFAULT_DOWNLOADER = File.join(ROOT, 'tools', 'sample_arxiv')
+  DEFAULT_TESTER = File.join(ROOT, 'tools', 'test_arxiv')
+
+  class Error < StandardError; end
+
+  def self.parse_options(argv)
+    options = { output: File.join(Dir.pwd, 'examples', 'arxiv'), attempts: 10,
+                downloader: DEFAULT_DOWNLOADER, tester: DEFAULT_TESTER }
+    parser = OptionParser.new do |opts|
+      opts.banner = 'Usage: tools/arxiv_test_cycle [options]'
+      opts.on('-o', '--output DIR', 'sample destination (default: examples/arxiv)') do |value|
+        options[:output] = File.expand_path(value)
+      end
+      opts.on('-n', '--attempts N', Integer, 'download attempts (default: 10)') { |v| options[:attempts] = v }
+      opts.on('--seed N', Integer, 'seed random sampling') { |v| options[:seed] = v }
+      opts.on('--main MEMBER.tex', 'select the paper main file') { |v| options[:main] = v }
+      opts.on('--engine ENGINE', %w[xelatex pdflatex lualatex], 'LaTeX engine override (default: automatic)') do |v|
+        options[:engine] = v
+      end
+      opts.on('--bws PATH', 'bws executable used by the tester') { |v| options[:bws] = v }
+      opts.on('--latex-it PATH', 'latex_it executable used by the tester') { |v| options[:latex_it] = v }
+      opts.on('--timeout SECONDS', Float, 'tester timeout (default: 600)') { |v| options[:timeout] = v }
+      opts.on('--downloader PATH', 'downloader executable (for testing or alternate samplers)') { |v| options[:downloader] = v }
+      opts.on('--tester PATH', 'tester executable (for testing or alternate runners)') { |v| options[:tester] = v }
+      opts.on('-h', '--help', 'show help') { puts opts; exit }
+    end
+    parser.parse!(argv)
+    raise Error, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
+    raise Error, '--attempts must be positive' unless options[:attempts].positive?
+    if options[:timeout] && (!options[:timeout].finite? || !options[:timeout].positive?)
+      raise Error, '--timeout must be finite and positive'
+    end
+
+    options
+  rescue OptionParser::ParseError, TypeError => e
+    raise Error, e.message
+  end
+
+  def self.directories(path)
+    return [] unless File.directory?(path)
+
+    Dir.children(path).filter_map do |name|
+      candidate = File.join(path, name)
+      candidate if File.directory?(candidate) && !File.symlink?(candidate)
+    end
+  end
+
+  def self.download(options, before)
+    FileUtils.mkdir_p(options[:output])
+    args = [RbConfig.ruby, options[:downloader], '--output', options[:output], '--attempts', options[:attempts].to_s]
+    args += ['--seed', options[:seed].to_s] if options[:seed]
+    output, status = Open3.capture2e(*args, chdir: ROOT)
+    puts output unless output.empty?
+    raise Error, "download failed (exit #{status.exitstatus || 'unknown'})" unless status.success?
+
+    new_directories = directories(options[:output]) - before
+    raise Error, 'download completed but did not create a new paper directory' if new_directories.empty?
+    raise Error, "download created multiple paper directories: #{new_directories.join(', ')}" if new_directories.length > 1
+
+    new_directories.first
+  end
+
+  def self.test(options, sample)
+    args = [RbConfig.ruby, options[:tester], sample]
+    args += ['--main', options[:main]] if options[:main]
+    args += ['--engine', options[:engine]] if options[:engine]
+    args += ['--bws', options[:bws]] if options[:bws]
+    args += ['--latex-it', options[:latex_it]] if options[:latex_it]
+    args += ['--timeout', options[:timeout].to_s] if options[:timeout]
+    output, status = Open3.capture2e(*args, chdir: ROOT)
+    puts output unless output.empty?
+    report_path = File.join(sample, 'test-report.json')
+    report = JSON.parse(File.read(report_path)) if File.file?(report_path)
+    [status, report]
+  rescue JSON::ParserError => e
+    raise Error, "tester wrote invalid JSON report: #{e.message}"
+  end
+
+  def self.report(sample, status, report)
+    if status.success? && report && report['status'] == 'PASS'
+      puts "NO BUGS FOUND: #{sample} passed test_arxiv."
+      return 0
+    end
+
+    checks = Array(report && report['checks']).select { |check| check['status'] != 'PASS' }
+    puts "POTENTIAL BUGS FOUND: test_arxiv failed for #{sample}."
+    checks.each { |check| puts "  #{check['name']}: #{check['detail'] || check['status']}" }
+    puts "  Test report: #{File.join(sample, 'test-report.md')}"
+    1
+  end
+
+  def self.run!(options)
+    before = directories(options[:output])
+    sample = download(options, before)
+    puts "Testing downloaded paper: #{sample}"
+    status, report = test(options, sample)
+    report(sample, status, report)
+  end
+
+  def self.main(argv)
+    options = parse_options(argv)
+    run!(options)
+  rescue Error, SystemCallError => e
+    warn "arxiv_test_cycle: #{e.message}"
+    1
+  end
+end
+
+exit ArxivTestCycle.main(ARGV) if __FILE__ == $PROGRAM_NAME

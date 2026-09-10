@@ -19,6 +19,7 @@
     ["/lib", "/lib"],
     ["/lib64", "/lib64"],
     ["/sbin", "/sbin"],
+    ["/etc/alternatives", "/etc/alternatives"],
     ["/etc/fonts", "/etc/fonts"],
     ["/etc/texmf", "/etc/texmf"],
     ["/etc/paperspecs", "/etc/paperspecs"],

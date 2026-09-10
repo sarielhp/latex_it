@@ -14,6 +14,8 @@ load File.expand_path('../latex_it', __dir__)
 
 module ArxivMetadataReport
   MAX_BYTES = 100 * 1024 * 1024
+  ABSTRACT_WARNING_RATIO = 0.25
+  ABSTRACT_WARNING_MIN_TOKENS = 8
   PLACEHOLDERS = ['unknown', 'anonymous', 'anonymous authors', 'author', 'authors', 'author name'].freeze
   class Error < StandardError; end
 
@@ -30,7 +32,8 @@ module ArxivMetadataReport
     content = utf8(files.fetch(main_name))
     reference = reference_metadata(metadata)
     extracted = { title: LaTeXMetaExtractor.extract_title(content),
-                  authors: LaTeXMetaExtractor.extract_author_names(content) }
+                  authors: LaTeXMetaExtractor.extract_author_names(content),
+                  abstract: LaTeXMetaExtractor.extract_abstract(content) }
     comparisons = compare_metadata(reference, extracted)
     pdf_result = pdf ? check_pdf(pdf, reference[:authors]) : { status: 'skipped' }
     report = build_report(dir, source_name, metadata, main_name, reference, extracted,
@@ -151,7 +154,7 @@ module ArxivMetadataReport
     raise Error, 'metadata authors are missing or empty' unless authors.is_a?(Array) && !authors.empty?
     raise Error, 'metadata authors contain empty or placeholder names' unless authors.all? { |a| valid_author?(a) }
 
-    { title: title, authors: authors }
+    { title: title, authors: authors, abstract: metadata['abstract'].to_s }
   end
 
   def self.compare_metadata(reference, extracted)
@@ -166,7 +169,40 @@ module ArxivMetadataReport
                  reference: reference[:authors], extracted: extracted[:authors],
                  normalized_reference: ra, normalized_extracted: ea, missing: missing,
                  extra: extra, order_mismatch: missing.empty? && extra.empty? && ra != ea,
-                 suggestions: suggestions(missing, ea) } }
+                 suggestions: suggestions(missing, ea) },
+      abstract: compare_abstract(reference[:abstract], extracted[:abstract]) }
+  end
+
+  def self.compare_abstract(reference, extracted)
+    normalized_reference = normalize(reference)
+    normalized_extracted = normalize(extracted)
+    reference_tokens = normalized_reference.split
+    extracted_tokens = normalized_extracted.split
+    shared = reference_tokens & extracted_tokens
+    warning = abstract_warning(reference_tokens, extracted_tokens, shared.length)
+    { status: 'review', availability: extracted_tokens.empty? ? 'unavailable' : 'available',
+      reference: reference.to_s, extracted: extracted.to_s,
+      normalized_reference: normalized_reference, normalized_extracted: normalized_extracted,
+      shared_tokens: shared, reference_token_count: reference_tokens.length,
+      extracted_token_count: extracted_tokens.length,
+      shared_token_ratio: shared_ratio(shared.length, reference_tokens.length, extracted_tokens.length),
+      warning: warning }
+  end
+
+  def self.abstract_warning(reference_tokens, extracted_tokens, shared_count)
+    return nil if reference_tokens.empty? || extracted_tokens.empty?
+    return nil if reference_tokens.length < ABSTRACT_WARNING_MIN_TOKENS
+
+    ratio = shared_ratio(shared_count, reference_tokens.length, extracted_tokens.length)
+    return nil if ratio >= ABSTRACT_WARNING_RATIO
+
+    { code: 'low_similarity',
+      message: 'Extracted abstract has very little text in common with arXiv metadata; review it.' }
+  end
+
+  def self.shared_ratio(shared_count, reference_count, extracted_count)
+    denominator = [reference_count, extracted_count].max
+    denominator.zero? ? 1.0 : (shared_count.to_f / denominator).round(3)
   end
 
   def self.comparison(reference, extracted, matches)
@@ -214,19 +250,24 @@ module ArxivMetadataReport
     return false if name.empty?
 
     pattern = Regexp.escape(name).gsub('\\ ', '\\s+')
-    text.match?(Regexp.new("(?<![\\p{L}\\p{N}])#{pattern}(?![\\p{L}\\p{N}])"))
+    text.match?(Regexp.new("(?<![\\p{L}\\p{N}])#{pattern}(?!\\p{L})"))
   end
 
   def self.build_report(dir, source_name, metadata, main_name, reference, extracted, comparisons, pdf, bytes)
+    warnings = ['arXiv source metadata and TeX/PDF metadata can legitimately differ; review mismatches.']
+    abstract_warning = comparisons[:abstract][:warning]
+    warnings << abstract_warning[:message] if abstract_warning
     { version: 1, sample_dir: File.expand_path(dir), source_filename: source_name,
       checksum: { expected: metadata['source_sha256'], actual: Digest::SHA256.hexdigest(bytes), status: 'match' },
       main: { member: main_name }, reference: reference, extracted: extracted,
-      comparisons: comparisons, pdf: pdf,
-      warnings: ['arXiv source metadata and TeX/PDF metadata can legitimately differ; review mismatches.'] }
+      comparisons: comparisons, pdf: pdf, warnings: warnings }
   end
 
   def self.print_summary(main, comparisons, pdf)
-    puts "Metadata report: main=#{main}, title=#{comparisons[:title][:status]}, authors=#{comparisons[:authors][:status]}"
+    abstract = comparisons[:abstract]
+    abstract_status = abstract[:warning] ? 'warning' : abstract[:availability]
+    puts "Metadata report: main=#{main}, title=#{comparisons[:title][:status]}, authors=#{comparisons[:authors][:status]}, abstract=#{abstract_status}"
+    puts "  WARNING: #{abstract[:warning][:message]}" if abstract[:warning]
     puts "PDF authors: #{pdf[:status]}" unless pdf[:status] == 'skipped'
     unless comparisons[:authors][:missing].empty?
       puts "  missing authors: #{comparisons[:authors][:missing].join(', ')}"

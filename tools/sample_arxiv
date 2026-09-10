@@ -25,19 +25,71 @@ module ArxivSampler
   class Error < StandardError; end
   class HttpError < Error; end
 
+  class MonthlyCountCache
+    def initialize(directory)
+      @directory = File.expand_path(directory)
+    end
+
+    def fetch(month)
+      path = cache_path(month)
+      return nil unless File.file?(path)
+
+      data = JSON.parse(File.read(path))
+      return nil unless data.is_a?(Hash) && data['month'] == month.strftime('%Y-%m')
+      total = data['total_results']
+      return nil unless total.is_a?(Integer) && total >= 0
+
+      total
+    rescue JSON::ParserError, IOError, SystemCallError => e
+      warn "arXiv count cache: ignoring #{path}: #{e.message}"
+      nil
+    end
+
+    def store(month, total)
+      FileUtils.mkdir_p(@directory)
+      path = cache_path(month)
+      temporary = "#{path}.tmp-#{Process.pid}-#{Thread.current.object_id}"
+      File.write(temporary, JSON.generate('month' => month.strftime('%Y-%m'),
+                                          'total_results' => total) + "\n", mode: 'w', perm: 0o600)
+      File.rename(temporary, path)
+    rescue IOError, SystemCallError => e
+      warn "arXiv count cache: unable to write #{path}: #{e.message}"
+    ensure
+      FileUtils.rm_f(temporary) if temporary && File.exist?(temporary)
+    end
+
+    private
+
+    def cache_path(month)
+      File.join(@directory, "#{month.strftime('%Y-%m')}.json")
+    end
+  end
+
   class Client
-    def initialize(min_interval: 3, http: Net::HTTP)
+    MAX_429_RETRIES = 3
+    RETRY_BACKOFF_BASE = 3
+    MAX_RETRY_BACKOFF = 60
+
+    def initialize(min_interval: 3, http: Net::HTTP, sleeper: ->(seconds) { sleep(seconds) })
       @min_interval = min_interval
       @http = http
+      @sleeper = sleeper
       @last_request = nil
     end
 
     def get(uri)
-      response, body = request(uri, 0)
-      return body if response.is_a?(Net::HTTPSuccess)
-      return nil if response.code == '404'
+      retries = 0
+      loop do
+        response, body = request(uri, 0)
+        return body if response.is_a?(Net::HTTPSuccess)
+        return nil if response.code == '404'
+        if response.code == '429' && retries < MAX_429_RETRIES
+          retry_request(response, retries += 1)
+          next
+        end
 
-      raise HttpError, "arXiv returned HTTP #{response.code} for #{uri}"
+        raise HttpError, "arXiv returned HTTP #{response.code} for #{uri}"
+      end
     end
 
     private
@@ -46,7 +98,19 @@ module ArxivSampler
       return unless @last_request
 
       wait = @min_interval - (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_request)
-      sleep(wait) if wait.positive?
+      @sleeper.call(wait) if wait.positive?
+    end
+
+    def retry_request(response, retry_number)
+      delay = retry_after(response) || [RETRY_BACKOFF_BASE * (2**(retry_number - 1)), MAX_RETRY_BACKOFF].min
+      @sleeper.call(delay) if delay.positive?
+    end
+
+    def retry_after(response)
+      value = response['retry-after'].to_s.strip
+      return nil unless value.match?(/\A\d+(?:\.\d+)?\z/)
+
+      value.to_f
     end
 
     def request(uri, redirects)
@@ -97,6 +161,8 @@ module ArxivSampler
     entries = document.get_elements('feed/entry').map do |entry|
       { id: entry.elements['id']&.text.to_s.split('/').last,
         title: entry.elements['title']&.text.to_s.gsub(/\s+/, ' ').strip,
+        abstract: entry.elements['summary']&.text.to_s.gsub(/\s+/, ' ').strip,
+        arxiv_entry_xml: entry.to_s,
         authors: entry.get_elements('author/name').map { |a| a.text.to_s.strip },
         categories: entry.get_elements('category').filter_map { |c| c.attributes['term'] },
         published: entry.elements['published']&.text,
@@ -144,10 +210,12 @@ module ArxivSampler
   end
 
   class Sampler
-    def initialize(client: Client.new, random: Random.new, clock: Date)
+    def initialize(client: Client.new, random: Random.new, clock: Date,
+                   cache_dir: File.expand_path('~/.cache/latex_it/arxiv'))
       @client = client
       @random = random
       @clock = clock
+      @cache = cache_dir && MonthlyCountCache.new(cache_dir)
     end
 
     def run!(output:, attempts: 10)
@@ -156,7 +224,7 @@ module ArxivSampler
       last_error = nil
       attempts.times do |attempt|
         month = random_month
-        total, = query(month, 0)
+        total = query_total(month)
         raise Error, "arXiv returned no papers for #{month}" if total.zero?
         raise Error, "#{month} has #{total} papers; API paging limit is 30,000" if total > 30_000
 
@@ -191,6 +259,15 @@ module ArxivSampler
       range = "submittedDate:[#{month.strftime('%Y%m%d')}0000 TO #{final_day.strftime('%Y%m%d')}2359]"
       uri = "#{API}?search_query=#{URI.encode_www_form_component(range)}&start=#{offset}&max_results=1&sortBy=submittedDate&sortOrder=ascending"
       ArxivSampler.parse_entries(@client.get(uri).to_s)
+    end
+
+    def query_total(month)
+      cached = @cache&.fetch(month)
+      return cached unless cached.nil?
+
+      total, = query(month, 0)
+      @cache&.store(month, total)
+      total
     end
 
     def valid_id?(id)
@@ -231,11 +308,15 @@ end
 
 if __FILE__ == $PROGRAM_NAME
   begin
-    options = { output: 'examples/arxiv', attempts: 10 }
+    options = { output: 'examples/arxiv', attempts: 10,
+                cache_dir: File.expand_path('~/.cache/latex_it/arxiv') }
     OptionParser.new do |opts|
       opts.banner = 'Usage: tools/sample_arxiv [options]'
       opts.on('-o', '--output DIR', 'destination directory (default: examples/arxiv)') { |v| options[:output] = v }
       opts.on('-n', '--attempts N', Integer, 'maximum candidates (default: 10)') { |v| options[:attempts] = v }
+      opts.on('--cache-dir DIR', 'monthly count cache (default: ~/.cache/latex_it/arxiv)') do |v|
+        options[:cache_dir] = v
+      end
       opts.on('--seed N', Integer, 'seed random selection') { |v| options[:seed] = v }
       opts.on('-h', '--help', 'show this help') do
         puts opts
@@ -244,9 +325,9 @@ if __FILE__ == $PROGRAM_NAME
     end.parse!
     raise OptionParser::InvalidArgument, "unexpected arguments: #{ARGV.join(' ')}" unless ARGV.empty?
 
-    ArxivSampler::Sampler.new(random: Random.new(options[:seed] || Random.new_seed)).run!(**options.reject do |k,|
-      k == :seed
-    end)
+    sampler = ArxivSampler::Sampler.new(random: Random.new(options[:seed] || Random.new_seed),
+                                        cache_dir: options[:cache_dir])
+    sampler.run!(**options.reject { |k,| %i[seed cache_dir].include?(k) })
   rescue ArxivSampler::Error, OptionParser::ParseError, SystemCallError, IOError, Timeout::Error,
          OpenSSL::SSL::SSLError => e
     warn "sample_arxiv: #{e.message}"

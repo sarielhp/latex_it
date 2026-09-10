@@ -35,6 +35,63 @@ class TestLatexItCLI < Minitest::Test
     assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdftex')
   end
 
+  def test_inputenc_source_selects_pdflatex
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'paper.tex')
+      File.write(path, "\\documentclass{article}\n\\usepackage[latin9]{inputenc}\n")
+      assert_equal 'pdflatex', LaTeXUtils.detect_engine_from_file(path)
+    end
+  end
+
+  def test_inputenc_detection_handles_requirepackage
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'paper.tex')
+      File.write(path, "\\documentclass{article}\n\\RequirePackage { inputenc }\n")
+      assert_equal 'pdflatex', LaTeXUtils.detect_engine_from_file(path)
+    end
+  end
+
+  def test_explicit_magic_comment_overrides_inputenc_fallback
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'paper.tex')
+      File.write(path, "%!TEX TS-program = xelatex\n\\usepackage[utf8]{inputenc}\n")
+      assert_equal 'xelatex', LaTeXUtils.detect_engine_from_file(path)
+    end
+  end
+
+  def test_incompatible_explicit_engine_falls_back_to_pdflatex
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'paper.tex')
+      File.write(path, "\\documentclass{article}\n\\usepackage[latin9]{inputenc}\n")
+      assert_equal 'pdflatex', LaTeXUtils.compatible_engine('xelatex', path)
+      assert_equal 'pdflatex', LaTeXUtils.compatible_engine('lualatex', path)
+      assert_equal 'pdflatex', LaTeXUtils.compatible_engine('pdflatex', path)
+    end
+  end
+
+  def test_eps_graphics_require_pdflatex
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'paper.tex')
+      File.write(path, <<~TEX)
+        \\usepackage{graphicx}
+        \\includegraphics[width=.5\\linewidth]{figures/result.eps}
+        \\epsfig{file=old.eps,width=2cm}
+      TEX
+      assert_equal ['EPS graphics'], LaTeXUtils.source_pdflatex_reasons(path)
+      assert LaTeXUtils.source_requires_pdflatex?(path)
+      assert_equal 'pdflatex', LaTeXUtils.compatible_engine('xelatex', path)
+      assert_equal 'pdflatex', LaTeXUtils.compatible_engine('lualatex', path)
+    end
+  end
+
+  def test_commented_eps_reference_does_not_trigger_detection
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'paper.tex')
+      File.write(path, "% \\includegraphics{commented.eps}\n% \\epsfig{file=commented.eps}\n")
+      assert_empty LaTeXUtils.source_pdflatex_reasons(path)
+    end
+  end
+
   def test_pdflatex_symlink_personality_selects_engine
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, 'paper.tex'), <<~TEX)

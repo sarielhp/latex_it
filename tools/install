@@ -18,6 +18,8 @@ module Installer
   TARGET_DIR  = File.expand_path('~/bin')
   TARGET_BIN  = File.join(TARGET_DIR, 'latex_it')
   TARGET_LINK = File.join(TARGET_DIR, 'l')
+  TEXMF_SOURCE = File.join(REPO_ROOT, 'vendor', 'revtex4')
+  TEXMF_TARGET = File.expand_path('~/.local/share/latex_it/texmf')
 
   def self.run!(verbose: false)
     verify_source!
@@ -29,14 +31,28 @@ module Installer
 
     FileUtils.rm_f(TARGET_LINK) if File.exist?(TARGET_LINK) || File.symlink?(TARGET_LINK)
     Dir.chdir(TARGET_DIR) do
-      FileUtils.ln_s('latex_it', 'l')
+    FileUtils.ln_s('latex_it', 'l')
     end
+
+    install_texmf!
 
     if verbose
       verify_verbose!
     else
       puts 'Program installed: ~/bin/latex_it, ~/bin/l.'
     end
+  end
+
+  def self.install_texmf!
+    source = File.join(TEXMF_SOURCE, 'tex')
+    unless File.directory?(source)
+      warn "Error: Compatibility files not found at: #{source}"
+      exit 1
+    end
+
+    FileUtils.mkdir_p(TEXMF_TARGET)
+    FileUtils.cp_r(source, TEXMF_TARGET)
+    FileUtils.cp(File.join(TEXMF_SOURCE, 'README.md'), TEXMF_TARGET)
   end
 
   def self.verify_source!

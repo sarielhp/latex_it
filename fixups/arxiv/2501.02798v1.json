@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "arxiv_id": "2501.02798v1",
+  "source_sha256": "db98bf6c76e49dcea5fddca8bfa47f62041bc9ae85d28ea5a9899ccfe9069c49",
+  "summary": "System.eps and conver1.eps are PDF files mislabeled as EPS, so XeLaTeX cannot determine their EPS bounding boxes.",
+  "files": ["System.eps", "conver1.eps"],
+  "proposed_repair": "Copy each file with a .pdf extension and update matching \\includegraphics references in the TeX source."
+}

@@ -35,6 +35,7 @@ class TestAuthorVerification < Minitest::Test
   def test_author_matching_respects_name_token_boundaries
     refute @packager.send(:arxiv_author_in_text?, 'Ann', 'Joanne Smith')
     assert @packager.send(:arxiv_author_in_text?, 'Ann', 'Ann Smith')
+    assert @packager.send(:arxiv_author_in_text?, 'M. I. Katsnelson', 'M. I. Katsnelson2')
   end
 
   def test_placeholder_authors_are_rejected

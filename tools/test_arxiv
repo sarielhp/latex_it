@@ -1,0 +1,307 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'digest'
+require 'fileutils'
+require 'json'
+require 'open3'
+require 'optparse'
+require 'rbconfig'
+require 'rubygems/package'
+require 'stringio'
+require 'tempfile'
+require 'tmpdir'
+require 'time'
+require 'zlib'
+
+module ArxivPaperTest
+  MAX_BYTES = 100 * 1024 * 1024
+  ROOT = File.expand_path('..', __dir__)
+  FIXUP_DIR = File.join(ROOT, 'fixups', 'arxiv')
+  RESERVED = %w[.git .bws .bws.jsonc .bws-home .latex_it_bws_bin .sandbox-config junk].freeze
+  class Error < StandardError; end
+
+  def self.fixup_for(metadata)
+    id = metadata['id']
+    checksum = metadata['source_sha256']
+    return unless id.is_a?(String) && id.match?(/\A[0-9]+\.[0-9]+v[0-9]+\z/)
+    return unless checksum.is_a?(String) && checksum.match?(/\A[0-9a-f]{64}\z/)
+
+    path = File.join(FIXUP_DIR, "#{id}.json")
+    return unless File.file?(path)
+
+    fixup = JSON.parse(File.read(path))
+    return unless fixup['arxiv_id'] == id && fixup['source_sha256'] == checksum
+
+    fixup.merge('catalog_path' => path)
+  rescue JSON::ParserError
+    raise Error, "invalid fixup catalog entry #{path}"
+  end
+
+  def self.member(name)
+    unless name.is_a?(String) && !name.empty? && !name.start_with?('/') && !name.include?("\0") &&
+           name.split('/').none? { |part| part == '..' || RESERVED.include?(part) }
+      raise Error, "unsafe archive member #{name.inspect}"
+    end
+
+    name.split('/').reject { |part| part.empty? || part == '.' }.join('/')
+  end
+
+  def self.expanded_source(bytes)
+    return bytes unless bytes.start_with?("\x1f\x8b".b)
+
+    Zlib::GzipReader.wrap(StringIO.new(bytes)) do |gzip|
+      expanded = gzip.read(MAX_BYTES + 1)
+      raise Error, 'source expands beyond 100 MiB' if expanded.bytesize > MAX_BYTES
+
+      expanded
+    end
+  end
+
+  def self.archive_files(bytes)
+    entries = {}
+    Gem::Package::TarReader.new(StringIO.new(bytes)) do |tar|
+      tar.each do |entry|
+        name = member(entry.full_name)
+        next if entry.directory? && name.empty?
+        raise Error, 'empty archive member' if name.empty?
+        raise Error, "duplicate archive member #{name}" if entries.key?(name)
+        raise Error, "archive member is not a regular file or directory: #{name}" unless entry.file? || entry.directory?
+        raise Error, "archive member exceeds 100 MiB: #{name}" if entry.header.size > MAX_BYTES
+
+        entries[name] = entry.directory? ? nil : entry.read
+        raise Error, 'archive contains too many entries' if entries.size > 20_000
+      end
+    end
+    entries.each_key do |name|
+      parts = name.split('/')
+      (1...parts.length).each do |length|
+        parent = parts.first(length).join('/')
+        raise Error, "file/directory collision at #{parent}" if entries[parent]
+      end
+    end
+    entries.compact
+  end
+
+  def self.extract(bytes, destination, requested)
+    requested = member(requested) if requested
+    raise Error, 'requested main must be a .tex member' if requested && !requested.downcase.end_with?('.tex')
+
+    expanded = expanded_source(bytes)
+    tar = expanded.bytesize >= 262 && expanded.byteslice(257, 5) == 'ustar'
+    files = tar ? archive_files(expanded) : { requested || 'source.tex' => expanded }
+    raise Error, 'source contains no TeX files' unless files.keys.any? { |name| name.downcase.end_with?('.tex') }
+
+    main = choose_main(files, requested)
+    files.each do |name, data|
+      target = File.join(destination, name)
+      FileUtils.mkdir_p(File.dirname(target))
+      File.binwrite(target, data)
+    end
+    main
+  end
+
+  def self.choose_main(files, requested)
+    if requested
+      raise Error, "requested main is not a regular .tex member: #{requested}" unless files.key?(requested)
+
+      return requested
+    end
+    tex = files.select { |name, _| name.downcase.end_with?('.tex') }
+    candidates = tex.select do |_, bytes|
+      bytes.dup.force_encoding(Encoding::UTF_8).scrub.match?(/\\document(?:class|style)\b/)
+    end.keys
+    return candidates.first if candidates.length == 1
+    return tex.keys.first if candidates.empty? && tex.length == 1
+
+    raise Error, "ambiguous main TeX file; use --main (#{candidates.join(', ')})"
+  end
+
+  def self.atomic_write(path, content)
+    Tempfile.create(['latex-it-test-', '.tmp'], File.dirname(path)) do |tmp|
+      tmp.write(content)
+      tmp.close
+      File.rename(tmp.path, path)
+    end
+  end
+
+  def self.options(argv)
+    result = { bws: ENV.fetch('BWS_BIN', 'bws'), latex_it: File.join(ROOT, 'latex_it'),
+               timeout: 600.0, engine: nil }
+    parser = OptionParser.new do |p|
+      p.banner = 'Usage: tools/test_arxiv SAMPLE_DIR [options]'
+      p.on('--main MEMBER.tex', 'Select the main source inside the archive') { |v| result[:main] = v }
+      p.on('--bws PATH', 'bws executable (default: BWS_BIN or bws)') { |v| result[:bws] = v }
+      p.on('--latex-it PATH', 'Test this executable instead of the repository copy') { |v| result[:latex_it] = v }
+      p.on('--timeout SECONDS', Float, 'Total sandbox time limit (default: 600)') { |v| result[:timeout] = v }
+      p.on('--engine ENGINE', %w[xelatex pdflatex lualatex], 'Engine override (default: automatic)') { |v| result[:engine] = v }
+      p.on('-h', '--help', 'Show help') { result[:help] = true }
+    end
+    parser.parse!(argv)
+    return puts(parser) if result[:help]
+    raise Error, 'exactly one SAMPLE_DIR is required' unless argv.length == 1
+    raise Error, '--timeout must be finite and positive' unless result[:timeout].finite? && result[:timeout].positive?
+
+    result[:latex_it] = File.expand_path(result[:latex_it])
+    result[:bws] = File.expand_path(result[:bws]) if result[:bws].include?('/')
+    result[:sample] = File.realpath(argv.first)
+    raise Error, 'SAMPLE_DIR must be a directory' unless File.directory?(result[:sample])
+
+    result
+  end
+
+  class Runner
+    def initialize(options)
+      @options = options
+      @sample = options.fetch(:sample)
+      @report = { 'version' => 1, 'sample_dir' => @sample, 'generated_at' => Time.now.utc.iso8601,
+                  'status' => 'FAIL', 'engine' => options[:engine], 'checks' => [] }
+    end
+
+    def run
+      lock_path = File.join(@sample, '.test-arxiv.lock')
+      raise Error, 'unsafe lock file' if File.symlink?(lock_path)
+
+      File.open(lock_path, File::CREAT | File::RDWR, 0o644) do |lock|
+        unless lock.flock(File::LOCK_EX | File::LOCK_NB)
+          raise Error, 'another test is already running in this paper directory'
+        end
+
+        run_locked
+      end
+    end
+
+    def run_locked
+      %w[PASS FAIL].each { |name| FileUtils.rm_f(File.join(@sample, name)) }
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      begin
+        Dir.mktmpdir('latex_it_test_stage_', '/tmp') do |stage|
+          prepare(stage)
+          launch(stage)
+        end
+      rescue StandardError => e
+        @report['error'] = "#{e.class}: #{e.message}"
+      ensure
+        @report['elapsed'] = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(3)
+        publish
+      end
+      puts "#{@report['status']}: #{File.join(@sample, 'test-report.md')}"
+      @report['status'] == 'PASS' ? 0 : 1
+    end
+
+    def source
+      metadata = JSON.parse(File.read(File.join(@sample, 'metadata.json')))
+      name = metadata.fetch('source_filename')
+      unless name.is_a?(String) && !name.empty? && File.basename(name) == name && !name.include?("\0")
+        raise Error, 'unsafe source_filename'
+      end
+
+      path = File.join(@sample, name)
+      raise Error, 'missing or unsafe source archive' unless File.file?(path) && !File.symlink?(path)
+      raise Error, 'source exceeds 100 MiB' if File.size(path) > MAX_BYTES
+
+      bytes = File.binread(path)
+      raise Error, 'source checksum mismatch' unless Digest::SHA256.hexdigest(bytes) == metadata.fetch('source_sha256')
+
+      @report['source_sha256'] = metadata['source_sha256']
+      @report['arxiv_id'] = metadata['id']
+      @report['fixup'] = ArxivPaperTest.fixup_for(metadata)
+      [metadata, bytes]
+    end
+
+    def prepare(stage)
+      metadata, bytes = source
+      @report['main'] = ArxivPaperTest.extract(bytes, File.join(stage, 'paper'), @options[:main])
+      FileUtils.mkdir_p(File.join(stage, 'tools'))
+      %w[arxiv_test_worker.rb check_arxiv_metadata].each do |file|
+        FileUtils.cp(File.join(ROOT, 'tools', file), File.join(stage, 'tools', file))
+      end
+      FileUtils.cp(@options[:latex_it], File.join(stage, 'latex_it'))
+      stage_compatibility_tree(stage)
+      FileUtils.cp(File.join(ROOT, 'VERSION'), File.join(stage, 'VERSION')) if @options[:latex_it] == File.join(ROOT,
+                                                                                                                'latex_it')
+      @report['latex_it_sha256'] = Digest::SHA256.file(File.join(stage, 'latex_it')).hexdigest
+      File.write(File.join(stage, 'metadata.json'), JSON.pretty_generate(metadata))
+      config = { main: @report['main'] }
+      config[:engine] = @options[:engine] if @options[:engine]
+      File.write(File.join(stage, 'test-config.json'), JSON.generate(config))
+    end
+
+    def stage_compatibility_tree(stage)
+      source = File.join(ROOT, 'vendor', 'revtex4')
+      return unless File.directory?(source)
+
+      destination = File.join(stage, 'vendor')
+      FileUtils.mkdir_p(destination)
+      FileUtils.cp_r(source, destination)
+    end
+
+    def launch(stage)
+      retained = Dir.mktmpdir('latex_it_test_results_', '/tmp')
+      workspace = File.join(retained, 'sandbox')
+      @report['artifacts'] = { 'sandbox' => workspace, 'log' => File.join(workspace, 'bws-run.log') }
+      argv = [RbConfig.ruby, File.join(ROOT, 'tools/bws_run'), stage, '--output', workspace,
+              '--bws', @options[:bws], '--latex-it', @options[:latex_it], '--timeout', @options[:timeout].to_s,
+              '--', 'ruby', 'tools/arxiv_test_worker.rb']
+      output, status = Open3.capture2e(*argv)
+      @report['runner'] = { 'exit_status' => status.exitstatus || 128 + status.termsig, 'output' => output }
+      worker_path = File.join(workspace, 'test-worker-report.json')
+      worker = File.file?(worker_path) ? JSON.parse(File.read(worker_path)) : {}
+      @report['worker'] = worker
+      @report['checks'] = worker.fetch('checks', [])
+      if status.exitstatus == 124
+        @report['error'] = "Sandbox timed out after #{@options[:timeout]} seconds; incomplete checks were not passed."
+      elsif worker.empty?
+        @report['error'] = 'Sandbox worker did not produce a report; inspect launcher output.'
+      elsif !worker['completed']
+        @report['error'] = "Worker stopped during #{worker['running_check'] || 'an unknown check'}."
+      end
+      passed = @report['checks'].any? && @report['checks'].all? { |c| c['status'] == 'PASS' }
+      return unless status.success? && worker['completed'] == true && worker['status'] == 'PASS' && passed
+
+      @report['status'] =
+        'PASS'
+    end
+
+    def markdown
+      lines = ["# latex_it test: #{@report['status']}", '',
+               "Paper: #{@report['arxiv_id'] || @sample}",
+               "Engine: `#{@report['engine'] || 'automatic'}`; main: `#{@report['main'] || 'undetermined'}`", '']
+      lines << "Error: #{@report['error']}" << '' if @report['error']
+      if (fixup = @report['fixup'])
+        lines << "Known source defect: #{fixup['summary']}"
+        lines << "Proposed repair: #{fixup['proposed_repair']}"
+        lines << "Catalog entry: `#{fixup['catalog_path']}` (analysis only; original source was tested unchanged.)"
+        lines << ''
+      end
+      @report['checks'].each do |check|
+        detail = check['detail'] || "#{check['passes']} compiler passes"
+        log = check['log'] ? " ([log](#{check['log']}))" : ''
+        lines << "- **#{check['status']}** #{check['name']}: #{detail}#{log}"
+      end
+      if @report['artifacts']
+        paths = @report['artifacts']
+        lines << '' << "[Build workspace](#{paths['sandbox']}) · [Sandbox log](#{paths['log']})"
+      end
+      lines << '' << '[Detailed report](test-report.json)' << ''
+      lines << 'FAIL is a test outcome, not proof of a latex_it bug: input, metadata and environment problems also fail checks.'
+      lines.join("\n") + "\n"
+    end
+
+    def publish
+      ArxivPaperTest.atomic_write(File.join(@sample, 'test-report.json'), JSON.pretty_generate(@report) + "\n")
+      ArxivPaperTest.atomic_write(File.join(@sample, 'test-report.md'), markdown)
+      ArxivPaperTest.atomic_write(File.join(@sample, @report['status']), "#{@report['generated_at']}\n")
+    end
+  end
+
+  def self.main(argv)
+    parsed = options(argv)
+    parsed ? Runner.new(parsed).run : 0
+  rescue StandardError => e
+    warn "test_arxiv: #{e.message}"
+    1
+  end
+end
+
+exit ArxivPaperTest.main(ARGV) if __FILE__ == $PROGRAM_NAME

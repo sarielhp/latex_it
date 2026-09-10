@@ -12,6 +12,7 @@ class TestSampleArxiv < Minitest::Test
         <opensearch:totalResults>1</opensearch:totalResults>
         <entry><id>http://arxiv.org/abs/1234.5678v2</id><title> A  Paper </title>
           <author><name>Ada Lovelace</name></author><category term="cs.AI" />
+          <summary> API abstract </summary>
         </entry>
       </feed>
     XML
@@ -21,6 +22,8 @@ class TestSampleArxiv < Minitest::Test
     assert_equal 'A Paper', entries.first[:title]
     assert_equal ['Ada Lovelace'], entries.first[:authors]
     assert_equal ['cs.AI'], entries.first[:categories]
+    assert_equal 'API abstract', entries.first[:abstract]
+    assert_includes entries.first[:arxiv_entry_xml], '<summary>'
   end
 
   def test_accepts_gzip_tar_with_tex_and_rejects_pdf
@@ -51,5 +54,21 @@ class TestSampleArxiv < Minitest::Test
     error = assert_raises(ArxivSampler::Error) { sampler.run!(output: Dir.mktmpdir, attempts: 2) }
     assert_includes error.message, 'after 2 attempts'
     assert_includes error.message, 'source archive is empty'
+  end
+
+  def test_monthly_count_cache_round_trip_and_validation
+    Dir.mktmpdir('arxiv-cache-') do |dir|
+      cache = ArxivSampler::MonthlyCountCache.new(dir)
+      month = Date.new(2024, 2, 1)
+      assert_nil cache.fetch(month)
+      cache.store(month, 17)
+      assert_equal 17, cache.fetch(month)
+
+      File.write(File.join(dir, '2024-02.json'), '{"month":"2024-02","total_results":-1}')
+      assert_nil cache.fetch(month)
+      File.write(File.join(dir, '2024-02.json'), 'not json')
+      _out, err = capture_io { assert_nil cache.fetch(month) }
+      assert_includes err, 'ignoring'
+    end
   end
 end

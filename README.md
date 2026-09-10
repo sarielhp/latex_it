@@ -103,7 +103,7 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
   - **Author Verification**: Extracts all author names from the original source and requires every name to appear on the rebuilt PDF's first page. Missing, malformed, or placeholder (`Unknown`/`Anonymous`) authors fail verification before visual comparison.
     Matching tolerates case, whitespace, punctuation, and normalized accents/umlauts. Small spelling differences produce edit-distance suggestions but still fail verification. This check also runs with `--no-arxiv-visual-verify`; only `--no-arxiv-verify` bypasses it.
 - **Metadata Extraction (`--meta`)**:
-  - Extracts `Title`, `Authors`, and `Abstract` from source TeX and converts TeX math/formatting macros into clean, readable Unicode plaintext.
+  - Extracts `Title`, `Authors`, and `Abstract` from source TeX. The abstract is emitted in arXiv web-form format: ASCII-only, comment-free, with supported inline MathJax TeX preserved and paragraph breaks represented by arXiv's required indentation rule.
   - Automatically derives page count and figure count for submission comments.
   - Generates `arxiv_<document>_meta.txt` in the root and announces both files upon completion.
 
@@ -250,11 +250,14 @@ skipped because of the API paging limit.
 
 Each download goes into `examples/arxiv/<versioned-paper-id>/` by default, with
 `source.tar.gz`, `source.tex.gz`, `source.tar`, or `source.tex` and `metadata.json`.
-Metadata records the title, authors, categories, source URL, checksum, and sampled
+Metadata records the title, API abstract/summary, authors, categories, source URL, checksum, and sampled
 month/offset. Existing samples are preserved, and the entire `examples/`
 directory is ignored by Git. Use `--output DIR` to choose another location, `--attempts N` to bound
 candidate attempts (default 10), or `--seed N` to repeat random choices while the
-date range and API results remain unchanged. `--help` lists these options.
+date range and API results remain unchanged. Monthly result counts are cached in
+`~/.cache/latex_it/arxiv` by default; use `--cache-dir DIR` to choose another
+location. Invalid cache entries are ignored and refreshed from arXiv. `--help`
+lists these options.
 
 Review a retained sample's arXiv metadata against the current TeX extractor:
 
@@ -275,12 +278,39 @@ remain mismatches. Only the selected main file is passed to the existing
 extractor; included files and custom macros are not expanded. The report does
 not compile or execute downloaded TeX. Its optional PDF check uses an existing
 PDF and the independent arXiv author list.
+The report also extracts the abstract and records a loose API-versus-TeX
+comparison for review. Abstract differences are expected for some papers and
+never fail the metadata check; an isolated generated abstract-page comparison
+is not performed. The original Atom `<entry>` XML is retained in
+`arxiv_entry_xml` so additional API fields remain available for later review.
 
 The sampler retains source bytes without extracting or compiling them. It skips
 missing or unrecognized TeX sources, limits downloads and decompressed data to
 100 MiB each, and stops on HTTP service errors. Requests are sequential and spaced
 at least three seconds apart; run only one sampler at a time. The download check
 recognizes TeX files but does not establish whether a project compiles.
+
+## Legacy REVTeX 4.0 support
+
+`tools/install` installs a small LPPL-licensed REVTeX 4.0 compatibility tree in
+`~/.local/share/latex_it/texmf`. It lets old papers using
+`\documentclass{revtex4}` compile without changing their source tree. The files
+are added only to compiler subprocesses and are copied into an arXiv archive when
+they were used, keeping that archive self-contained. `bws_run` stages the same
+tree inside its disposable workspace.
+
+Compatibility is enabled by default. Configure it in `.l.jsonc` or the global
+config file:
+
+```jsonc
+"revtex4": {
+  "enabled": true,
+  "texmf_dirs": ["~/.local/share/latex_it/texmf"]
+}
+```
+
+Set `enabled` to `false` for a strict modern-only build. `texmf_dirs` can add
+other local trees containing the same REVTeX 4.0 layout.
 
 ## Offline LaTeX builds with bws
 
@@ -339,6 +369,42 @@ To install `latex_it` directly to `~/bin/latex_it` and create the `~/bin/l` syml
 ```
 
 ---
+
+For a complete disposable build audit of a retained sample, run:
+
+```bash
+tools/test_arxiv examples/arxiv/1510.00949v1
+```
+
+`tools/test_arxiv SAMPLE_DIR` preserves the downloaded snapshot and runs one
+selected engine (default `xelatex`) through `bws_run`. It writes
+`test-report.json`, `test-report.md`, and exactly one `PASS` or `FAIL` marker in
+the original sample directory. The report covers fresh, no-op and `--fast` builds,
+single-pass, PDF diff hash/mtime preservation, same-mtime source mutation, negative TeX and
+recovery, metadata, portable zip verification, and strict arXiv text/visual/
+author checks. Use `--main` for ambiguous archives, or `--engine`, `--bws`,
+`--latex-it`, and `--timeout` (default 600 seconds). Partial timeout results,
+environment or metadata failures, and retained `/tmp` artifacts are recorded.
+The exit status is zero only for `PASS`; failures require review and do not
+necessarily mean a `latex_it` bug. The worker uses a UTF-8 locale. The timeout
+covers sandbox execution, not bounded source extraction and staging. Source
+archives with links, unsafe paths, conflicting members or more than 100 MiB
+compressed/expanded data are rejected. Plain and gzip-compressed TeX are also
+accepted. No published arXiv PDF comparison or multi-engine matrix is performed.
+`tools/arxiv_test_worker.rb` is an internal worker, not a public command.
+
+To download a fresh random sample and test it in one step, run:
+
+```bash
+tools/arxiv_test_cycle --output examples/arxiv
+```
+
+The cycle records the directories present before downloading, runs
+`tools/sample_arxiv`, identifies the one newly created paper directory, and
+runs `tools/test_arxiv` on it. It exits zero only when the paper passes every
+test, and reports failed checks and the retained test report otherwise. The
+`--engine`, `--bws`, `--latex-it`, `--main`, and `--timeout` options are passed
+to the tester; `--attempts` and `--seed` are passed to the downloader.
 
 ## Development Environment Setup
 

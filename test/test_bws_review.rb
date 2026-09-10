@@ -43,6 +43,14 @@ class TestBwsReview < Minitest::Test
     end
   end
 
+  def test_prepare_stages_revtex4_compatibility_tree
+    with_source do |_root, source, output|
+      text, status = prepare(source, output)
+      assert status.success?, text
+      assert File.file?(File.join(output, '.latex_it_bws_bin/vendor/revtex4/tex/latex/revtex4/revtex4.cls'))
+    end
+  end
+
   def test_existing_output_is_not_overwritten
     with_source do |_root, source, output|
       FileUtils.mkdir_p(output)

@@ -29,6 +29,8 @@ class TestSampleArxivReview < Minitest::Test
         <opensearch:totalResults>20</opensearch:totalResults>
         <entry><id>http://arxiv.org/abs/#{id}</id><title>Sample paper</title>
           <author><name>Sample Author</name></author><category term="math.CO"/>
+          <summary>  An API   abstract with
+            normalized whitespace. </summary>
         </entry>
       </feed>
     XML
@@ -47,6 +49,8 @@ class TestSampleArxivReview < Minitest::Test
       metadata = JSON.parse(File.read(File.join(result, 'metadata.json')))
       assert_equal '1006.0038v3', metadata['id']
       assert_equal ['Sample Author'], metadata['authors']
+      assert_equal 'An API abstract with normalized whitespace.', metadata['abstract']
+      assert_includes metadata['arxiv_entry_xml'], '<summary>'
       assert_equal Digest::SHA256.hexdigest(source), metadata['source_sha256']
       assert_equal source, File.binread(Dir[File.join(result, 'source*')].fetch(0))
       assert_equal 'https://export.arxiv.org/e-print/1006.0038v3', client.urls.last
@@ -89,6 +93,7 @@ class TestSampleArxivReview < Minitest::Test
     output, status = Open3.capture2e(bin, '--help')
     assert status.success?, output
     assert_includes output, '--output'
+    assert_includes output, '--cache-dir'
     [['--unknown'], ['extra'], ['--attempts', '0']].each do |args|
       output, status = Open3.capture2e(bin, *args)
       refute status.success?, output
@@ -125,16 +130,50 @@ class TestSampleArxivReview < Minitest::Test
     end
     transport = Object.new
     transport.define_singleton_method(:new) { |*_args| connection }
-    client = ArxivSampler::Client.new(min_interval: 0, http: transport)
+    client = ArxivSampler::Client.new(min_interval: 0, http: transport, sleeper: ->(_seconds) {})
     assert_equal 'source bytes', client.get('https://export.arxiv.org/e-print/1006.0038v3')
     assert_empty replies
     rate_limit = Net::HTTPTooManyRequests.new('1.1', '429', 'Too Many Requests')
     rate_limit.define_singleton_method(:read_body) { |&block| block.call('Try later') }
-    replies << rate_limit
+    4.times { replies << rate_limit }
     Dir.mktmpdir do |dir|
       sampler = ArxivSampler::Sampler.new(client: client)
       assert_raises(ArxivSampler::HttpError) { sampler.run!(output: dir, attempts: 10) }
       assert_empty replies
     end
+  end
+
+  def test_http_429_retries_with_retry_after_and_bounded_backoff
+    responses = [Net::HTTPTooManyRequests.new('1.1', '429', 'Too Many Requests'),
+                 Net::HTTPOK.new('1.1', '200', 'OK')]
+    responses.first['retry-after'] = '7'
+    responses.each { |response| response.define_singleton_method(:read_body) { |&block| block.call('body') } }
+    connection = Object.new
+    %i[use_ssl= open_timeout= read_timeout= max_retries=].each do |setter|
+      connection.define_singleton_method(setter) { |_value| }
+    end
+    connection.define_singleton_method(:start) { |&block| block.call(connection) }
+    connection.define_singleton_method(:request) do |_request, &block|
+      response = responses.shift
+      block.call(response)
+      response
+    end
+    transport = Object.new
+    transport.define_singleton_method(:new) { |*_args| connection }
+    sleeps = []
+    client = ArxivSampler::Client.new(min_interval: 0, http: transport,
+                                      sleeper: ->(seconds) { sleeps << seconds })
+    assert_equal 'body', client.get('https://export.arxiv.org/api/query')
+    assert_equal [7.0], sleeps
+
+    retries = Array.new(4) { Net::HTTPTooManyRequests.new('1.1', '429', 'Too Many Requests') }
+    retries.each { |response| response.define_singleton_method(:read_body) {} }
+    connection.define_singleton_method(:request) do |_request, &block|
+      response = retries.shift
+      block.call(response)
+      response
+    end
+    assert_raises(ArxivSampler::HttpError) { client.get('https://export.arxiv.org/api/query') }
+    assert_equal [7.0, 3, 6, 12], sleeps
   end
 end

@@ -55,6 +55,41 @@ class TestArxivSupport < Minitest::Test
     assert_includes abstract, "paragraph.\n\nSecond paragraph"
   end
 
+  def test_meta_extraction_abstract_uses_arxiv_web_format
+    tex = <<~TEX
+      \\begin{abstract}
+        First  paragraph with odd spacing.%
+        % Empty and non-empty comments must disappear.
+        continued text.
+
+        Second paragraph with an escaped percent: 50\\% complete.% trailing comment
+      \\end{abstract}
+    TEX
+
+    abstract = LaTeXMetaExtractor.extract_abstract(tex)
+    expected = "First paragraph with odd spacing. continued text.\n\nSecond paragraph with an escaped percent: 50% complete."
+    assert_equal expected, abstract
+    refute_match(/%/, abstract.sub('50%', ''))
+    refute_match(/[ \t]+\n|\n[ \t]+/, abstract)
+  end
+
+  def test_meta_extraction_abstract_for_arxiv_form
+    tex = <<~TEX
+      \\begin{abstract}
+        First paragraph with Chérif and “odd” spacing. % private note
+        continued with $\\alpha \\leq β$.
+
+        Second paragraph with \\textbf{formatting} and 50\\% complete.
+      \\end{abstract}
+    TEX
+
+    abstract = LaTeXMetaExtractor.extract_abstract_for_arxiv(tex)
+    expected = "First paragraph with Ch\\'erif and \"odd\" spacing. continued with $\\alpha \\leq \\beta$.\n Second paragraph with formatting and 50% complete."
+    assert_equal expected.encode(Encoding::US_ASCII), abstract
+    assert_equal Encoding::US_ASCII, abstract.encoding
+    refute_match(/% private note|\\textbf|[[:space:]]+\n[[:space:]]*\n/, abstract)
+  end
+
   def test_flattener_recursive_inlining_and_comment_stripping
     Dir.mktmpdir do |dir|
       main_tex = <<~TEX
@@ -167,6 +202,31 @@ class TestArxivSupport < Minitest::Test
     end
   end
 
+  def test_arxiv_stages_recorded_eps_figures_preserving_paths
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        FileUtils.mkdir_p('figs/nested')
+        File.write('paper.tex', '\\documentclass{article}\n')
+        File.write('figs/nested/plot.EPS', 'EPS-CONTENTS')
+        File.write('figs/unrecorded.eps', 'DO-NOT-COPY')
+        File.write('junk/paper.fls', "INPUT ./figs/nested/plot.EPS\n")
+
+        builder = LatexBuilder.new('paper.tex', {})
+        packager = LatexArxivPackager.new(builder)
+        stage = Dir.mktmpdir('arxiv_stage_')
+        begin
+          packager.send(:stage_active_figures, stage)
+          staged = File.join(stage, 'figs/nested/plot.EPS')
+          assert_equal 'EPS-CONTENTS', File.read(staged)
+          refute File.exist?(File.join(stage, 'figs/unrecorded.eps'))
+        ensure
+          FileUtils.remove_entry(stage)
+        end
+      end
+    end
+  end
+
   def test_cli_meta_flag
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "paper.tex"), "\\documentclass{article}\n\\title{CLI Title}\n\\author{Bob Author}\n\\begin{abstract}Quick summary\\end{abstract}\n\\begin{document}\\end{document}\n")
@@ -216,7 +276,7 @@ class TestArxivSupport < Minitest::Test
         meta_txt = File.read('arxiv_paper_meta.txt')
         assert_includes meta_txt, "Title:\nE2E Paper"
         assert_includes meta_txt, "Authors:\nAlice One, Bob Two"
-        assert_includes meta_txt, "Abstract:\nSample abstract with α ≤ β."
+        assert_includes meta_txt, "Abstract:\nSample abstract with $\\alpha \\le \\beta$."
       end
     end
   end

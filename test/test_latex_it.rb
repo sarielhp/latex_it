@@ -975,23 +975,46 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
-  def test_brace_checker_reproduces_occupancy_reviewed_error
-    snippet = <<~LATEX
+  def test_brace_checker_detects_unclosed_brace_in_small_latex_example
+    latex = <<~LATEX
+      \\documentclass{article}
+      \\begin{document}
       \\begin{equation*}
-          \\ExCond{Y_{i}}{Y_{i-1}}
-          \\LEQ
-          Y_{i-1} (1 -\\tfrac{1}{e})
-          \\LT
-          \\frac{Y_{i-1}{2}.
+        E = \\frac{m{c^2}
       \\end{equation*}
+      \\end{document}
     LATEX
-    errs = LaTeXBraceChecker.new('occupancy_reviewed.tex', snippet).scan
+    errs = LaTeXBraceChecker.new('paper.tex', latex).scan
     assert_equal 1, errs.size
     err = errs.first
-    assert_equal 6, err[:line]
-    assert_equal 10, err[:col]
+    assert_equal 4, err[:line]
+    assert_equal 12, err[:col]
     assert_includes err[:text], "inside environment 'equation*'"
-    assert_includes err[:text], '\\frac{Y_{i-1}{2}.'
+    assert_includes err[:text], 'E = \\frac{m{c^2}'
+  end
+
+  def test_builder_check_source_braces_on_small_latex_file
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', <<~LATEX)
+          \\documentclass{article}
+          \\begin{document}
+          \\begin{theorem}
+            Let $X$ be { unclosed.
+          \\end{theorem}
+          \\end{document}
+        LATEX
+        builder = LatexBuilder.new('paper.tex', {})
+        errs = builder.send(:check_source_braces)
+        assert_equal 1, errs.size
+        err = errs.first
+        assert_equal 4, err[:line]
+        assert_equal 14, err[:col]
+        assert_includes err[:text], "inside environment 'theorem'"
+        assert_includes err[:text], '! Unclosed open brace'
+        assert_includes err[:text], 'l.4   Let $X$ be { unclosed.'
+      end
+    end
   end
 
   def test_brace_checker_detects_mismatched_bracket_alert

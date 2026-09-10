@@ -146,12 +146,12 @@ The following developer tools are pre-configured in the environment:
 
 | Tool | Location / Command | Purpose for AI Agents |
 | :--- | :--- | :--- |
-| **`rtk`** | `/home/sariel/.cargo/bin/rtk` | **CLI output token compression proxy.** Prefix all shell commands with `rtk` (e.g. `rtk rubocop`, `rtk git status`) to compress terminal output by 60–90%. |
-| **`ast-grep` (`sg`)** | `/home/sariel/.local/bin/sg` | **Structural AST search & rewrite.** Use `rtk sg -p '<pattern>' -l ruby` instead of fragile regex searches. |
-| **`rubocop`** | `~/.local/share/gem/ruby/3.3.0/bin/rubocop` | **Static analysis & formatting.** Lint and auto-correct Ruby code. |
-| **`ruby-lsp`** | `~/.local/share/gem/ruby/3.3.0/bin/ruby-lsp` | **Shopify Language Server.** Fast symbol navigation, definitions, and code intelligence. |
-| **`repomix`** | `/home/sariel/.local/bin/repomix` | **Repository context packer.** Generates token-optimized codebase snapshots for LLM prompts. |
-| **`pdftotext`** | `/usr/bin/pdftotext` | **Poppler PDF text extractor.** Enables text diff verification in `latex_it -d`. |
+| **`rtk`** | `rtk` (in `PATH`) | **CLI output token compression proxy.** Prefix all shell commands with `rtk` (e.g. `rtk git status`, `rtk ./tools/gate`) to compress terminal output by 60–90%. |
+| **`ast-grep` (`sg`)** | `sg` (in `PATH`) | **Structural AST search & rewrite.** Use `rtk sg -p '<pattern>' -l ruby` instead of fragile regex searches. |
+| **`rubocop`** | `rubocop` (Ruby gem) | **Static analysis & formatting.** Lint and auto-correct Ruby code. |
+| **`ruby-lsp`** | `ruby-lsp` (Ruby gem) | **Shopify Language Server.** Fast symbol navigation, definitions, and code intelligence. |
+| **`repomix`** | `repomix` (in `PATH`) | **Repository context packer.** Generates token-optimized codebase snapshots for LLM prompts. |
+| **`pdftotext`** | `pdftotext` (in `PATH`) | **Poppler PDF text extractor.** Enables text diff verification in `latex_it -d`. |
 | **`minitest`** | Ruby gem | **Unit test runner.** Powers `tools/gate` and `test/test_*.rb`. |
 | **`rainbow`** | Ruby gem | **Colorized diagnostics.** ANSI color rendering in terminal output. |
 

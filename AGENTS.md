@@ -1,31 +1,32 @@
 # Agent Instructions for Maintaining `latex_it`
 
-This document provides architectural guidelines, core invariants, development workflows, and acceleration instructions for AI agents and maintainers working in the [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) repository.
+This document provides architectural guidelines, core invariants, development workflows, and acceleration instructions for AI agents and maintainers working in the [`latex_it`](latex_it) repository.
 
 ---
 
 ## 1. Core Architecture & Repository Layout
 
-- **Primary Executable**: [latex_it](file:///home/sariel/prog/26/latex_it/latex_it)
+- **Primary Executable**: [`latex_it`](latex_it)
   - Standalone, high-performance Ruby executable (`#!/usr/bin/env ruby`).
   - Supports symlink personalities (`l`, `lw`, `ll`, `llua`, `latex_clean`, `latex_file_in_dir`, `latex_env_free`).
 - **Core Modules & Classes**:
-  - [`LaTeXConfig`](file:///home/sariel/prog/26/latex_it/latex_it#L58-L185): Unified JSONC configuration loader (`.l.jsonc`, `~/.config/latex_it/config.jsonc`), auto-template creator, and quote-aware JSONC parser.
-  - [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L187-L435): Engine detection & validation, main file discovery heuristics, TeX environment sanitization, noise filtering, and directory cleanup.
-  - [`LatexBuilder`](file:///home/sariel/prog/26/latex_it/latex_it#L437-L1570): Compilation lifecycle manager, pass scheduler, `junk/` directory isolation, bibliography handling, lockfile protection, and diagnostic log analysis.
-  - [`LatexPackager`](file:///home/sariel/prog/26/latex_it/latex_it#L1572-L1825): Portable zip archive bundler (`-z`), active figure source discovery (`.fig`, `.ipe`, `.isy`, etc.), styles isolation, and `/tmp` sandbox verifier (`-t`).
+  - `LaTeXConfig`: Unified JSONC configuration loader (`.l.jsonc`, `~/.config/latex_it/config.jsonc`), auto-template creator, and quote-aware JSONC parser.
+  - `LaTeXUtils`: Engine detection & validation, main file discovery heuristics, TeX environment sanitization, noise filtering, and directory cleanup.
+  - `LaTeXBraceChecker`: Lexical environment-scoped brace validator, `{]` mismatch detector, and AUCTeX error message formatter.
+  - `LatexBuilder`: Compilation lifecycle manager, pass scheduler, `junk/` directory isolation, bibliography handling, lockfile protection, and diagnostic log analysis.
+  - `LatexPackager`: Portable zip archive bundler (`-z`), active figure source discovery (`.fig`, `.ipe`, `.isy`, etc.), styles isolation, and `/tmp` sandbox verifier (`-t`).
   - **CLI Dispatcher**: Symlink personality detection and option parsing with `OptionParser`.
 - **Workflow & Quality Tooling** (`tools/` / `tool/`):
-  - [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax and tests.
-  - [`tools/setup_ruby_dev`](file:///home/sariel/prog/26/latex_it/tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
-  - [`tools/install`](file:///home/sariel/prog/26/latex_it/tools/install) (aliased as `tool/install`): Installs `latex_it` to `~/bin/latex_it` and configures `~/bin/l` symlink.
-  - [`tools/bump`](file:///home/sariel/prog/26/latex_it/tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate --full`, increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`, commits, tags, and pushes to remote.
+  - [`tools/gate`](tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax and tests.
+  - [`tools/setup_ruby_dev`](tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
+  - [`tools/install`](tools/install) (aliased as `tool/install`): Installs `latex_it` to `~/bin/latex_it` and configures `~/bin/l` symlink.
+  - [`tools/bump`](tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate --full`, increments version by +0.1.0 in [`VERSION`](VERSION) and `latex_it`, commits, tags, and pushes to remote.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
 - **Documentation & Configuration**:
-  - [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION): Plaintext file tracking the canonical project version.
-  - [README.md](file:///home/sariel/prog/26/latex_it/README.md): User-facing feature reference, options, and architecture guide.
-  - [AGENTS.md](file:///home/sariel/prog/26/latex_it/AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
+  - [`VERSION`](VERSION): Plaintext file tracking the canonical project version.
+  - [`README.md`](README.md): User-facing feature reference, options, and architecture guide.
+  - [`AGENTS.md`](AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
 
 ---
 
@@ -38,7 +39,7 @@ This document provides architectural guidelines, core invariants, development wo
 - **Language Policy**:
   All scripts, tooling, and test runners must be written in idiomatic **Ruby** (`#!/usr/bin/env ruby`). Do not introduce Python, Bash, Sed, or Awk scripts.
 - **Canonical Interface & Anti-Alias Bloat**:
-  Maintain a minimal, well-documented CLI hierarchy. Do not add undocumented switches or unadvertised legacy aliases without updating [README.md](file:///home/sariel/prog/26/latex_it/README.md).
+  Maintain a minimal, well-documented CLI hierarchy. Do not add undocumented switches or unadvertised legacy aliases without updating [`README.md`](README.md).
 - **Isolated Build Output (`junk/`)**:
   All intermediate build artifacts must remain confined to `junk/`. Only final targets (`<file>.pdf`, `<file>.bbl`, `<file>.synctex.gz`) are exported to the project root. Cache preservation happens exclusively via `junk/old/`.
 - **Engine Support**:
@@ -128,8 +129,8 @@ Always execute quality workflows through the provided scripts:
 
 ### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
 - Ensures working tree is completely clean (aborts if uncommitted changes exist).
-- Runs [`tools/gate --full`](file:///home/sariel/prog/26/latex_it/tools/gate) automatically. (Do not run `--full` manually before bumping to avoid duplicate gate runs).
-- Increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`.
+- Runs [`tools/gate --full`](tools/gate) automatically. (Do not run `--full` manually before bumping to avoid duplicate gate runs).
+- Increments version by +0.1.0 in [`VERSION`](VERSION) and `latex_it`.
 - Commits changes, creates a release git tag, and pushes to remote with `--follow-tags`.
 - **Trigger**:
   ```bash

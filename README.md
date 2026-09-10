@@ -180,43 +180,49 @@ arXiv Preparation Options:
 
 ## Code Architecture
 
-The script [latex_it](file:///home/sariel/prog/26/latex_it/latex_it) is organized into three primary sections:
+The script [`latex_it`](https://github.com/sarielhp/latex_it/blob/master/latex_it) is organized into modular classes:
 
-- [`LaTeXUtils`](file:///home/sariel/prog/26/latex_it/latex_it#L56-L306):
+- [`LaTeXConfig`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
+  Unified JSONC configuration loader (`.l.jsonc`, `~/.config/latex_it/config.jsonc`), auto-template creator, and quote-aware parser.
+
+- [`LaTeXUtils`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
   Utility module containing helper methods for:
-  - Engine normalization ([`normalize_engine`](file:///home/sariel/prog/26/latex_it/latex_it#L77-L93))
-  - File inspection & magic comment parsing ([`detect_engine_from_file`](file:///home/sariel/prog/26/latex_it/latex_it#L95-L128))
-  - Safe binary-safe file reading ([`safe_read`](file:///home/sariel/prog/26/latex_it/latex_it#L130-L136))
-  - Output noise reduction ([`filter_subcommand_noise`](file:///home/sariel/prog/26/latex_it/latex_it#L138-L143))
-  - Bibliography content verification ([`bbl_has_entries?`](file:///home/sariel/prog/26/latex_it/latex_it#L145-L150))
-  - Binary executable checks in `$PATH` ([`command_available?`](file:///home/sariel/prog/26/latex_it/latex_it#L152-L157), [`check_program`](file:///home/sariel/prog/26/latex_it/latex_it#L159-L164))
-  - Local configuration loading ([`load_config_latex`](file:///home/sariel/prog/26/latex_it/latex_it#L166-L185))
-  - Main file heuristic detection ([`find_main_latex_file`](file:///home/sariel/prog/26/latex_it/latex_it#L187-L239))
-  - Directory cleaning ([`clean_directory`](file:///home/sariel/prog/26/latex_it/latex_it#L241-L271))
-  - Environment sanitization ([`reset_latex_environment!`](file:///home/sariel/prog/26/latex_it/latex_it#L273-L305))
+  - Engine normalization (`normalize_engine`)
+  - File inspection & magic comment parsing (`detect_engine_from_file`)
+  - Safe binary-safe file reading (`safe_read`)
+  - Output noise reduction (`filter_subcommand_noise`)
+  - Bibliography content verification (`bbl_has_entries?`)
+  - Binary executable checks in `$PATH` (`command_available?`, `check_program`)
+  - Local configuration loading (`load_config_latex`)
+  - Main file heuristic detection (`find_main_latex_file`)
+  - Directory cleaning (`clean_directory`)
+  - Environment sanitization (`reset_latex_environment!`)
 
-- [`LatexBuilder`](file:///home/sariel/prog/26/latex_it/latex_it#L308-L1166):
+- [`LaTeXBraceChecker`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
+  Lexical brace validator enforcing environment-scoped matching, `{]` mistype alert detection, and AUCTeX error message formatting.
+
+- [`LatexBuilder`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
   Main orchestrator class managing target builds:
-  - Entry point and working directory context ([`run!`](file:///home/sariel/prog/26/latex_it/latex_it#L318-L338), [`compile_target`](file:///home/sariel/prog/26/latex_it/latex_it#L342-L421))
-  - Concurrency locking via `flock` ([`with_lock`](file:///home/sariel/prog/26/latex_it/latex_it#L423-L434))
-  - Build environment & compiler flag setup ([`setup_environment`](file:///home/sariel/prog/26/latex_it/latex_it#L436-L469))
-  - Isolated `junk/` directory layout and cache management ([`junk_dir_create`](file:///home/sariel/prog/26/latex_it/latex_it#L470-L495))
-  - Compilation execution via `Open3.capture2e` ([`run_latex_pass`](file:///home/sariel/prog/26/latex_it/latex_it#L517-L568))
-  - Bibliography engine selection and execution ([`detect_bib_tool`](file:///home/sariel/prog/26/latex_it/latex_it#L570-L607), [`run_bib_pass`](file:///home/sariel/prog/26/latex_it/latex_it#L609-L651))
-  - Change detection heuristics ([`needs_bib_pass?`](file:///home/sariel/prog/26/latex_it/latex_it#L658-L681), [`needs_latex_rerun?`](file:///home/sariel/prog/26/latex_it/latex_it#L683-L699), [`compute_aux_hash`](file:///home/sariel/prog/26/latex_it/latex_it#L653-L656))
-  - PDF diff comparison and target artifact updating ([`update_target_file`](file:///home/sariel/prog/26/latex_it/latex_it#L998-L1012))
-  - Diagnostics, warnings, and errors extraction ([`extract_warnings`](file:///home/sariel/prog/26/latex_it/latex_it#L745-L874), [`extract_errors`](file:///home/sariel/prog/26/latex_it/latex_it#L876-L930), [`report_errors`](file:///home/sariel/prog/26/latex_it/latex_it#L971-L996), [`analyze_output`](file:///home/sariel/prog/26/latex_it/latex_it#L1014-L1113))
+  - Entry point and working directory context (`run!`, `compile_target`)
+  - Concurrency locking via `flock` (`with_lock`)
+  - Build environment & compiler flag setup (`setup_environment`)
+  - Isolated `junk/` directory layout and cache management (`junk_dir_create`)
+  - Compilation execution via `Open3.capture2e` (`run_latex_pass`)
+  - Bibliography engine selection and execution (`detect_bib_tool`, `run_bib_pass`)
+  - Change detection heuristics (`needs_bib_pass?`, `needs_latex_rerun?`, `compute_aux_hash`)
+  - PDF diff comparison and target artifact updating (`update_target_file`)
+  - Diagnostics, warnings, and errors extraction (`extract_warnings`, `extract_errors`, `report_errors`, `analyze_output`)
 
-- [`LatexPackager`](file:///home/sariel/prog/26/latex_it/latex_it):
+- [`LatexPackager`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
   Portable paper archive generator (`-z`) and `/tmp` sandbox verifier (`-t`).
 
-- [`LaTeXMetaExtractor`](file:///home/sariel/prog/26/latex_it/latex_it):
+- [`LaTeXMetaExtractor`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
   Metadata parser for Title, Authors, and Abstract, converting TeX math and formatting into clean Unicode plaintext.
 
-- [`LaTeXFlattener`](file:///home/sariel/prog/26/latex_it/latex_it):
+- [`LaTeXFlattener`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
   Recursive subfile inliner and comment sanitizer producing monolithic `<file>.tex`.
 
-- [`LatexArxivPackager`](file:///home/sariel/prog/26/latex_it/latex_it):
+- [`LatexArxivPackager`](https://github.com/sarielhp/latex_it/blob/master/latex_it):
   arXiv packaging manager (`--arxiv`), biblatex version shield collector, and isolated sandbox verifier.
 
 - **CLI Dispatcher**:

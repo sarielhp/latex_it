@@ -16,10 +16,10 @@ This document provides architectural guidelines, core invariants, development wo
   - [`LatexPackager`](file:///home/sariel/prog/26/latex_it/latex_it#L1572-L1825): Portable zip archive bundler (`-z`), active figure source discovery (`.fig`, `.ipe`, `.isy`, etc.), styles isolation, and `/tmp` sandbox verifier (`-t`).
   - **CLI Dispatcher**: Symlink personality detection and option parsing with `OptionParser`.
 - **Workflow & Quality Tooling** (`tools/` / `tool/`):
-  - [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate): Sub-second (< 1s) quality gate verifying syntax and test suites.
+  - [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax and tests.
   - [`tools/setup_ruby_dev`](file:///home/sariel/prog/26/latex_it/tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
   - [`tools/install`](file:///home/sariel/prog/26/latex_it/tools/install) (aliased as `tool/install`): Installs `latex_it` to `~/bin/latex_it` and configures `~/bin/l` symlink.
-  - [`tools/bump`](file:///home/sariel/prog/26/latex_it/tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate`, increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`, commits, tags, and pushes to remote.
+  - [`tools/bump`](file:///home/sariel/prog/26/latex_it/tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate --full`, increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`, commits, tags, and pushes to remote.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
 - **Documentation & Configuration**:
@@ -79,13 +79,16 @@ Any modifications to compilation logic must honor the following invariants:
 
 Always execute quality workflows through the provided scripts:
 
-### 1. `tools/gate` (Fast Quality Gate)
-- Sub-second check (< 1s) validating:
-  1. Ruby syntax (`ruby -cw`) across `latex_it`, `tools/`, and `test/`.
-  2. Automated Minitest regression test suite (`test/test_*.rb`).
-- **Trigger**: Run continuously after every edit or refactoring step.
+### 1. `tools/gate` (Tiered Quality Gate)
+- `--fast` (default) checks Ruby syntax and deterministic unit tests. Run it after every edit.
+- `--medium` adds practical real-LaTeX integration tests. Run it after roughly ten fast checks and before committing or changing build logic.
+- `--full` adds long-running integration, BWS, archive/visual verification, and ArXiv corpus tests. Run it before bumping or pushing, and in CI.
+- Every tier checks Ruby syntax across `latex_it`, `tools/`, and `test/`.
+- **Trigger**: Run the appropriate tier continuously during development.
   ```bash
-  rtk ./tools/gate
+  rtk ./tools/gate --fast
+  rtk ./tools/gate --medium
+  rtk ./tools/gate --full
   ```
 
 ### 2. `tools/setup_ruby_dev` (Environment & Tooling Auditor)
@@ -121,7 +124,7 @@ Always execute quality workflows through the provided scripts:
 
 ### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
 - Ensures working tree is completely clean (aborts if uncommitted changes exist).
-- Runs [`tools/gate`](file:///home/sariel/prog/26/latex_it/tools/gate).
+- Runs [`tools/gate --full`](file:///home/sariel/prog/26/latex_it/tools/gate).
 - Increments version by +0.1.0 in [`VERSION`](file:///home/sariel/prog/26/latex_it/VERSION) and `latex_it`.
 - Commits changes, creates a release git tag, and pushes to remote with `--follow-tags`.
 - **Trigger**:

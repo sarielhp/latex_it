@@ -1,69 +1,91 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ==============================================================================
-# tools/gate
-#
-# Fast Quality Gate (< 2s) for latex_it:
-# 1. Ruby syntax check (ruby -cw) across scripts and tests
-# 2. Automated test suite execution (minitest)
-# ==============================================================================
-
-require 'English'
+# Tiered quality gate. The default is cheap enough to run after every edit.
 require 'open3'
+require 'optparse'
 
 module QualityGate
-  GREEN = "\e[32m"
-  RED   = "\e[31m"
-  CYAN  = "\e[36m"
-  BOLD  = "\e[1m"
-  RESET = "\e[0m"
+  COLORS = { green: "\e[32m", red: "\e[31m", cyan: "\e[36m", bold: "\e[1m", reset: "\e[0m" }.freeze
+  FAST_TESTS = %w[
+    test_arxiv_cycle.rb test_arxiv_runner_review.rb test_arxiv_worker.rb
+    test_author_verification.rb test_compatibility.rb test_repair_failures.rb
+    test_sample_arxiv.rb test_sample_arxiv_review.rb
+  ].freeze
+  MEDIUM_TESTS = %w[
+    test_arxiv.rb test_latex_it.rb test_metadata_report_review.rb
+  ].freeze
+  FULL_TESTS = %w[
+    test_arxiv_fixups.rb test_bws_review.rb test_visual_verification.rb
+    test_review_integration.rb
+  ].freeze
+  TIERS = { fast: FAST_TESTS, medium: FAST_TESTS + MEDIUM_TESTS,
+            full: FAST_TESTS + MEDIUM_TESTS + FULL_TESTS }.freeze
 
-  def self.run!
-    puts "#{BOLD}==> Running Fast Quality Gate (latex_it)...#{RESET}"
-    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  def self.run!(tier)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     root = File.expand_path('..', __dir__)
-
     Dir.chdir(root) do
+      announce(tier)
       check_syntax!
-      run_tests!
+      run_tests!(TIERS.fetch(tier))
     end
+    elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(2)
+    puts color(:green, "#{color(:bold, 'All')} #{tier} quality gate checks passed in #{elapsed}s!")
+  rescue KeyError
+    abort 'gate: unknown tier'
+  end
 
-    elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)
-    puts "#{GREEN}#{BOLD}All quality gate checks passed in #{elapsed}s!#{RESET}"
+  def self.announce(tier)
+    puts color(:bold, "==> Running #{tier.capitalize} Quality Gate (latex_it)...")
   end
 
   def self.check_syntax!
-    puts "--> #{CYAN}[1/2] Ruby syntax verification (ruby -cw)...#{RESET}"
-    files = ['latex_it', 'tools/setup_ruby_dev', 'tools/gate', 'tools/sample_arxiv', 'tools/check_arxiv_metadata', 'tools/bws_run', 'tools/test_arxiv', 'tools/arxiv_test_cycle', 'tools/arxiv_test_worker.rb', 'test/test_latex_it.rb'].select { |f| File.exist?(f) }
+    puts "--> #{color(:cyan, '[1/2]')} Ruby syntax verification (ruby -cw)..."
+    files = ['latex_it'] + Dir.glob('tools/*').select { |path| ruby_script?(path) } + Dir.glob('test/**/*.rb')
+    files.uniq.each do |file|
+      output, status = Open3.capture2e('ruby', '-cw', file)
+      next if status.success?
 
-    files.each do |f|
-      stdout_stderr, status = Open3.capture2e('ruby', '-cw', f)
-      unless status.success?
-        puts "#{RED}❌ Syntax check failed on #{f}:#{RESET}"
-        puts stdout_stderr
-        exit 1
-      end
+      abort_failure("Syntax check failed on #{file}", output)
     end
   end
 
-  def self.run_tests!
-    puts "--> #{CYAN}[2/2] Automated test suite (minitest)...#{RESET}"
-    test_files = Dir.glob('test/**/test_*.rb')
-    if test_files.empty?
-      puts '    (No test files found, skipping)'
-      return
+  def self.run_tests!(files)
+    puts "--> #{color(:cyan, '[2/2]')} #{files.length} test files..."
+    files.each do |name|
+      file = File.join('test', name)
+      output, status = run_test(file)
+      abort_failure("Test failure in #{file}", output) unless status.success?
     end
+  end
 
-    test_files.each do |tf|
-      stdout_stderr, status = Open3.capture2e('ruby', '-I.', tf)
-      unless status.success?
-        puts "#{RED}❌ Test failure in #{tf}:#{RESET}"
-        puts stdout_stderr
-        exit 1
-      end
-    end
+  def self.run_test(file)
+    Open3.capture2e('ruby', '-I.', file)
+  end
+
+  def self.ruby_script?(path)
+    File.file?(path) && (File.extname(path) == '.rb' || File.open(path, &:gets).to_s.start_with?('#!/usr/bin/env ruby'))
+  end
+
+  def self.abort_failure(label, output)
+    warn color(:red, "❌ #{label}:")
+    warn output
+    exit 1
+  end
+
+  def self.color(name, text)
+    "#{COLORS.fetch(name)}#{text}#{COLORS[:reset]}"
   end
 end
 
-QualityGate.run! if __FILE__ == $PROGRAM_NAME
+options = { tier: :fast }
+OptionParser.new do |opts|
+  opts.banner = 'Usage: tools/gate [--fast|--medium|--full]'
+  opts.on('--fast', 'syntax and deterministic unit tests (default)') { options[:tier] = :fast }
+  opts.on('--medium', 'fast checks plus practical real-LaTeX integration tests') { options[:tier] = :medium }
+  opts.on('--full', 'medium checks plus long integration, BWS, visual, and corpus checks') { options[:tier] = :full }
+  opts.on('-h', '--help', 'show this help') { puts opts; exit }
+end.parse!
+abort "gate: unexpected arguments: #{ARGV.join(' ')}" unless ARGV.empty?
+QualityGate.run!(options[:tier])

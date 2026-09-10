@@ -6,7 +6,7 @@
 #
 # Automated version bump and release workflow for latex_it:
 # 1. Validates working tree is 100% clean (aborts if uncommitted changes exist).
-# 2. Runs the fast quality gate (tools/gate).
+# 2. Runs the full quality gate (tools/gate --full).
 # 3. Increments version by +0.1.0 (major.minor+1.patch).
 # 4. Updates VERSION and latex_it files.
 # 5. Commits the updated version, tags the release, and pushes to remote.
@@ -78,7 +78,7 @@ module VersionBumper
     return unless File.file?(gate_script) && File.executable?(gate_script)
 
     puts "--> Running quality gate: #{CYAN}tools/gate#{RESET}..."
-    stdout_stderr, status = Open3.capture2e(gate_script)
+    stdout_stderr, status = Open3.capture2e(gate_script, '--full')
     return if status.success?
 
     puts "#{RED}❌ Quality gate failed. Aborting bump.#{RESET}"

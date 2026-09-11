@@ -75,7 +75,10 @@ l -e        # Show plain-English explanations for errors and warnings
   - Selects the right engine (`xelatex`, `lualatex`, or `pdflatex`) from magic comments or loaded packages.
   - Automatically runs Biber or BibTeX when citations or `.bib` files change.
 - **Fast incremental builds**: Tracks file checksums and exits immediately if nothing changed, avoiding redundant compiler passes.
-- **Actionable diagnostics**: Categorizes compiler output into Errors, Alerts, and Warnings. Adding `-e` shows plain-English suggestions on how to fix issues.
+- **Intelligent 4-tier diagnostics (Alerts & Whatevers)**: Standard LaTeX treats a $0.5\text{mm}$ line overflow with the same gravity as a broken citation, while silently producing a broken PDF when `\label` is placed before `\caption`. `latex_it` introduces two specialized tiers:
+  - **Alerts**: Catches critical flaws that compile with exit code 0 but silently ruin published papers (e.g. inverted `\label` binding to the wrong section, or massive $\ge 24\text{pt}$ line spillages).
+  - **Whatevers**: Suppresses harmless sub-millimeter cosmetic noise (like $\le 2.5\text{pt}$ micro-overflows and hyperref bookmark stripping) to cure warning fatigue, while counting them in the summary line (`l -a` to inspect).
+  [Learn more about Alerts & Whatevers](docs/diagnostics.html#why-alerts-and-whatevers).
 - **arXiv packaging**: Run `l --arxiv` to produce a flattened, comment-free zip archive ready for upload to arXiv (see [docs/arxiv.md](docs/arxiv.md)).
 
 ---
@@ -127,7 +130,7 @@ For technical details, configuration options, and advanced features, see:
 
 - **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
 - **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.
-- **[docs/diagnostics.md](docs/diagnostics.md)**: Diagnostic tiers, error explanations, threshold settings, and semantic checks.
+- **[docs/diagnostics.md](docs/diagnostics.html)**: The 4-tier diagnostic hierarchy (**Alerts** & **Whatevers** explained), error explanations (`-e`), and threshold tuning.
 - **[docs/errors/README.md](docs/errors/README.md)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.
 - **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and environment variables.
 - **[docs/architecture.md](docs/architecture.md)**: Internal design, build lifecycle, and modular Ruby structure.

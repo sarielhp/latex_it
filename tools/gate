@@ -11,8 +11,8 @@ module QualityGate
   FAST_TESTS = %w[
     test_arxiv_cycle.rb test_arxiv_runner_review.rb test_arxiv_worker.rb
     test_author_verification.rb test_code_metrics.rb test_compatibility.rb
-    test_deep_diagnostics.rb test_error_catalog.rb test_repair_failures.rb test_sample_arxiv.rb
-    test_sample_arxiv_review.rb
+    test_config.rb test_deep_diagnostics.rb test_error_catalog.rb test_repair_failures.rb
+    test_sample_arxiv.rb test_sample_arxiv_review.rb
   ].freeze
   MEDIUM_TESTS = %w[
     test_arxiv.rb test_latex_it.rb test_metadata_report_review.rb

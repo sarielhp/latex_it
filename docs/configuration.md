@@ -11,8 +11,7 @@ Settings are resolved using the following order of precedence (highest to lowest
 1. **Command-line flags** (e.g. `--engine=lualatex`, `-1`, `-e`)
 2. **Local project configuration** (`.l.jsonc` or `.latex_it.jsonc` in document root)
 3. **Global user configuration** (`~/.config/latex_it/config.jsonc`)
-4. **Legacy config** (`.config_latex` in document root)
-5. **Built-in defaults**
+4. **Built-in defaults**
 
 ---
 
@@ -38,29 +37,47 @@ This creates `.l.jsonc` pre-populated with default settings and comments:
   "fast": false,
 
   // Enable diff-based PDF replacement (requires pdftotext)
-  "diff": false,
+  "update_on_diff": false,
 
   // Overfull \hbox threshold (in pt) to classify as an Alert
   "alert_overfull_pt": 24.0,
 
   // Overfull \hbox threshold (in pt) to classify as Whatever (suppressed)
-  "whatever_pt": 2.5,
+  "whatever_overfull_pt": 2.5,
 
-  // Colored terminal output: true, false, or "auto"
-  "color": "auto",
+  // Filename patterns ignored when auto-detecting the main .tex document
+  "exclude_main_tex": [
+    "prefix*.tex",
+    "prelim*.tex",
+    "preamble*.tex",
+    "*.num.tex",
+    "pratenddefaultcategory.tex"
+  ],
 
-  // Enable lockfile concurrency protection
-  "lock": true,
+  // Patterns excluded from brace checking and diagnostic source scans
+  "exclude_source_tex": [
+    "styles/*",
+    "macros/*",
+    "pkg/*",
+    "packages/*",
+    "*prefix*.tex",
+    "*preamble*.tex",
+    "*macros*.tex",
+    "*styles*.tex"
+  ],
+
+  // Directories searched for bibliography (.bib) files (in addition to root)
+  "bib_dirs": ["refs", "bib", "bibliography"],
+
+  // Automatically mirror project subdirectories into junk/ for nested inputs
+  "auto_mirror_subdirs": true,
+
+  // Additional subdirectories inside junk/ to pre-create
+  "junk_subdirs": ["figs", "fragment"],
 
   // Route styles to styles/ in zip packages
-  "inject_styles": false,
-
-  // REVTeX 4.0 legacy compatibility tree
-  "revtex4": {
-    "enabled": true,
-    "texmf_dirs": [
-      "~/.local/share/latex_it/texmf"
-    ]
+  "zip": {
+    "inject_styles": false
   }
 }
 ```

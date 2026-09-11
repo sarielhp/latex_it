@@ -143,7 +143,13 @@ module LatexCLI
       arxiv_verify: cfg.dig('arxiv', 'verify') != false,
       arxiv_visual_verify: cfg.dig('arxiv', 'visual_verify') != false,
       biblatex_shield: cfg.dig('arxiv', 'bundle_biblatex') != false,
-      comments: cfg.dig('arxiv', 'comments')
+      comments: cfg.dig('arxiv', 'comments'),
+      exclude_main_tex: cfg['exclude_main_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_MAIN_PATTERNS,
+      exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
+      bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
+      auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
+      junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
+      strip_host_patterns: cfg.dig('arxiv', 'strip_host_patterns') || LaTeXUtils::DEFAULT_STRIP_HOST_PATTERNS
     }
   end
 
@@ -253,7 +259,7 @@ module LatexCLI
   def self.handle_help_and_examples(parser, options, prog_name, argv = [])
     if options[:show_main]
       dir = argv[0] || '.'
-      puts LaTeXUtils.find_main_latex_file(dir)
+      puts LaTeXUtils.find_main_latex_file(dir, options[:exclude_main_tex])
       exit 0
     elsif options[:clean_only]
       dir = argv[0] || '.'
@@ -284,7 +290,7 @@ module LatexCLI
   end
 
   def self.execute_targets(argv, options)
-    targets = argv.empty? ? [LaTeXUtils.find_main_latex_file] : argv
+    targets = argv.empty? ? [LaTeXUtils.find_main_latex_file('.', options[:exclude_main_tex])] : argv
     targets.each do |target|
       if options[:meta_only]
         process_meta_target(target, options)

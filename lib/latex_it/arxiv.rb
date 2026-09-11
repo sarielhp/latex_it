@@ -75,7 +75,7 @@ class LatexArxivPackager
   end
 
   def stage_arxiv_files(stage_dir)
-    flattened_tex = LaTeXFlattener.flatten(@filename, '.')
+    flattened_tex = LaTeXFlattener.flatten(@filename, '.', @options[:strip_host_patterns])
     File.write(File.join(stage_dir, @filename), flattened_tex)
 
     stage_bbl(stage_dir)

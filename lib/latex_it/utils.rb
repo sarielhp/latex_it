@@ -34,6 +34,20 @@ module LaTeXUtils
     TEXMFDBS TEXMFCACHE
   ].freeze
 
+  DEFAULT_EXCLUDE_MAIN_PATTERNS = [
+    'prefix*.tex', 'prelim*.tex', 'preamble*.tex',
+    '*.num.tex', 'pratenddefaultcategory.tex'
+  ].freeze
+
+  DEFAULT_EXCLUDE_SOURCE_PATTERNS = [
+    'styles/*', 'macros/*', 'pkg/*', 'packages/*',
+    '*prefix*.tex', '*preamble*.tex', '*macros*.tex', '*styles*.tex'
+  ].freeze
+
+  DEFAULT_BIB_DIRS = %w[refs bib bibliography].freeze
+  DEFAULT_JUNK_SUBDIRS = %w[figs fragment].freeze
+  DEFAULT_STRIP_HOST_PATTERNS = %w[computer local private].freeze
+
   def self.normalize_engine(engine)
     return 'xelatex' if engine.nil? || engine.to_s.strip.empty?
 
@@ -172,44 +186,23 @@ module LaTeXUtils
     exit 1
   end
 
-  def self.load_config_latex(dir = '.')
-    config_file = File.join(dir, '.config_latex')
-    return unless File.exist?(config_file)
-    return if ENV['LOADED_LATEX_CFG']
-
-    warn ' -- Loading local LaTeX preferences from .config_latex'
-    content = safe_read(config_file)
-    content.each_line do |line|
-      line = line.strip
-      next if line.empty? || line.start_with?('#')
-
-      line = line.sub(/^export\s+/, '')
-      if line =~ /\A([A-Za-z0-9_]+)=(.*)\z/
-        key = Regexp.last_match(1)
-        val = Regexp.last_match(2).gsub(/\A["']|["']\z/, '')
-        ENV[key] = val
-      end
-    end
-    ENV['LOADED_LATEX_CFG'] = '1'
-  end
-
-  def self.candidate_tex_files(dir)
+  def self.candidate_tex_files(dir, exclude_patterns = nil)
+    patterns = exclude_patterns || DEFAULT_EXCLUDE_MAIN_PATTERNS
     search_path = (dir == '.' ? '*.tex' : File.join(dir, '*.tex'))
     Dir[search_path].map { |f| File.basename(f) }.reject do |f|
-      f =~ /\.num\.tex\z/ || f =~ /\Aprefix.*\.tex\z/ || f =~ /\Aprelim.*\.tex\z/ ||
-        f =~ /\Apreamble.*\.tex\z/ || f == 'pratenddefaultcategory.tex' ||
-        f.start_with?('flycheck_', '.') || f.end_with?('~', '.bak')
+      f.start_with?('flycheck_', '.') || f.end_with?('~', '.bak') ||
+        patterns.any? { |pat| File.fnmatch?(pat, f, File::FNM_CASEFOLD | File::FNM_EXTGLOB) }
     end
   end
 
-  def self.find_main_latex_file(dir = '.')
+  def self.find_main_latex_file(dir = '.', exclude_patterns = nil)
     mainfile = File.join(dir, '.mainfile')
     if File.exist?(mainfile)
       mf = File.read(mainfile).strip
       return mf unless mf.empty?
     end
 
-    candidates = candidate_tex_files(dir)
+    candidates = candidate_tex_files(dir, exclude_patterns)
     if candidates.empty?
       warn "Error: No LaTeX (.tex) files found in directory '#{File.expand_path(dir)}'."
       exit 1

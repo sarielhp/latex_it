@@ -22,9 +22,9 @@ module LaTeXFlattener
     output << yield(content[offset..])
   end
 
-  def self.flatten(main_tex, base_dir = '.')
+  def self.flatten(main_tex, base_dir = '.', strip_patterns = nil)
     inlined = inline_file(main_tex, base_dir, [])
-    cleaned = clean_host_specific(inlined)
+    cleaned = clean_host_specific(inlined, strip_patterns)
     strip_comments(cleaned)
   end
 
@@ -65,10 +65,14 @@ module LaTeXFlattener
     inlined + rest + (line.end_with?("\n") ? "\n" : '')
   end
 
-  def self.clean_host_specific(content)
+  def self.clean_host_specific(content, patterns = nil)
+    tokens = patterns || LaTeXUtils::DEFAULT_STRIP_HOST_PATTERNS
+    return content if tokens.empty?
+
+    re_str = tokens.map { |t| Regexp.escape(t) }.join('|')
     transform_tex(content) do |chunk|
-      chunk.gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}\{[^}]*\}/m, '')
-           .gsub(/\\IfFileExists\{[^}]*(?:computer|local|private)[^}]*\}\{[^}]*\}/m, '')
+      chunk.gsub(/\\IfFileExists\{[^}]*(?:#{re_str})[^}]*\}\{[^}]*\}\{[^}]*\}/m, '')
+           .gsub(/\\IfFileExists\{[^}]*(?:#{re_str})[^}]*\}\{[^}]*\}/m, '')
     end
   end
 

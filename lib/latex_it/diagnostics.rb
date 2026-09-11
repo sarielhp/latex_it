@@ -710,9 +710,9 @@ module LaTeXDiagnostics
       candidates.concat(extract_fls_dependencies("junk/#{@bfilename}.fls").select { |f| f.end_with?('.tex') })
     end
     candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
+    patterns = (@options && @options[:exclude_source_tex]) || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS
     candidates.uniq.reject do |f|
-      f.start_with?('styles/', 'macros/', 'pkg/', 'packages/') ||
-        f =~ %r{(?:prefix|preamble|macros|styles)\.tex\z}i
+      patterns.any? { |pat| File.fnmatch?(pat, f, File::FNM_CASEFOLD | File::FNM_EXTGLOB) }
     end
   end
 

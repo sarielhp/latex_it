@@ -70,6 +70,36 @@ module LaTeXConfig
       "suppress_warnings": false,
       "suppress_alerts": false,
 
+      // Filename patterns ignored when auto-detecting the main .tex document
+      "exclude_main_tex": [
+        "prefix*.tex",
+        "prelim*.tex",
+        "preamble*.tex",
+        "*.num.tex",
+        "pratenddefaultcategory.tex"
+      ],
+
+      // Patterns excluded from brace checking and diagnostic source scans
+      "exclude_source_tex": [
+        "styles/*",
+        "macros/*",
+        "pkg/*",
+        "packages/*",
+        "*prefix*.tex",
+        "*preamble*.tex",
+        "*macros*.tex",
+        "*styles*.tex"
+      ],
+
+      // Directories searched for bibliography (.bib) files (in addition to root)
+      "bib_dirs": ["refs", "bib", "bibliography"],
+
+      // Automatically mirror project subdirectories into junk/ for nested inputs
+      "auto_mirror_subdirs": true,
+
+      // Additional subdirectories inside junk/ to pre-create
+      "junk_subdirs": ["figs", "fragment"],
+
       // Portable Zip Bundling Settings (invoked via `l -z`)
       "zip": {
         // When true, harvested style files are placed in styles/ and \\input@path
@@ -102,7 +132,10 @@ module LaTeXConfig
         "visual_verify": true,
 
         // Default comments string for submission (e.g. page count, conference details)
-        "comments": null
+        "comments": null,
+
+        // File patterns in \\IfFileExists{...} stripped during flattening
+        "strip_host_patterns": ["computer", "local", "private"]
       }
     }
   JSONC
@@ -183,17 +216,13 @@ module LaTeXConfig
     merged_global = deep_merge(base_cfg, global_cfg)
 
     local_cfg = {}
-    found_local = false
     LOCAL_CONFIG_CANDIDATES.each do |candidate|
       path = File.join(dir, candidate)
       if File.exist?(path)
         local_cfg = parse_jsonc(File.read(path))
-        found_local = true
         break
       end
     end
-
-    LaTeXUtils.load_config_latex(dir) if !found_local && defined?(LaTeXUtils)
 
     deep_merge(merged_global, local_cfg)
   end

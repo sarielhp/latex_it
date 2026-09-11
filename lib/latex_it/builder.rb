@@ -392,7 +392,6 @@ class LatexBuilder
   def setup_environment
     junk_dir_create
 
-    LaTeXUtils.load_config_latex
     LaTeXUtils.reset_latex_environment! if @options[:no_env]
 
     @engine_name = resolve_engine
@@ -429,9 +428,19 @@ class LatexBuilder
   end
 
   def junk_dir_create
-    FileUtils.mkdir_p('junk/figs')
     FileUtils.mkdir_p('junk/junk')
-    FileUtils.mkdir_p('junk/fragment')
+    target_subdirs = @options[:junk_subdirs] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS
+    target_subdirs.each { |dir| FileUtils.mkdir_p(File.join('junk', dir)) }
+    mirror_project_subdirs_to_junk if @options[:auto_mirror_subdirs] != false
+  end
+
+  def mirror_project_subdirs_to_junk
+    Dir.glob('*/').each do |d|
+      clean_dir = d.chomp('/')
+      next if clean_dir.start_with?('junk', '.', 'backup')
+
+      FileUtils.mkdir_p(File.join('junk', clean_dir))
+    end
   end
 
   def deep_clean
@@ -615,7 +624,8 @@ class LatexBuilder
     targets = aux_contents.scan(/\\bibdata\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.map(&:strip)
     return true if targets.empty?
 
-    bib_dirs = ['.', 'refs'] + ENV['BIBINPUTS'].to_s.split(':').reject(&:empty?)
+    configured_dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
+    bib_dirs = (['.'] + configured_dirs + ENV['BIBINPUTS'].to_s.split(':')).reject(&:empty?)
     targets.any? do |target|
       bib_dirs.any? do |d|
         File.file?(File.join(d, "#{target}.bib")) || File.file?(File.join(d, target))
@@ -705,9 +715,10 @@ class LatexBuilder
   end
 
   def collect_bib_candidates(bibdata_str, files)
+    configured_dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
+    prefixes = [''] + configured_dirs.map { |d| "#{d.chomp('/')}/" }
     bibdata_str.split(',').map(&:strip).each do |name|
       stem = name.delete_suffix('.bib')
-      prefixes = ['', 'refs/', 'bib/', 'bibliography/']
       match = prefixes.map { |pfx| "#{pfx}#{stem}.bib" }.find { |cand| File.file?(cand) }
       files << match if match
     end
@@ -721,8 +732,10 @@ class LatexBuilder
       end
     else
       Dir.chdir('junk') do
-        FileUtils.mkdir_p('styles')
-        Dir['../styles/*'].each { |s| FileUtils.cp_r(s, 'styles/') }
+        if File.directory?('../styles')
+          FileUtils.mkdir_p('styles')
+          Dir['../styles/*'].each { |s| FileUtils.cp_r(s, 'styles/') }
+        end
         Open3.capture2e('bibtex', @bfilename)
       end
     end
@@ -811,10 +824,9 @@ class LatexBuilder
       candidates.concat(extract_fls_dependencies("junk/#{@bfilename}.fls").select { |f| f.end_with?('.tex') })
     end
     candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
+    patterns = @options[:exclude_source_tex] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS
     candidates.uniq.reject do |f|
-      f == @filename ||
-        f.start_with?('styles/', 'macros/', 'pkg/', 'packages/') ||
-        f =~ %r{(?:prefix|preamble|macros|styles)\.tex\z}i
+      f == @filename || patterns.any? { |pat| File.fnmatch?(pat, f, File::FNM_CASEFOLD | File::FNM_EXTGLOB) }
     end
   end
 

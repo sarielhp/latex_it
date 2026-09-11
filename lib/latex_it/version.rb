@@ -7,7 +7,7 @@
 # ==============================================================================
 
 module LatexIt
-  VERSION = '0.21.0'.freeze
+  VERSION = '0.22.0'.freeze
   EXECUTABLE = File.expand_path('../../latex_it', __dir__).freeze
 end
 

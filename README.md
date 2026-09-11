@@ -6,6 +6,10 @@ Like `latexmk`, it handles multi-pass compilation and bibliography dependencies 
 1. **Cluttered directories**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are isolated in a `junk/` directory, keeping your working tree clean.
 2. **Cryptic output**: Low-level engine noise is filtered out, separating real errors and layout flaws from harmless background warnings and offering plain-English suggestions for fixes.
 
+<p align="center">
+  <img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%">
+</p>
+
 ---
 
 ## Quick Start

@@ -2,6 +2,10 @@
 
 `latex_it` parses raw compiler logs from `xelatex`, `lualatex`, and `pdflatex` to present clean, categorized diagnostic messages. Instead of wading through hundreds of lines of TeX console output, errors and warnings are categorized into clear tiers with actionable remediation hints.
 
+<p align="center">
+  <img src="images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%">
+</p>
+
 ---
 
 ## 1. The 4-Tier Diagnostic Hierarchy

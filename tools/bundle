@@ -17,7 +17,7 @@ require 'optparse'
 
 module LatexBundler
   REPO_ROOT = File.expand_path('..', __dir__)
-  VERSION_FILE = File.join(REPO_ROOT, 'VERSION')
+  VERSION_FILE = File.join(REPO_ROOT, 'lib', 'latex_it', 'version.rb')
   ENTRY_FILE = File.join(REPO_ROOT, 'latex_it')
   LIB_DIR = File.join(REPO_ROOT, 'lib', 'latex_it')
 
@@ -50,7 +50,10 @@ module LatexBundler
   ].freeze
 
   def self.current_version
-    File.file?(VERSION_FILE) ? File.read(VERSION_FILE).strip : '0.14.0'
+    return '0.21.0' unless File.file?(VERSION_FILE)
+
+    content = File.read(VERSION_FILE)
+    content =~ /VERSION\s*=\s*['"]([^'"]+)['"]/ ? Regexp.last_match(1) : '0.21.0'
   end
 
   def self.clean_module_content(name, content, version)
@@ -66,7 +69,7 @@ module LatexBundler
   end
 
   def self.specialize_version_module(content, version)
-    content.sub(/VERSION = .*\n/, "VERSION = '#{version}'\n")
+    content.sub(/VERSION = .*\n/, "VERSION = '#{version}'.freeze\n")
            .sub(/EXECUTABLE = .*\n/, "EXECUTABLE = File.expand_path(__FILE__).freeze\n")
   end
 

@@ -34,7 +34,6 @@ This document provides architectural guidelines, core invariants, development wo
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
   - `test/fixups/`: ArXiv test repair records and schema.
 - **Documentation & Configuration**:
-  - [`VERSION`](VERSION): Plaintext file tracking the canonical project version.
   - [`README.md`](README.md): User-facing feature reference, options, and architecture guide.
   - [`docs/`](docs/): Comprehensive technical guides (`arxiv.md`, `diagnostics.md`, `configuration.md`, `architecture.md`, `sandbox_testing.md`) and [`docs/errors/`](docs/errors/) error catalog.
   - [`AGENTS.md`](AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
@@ -145,7 +144,7 @@ Always execute quality workflows through the provided scripts:
 ### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
 - Ensures working tree is completely clean (aborts if uncommitted changes exist).
 - Runs [`tools/gate --full`](tools/gate) automatically. (Do not run `--full` manually before bumping to avoid duplicate gate runs).
-- Increments version by +0.1.0 in [`VERSION`](VERSION) and `latex_it`.
+- Increments version by +0.1.0 in [`lib/latex_it/version.rb`](lib/latex_it/version.rb) and bundled `latex_it`.
 - Commits changes, creates a release git tag, and pushes to remote with `--follow-tags`.
 - **Trigger**:
   ```bash

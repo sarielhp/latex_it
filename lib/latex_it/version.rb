@@ -7,8 +7,7 @@
 # ==============================================================================
 
 module LatexIt
-  VERSION_FILE = File.expand_path('../../VERSION', __dir__)
-  VERSION = (File.file?(VERSION_FILE) ? File.read(VERSION_FILE).strip : '0.21.0').freeze
+  VERSION = '0.21.0'.freeze
   EXECUTABLE = File.expand_path('../../latex_it', __dir__).freeze
 end
 

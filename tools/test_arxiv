@@ -231,8 +231,6 @@ module ArxivPaperTest
       end
       FileUtils.cp(@options[:latex_it], File.join(stage, 'latex_it'))
       stage_compatibility_tree(stage)
-      FileUtils.cp(File.join(ROOT, 'VERSION'), File.join(stage, 'VERSION')) if @options[:latex_it] == File.join(ROOT,
-                                                                                                                'latex_it')
       @report['latex_it_sha256'] = Digest::SHA256.file(File.join(stage, 'latex_it')).hexdigest
       File.write(File.join(stage, 'metadata.json'), JSON.pretty_generate(metadata))
       config = { main: @report['main'] }

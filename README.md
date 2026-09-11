@@ -35,9 +35,10 @@ cd latex_it
 
 ### Requirements
 
+- **Operating System**: **Linux** (primary target; macOS is supported/functional via Homebrew/MacTeX; Windows requires WSL).
 - **Ruby**: 2.7 or newer.
 - **TeX Distribution**: TeX Live, MacTeX, or compatible (`xelatex`, `lualatex`, or `pdflatex`).
-- **Optional**: `poppler-utils` (provides `pdftotext` for `-d` / `--diff` text diffing).
+- **Optional**: `poppler-utils` (provides `pdftotext` for `-d` / `--diff` text diffing; `brew install poppler` on macOS).
 
 ---
 

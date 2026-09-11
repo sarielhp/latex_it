@@ -47,7 +47,7 @@ module LatexCLI
     normalize_argv!(argv)
     parser = build_option_parser(options)
     parser.parse!(argv)
-    handle_help_and_examples(parser, options, prog_name)
+    handle_help_and_examples(parser, options, prog_name, argv)
 
     configure_environment(options)
     execute_targets(argv, options)
@@ -107,6 +107,8 @@ module LatexCLI
       single_pass: false,
       show_examples: false,
       show_help: false,
+      show_main: false,
+      clean_only: false,
       fast: is_lw || cfg['fast'] == true,
       update_on_diff: cfg['update_on_diff'] == true,
       bib: cfg['bib'],
@@ -148,6 +150,12 @@ module LatexCLI
     argv.map! do |arg|
       case arg
       when '-Werror' then '--werror'
+      when '-emacs' then '--emacs'
+      when '-pdflatex' then '--pdflatex'
+      when '-xelatex' then '--xe'
+      when '-lualatex' then '--lua'
+      when '-help' then '--help'
+      when '-version' then '--version'
       else arg
       end
     end
@@ -168,17 +176,8 @@ module LatexCLI
   end
 
   def self.add_compilation_options_primary(opts, options)
-    opts.on('-m', '--main', 'Print the detected main LaTeX file and exit') do
-      dir = ARGV[0] || '.'
-      puts LaTeXUtils.find_main_latex_file(dir)
-      exit 0
-    end
-    opts.on('-C', '--clean-only', 'Clean auxiliary and junk files in directory and exit without building') do
-      dir = ARGV[0] || '.'
-      target = File.directory?(dir) ? dir : File.dirname(dir)
-      LaTeXUtils.clean_directory(target)
-      exit 0
-    end
+    opts.on('-m', '--main', 'Print the detected main LaTeX file and exit') { options[:show_main] = true }
+    opts.on('-C', '--clean-only', 'Clean auxiliary and junk files in directory and exit without building') { options[:clean_only] = true }
     opts.on('--fast', 'Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed') { options[:fast] = true }
     opts.on('-a', '--all', 'Show all diagnostics across all tiers (including Whatevers and Warnings)') do
       options[:all] = true
@@ -250,7 +249,18 @@ module LatexCLI
     opts.on('-h', '--help', 'Show this help message') { options[:show_help] = true }
   end
 
-  def self.handle_help_and_examples(parser, options, prog_name)
+  def self.handle_help_and_examples(parser, options, prog_name, argv = [])
+    if options[:show_main]
+      dir = argv[0] || '.'
+      puts LaTeXUtils.find_main_latex_file(dir)
+      exit 0
+    elsif options[:clean_only]
+      dir = argv[0] || '.'
+      target = File.directory?(dir) ? dir : File.dirname(dir)
+      LaTeXUtils.clean_directory(target)
+      exit 0
+    end
+
     if options[:show_help] && options[:show_examples]
       puts parser
       puts "\n#{LaTeXUtils.detailed_examples}"

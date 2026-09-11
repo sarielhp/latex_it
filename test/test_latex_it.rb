@@ -496,6 +496,27 @@ class TestLatexItCLI < Minitest::Test
     assert_includes out, '(./chapters/ch2.tex'
   end
 
+  def test_diagnostics_correctly_attributes_file_with_inline_package_parens
+    log_content = <<~LOG
+      (./main.tex (./styles/prefix.tex)
+      (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-NewComputerModern.cfg)
+      (junk/main.aux)
+      File: foo.cfg (AT)
+      Overfull \\hbox (30.0pt too wide) in paragraph at lines 140--143
+      (../fragment/def.tex)
+      Overfull \\hbox (15.0pt too wide) detected at line 249
+      )
+    LOG
+
+    builder = LatexBuilder.new('main.tex', {})
+    warnings = builder.send(:extract_warnings, log_content)
+    assert_equal 2, warnings.size
+    assert_equal './main.tex', warnings[0][:file]
+    assert_equal '140--143', warnings[0][:line_str]
+    assert_equal './main.tex', warnings[1][:file]
+    assert_equal '249', warnings[1][:line_str]
+  end
+
   def test_werror_aborts_on_warnings
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, 'junk'))
@@ -1153,5 +1174,48 @@ class TestLatexItCLI < Minitest::Test
     errs = LaTeXBraceChecker.new('test.tex', snippet).scan
     assert_equal 1, errs.size
     assert_includes errs.first[:text], "Extra closing brace '}'"
+  end
+
+  def test_compiler_environment_sets_max_print_line
+    builder = LatexBuilder.new('main.tex', {})
+    env = builder.send(:pass_environment)
+    assert_equal '2048', env['max_print_line']
+  end
+
+  def test_atomic_copy_replaces_target_atomically
+    Dir.mktmpdir do |dir|
+      src = File.join(dir, 'source.pdf')
+      dst = File.join(dir, 'final.pdf')
+      File.write(src, '%PDF-1.4 dummy new')
+      File.write(dst, '%PDF-1.4 dummy old')
+
+      builder = LatexBuilder.new('main.tex', {})
+      builder.send(:atomic_copy, src, dst)
+
+      assert_equal '%PDF-1.4 dummy new', File.read(dst)
+      assert_empty Dir.glob(File.join(dir, '*.tmp*'))
+    end
+  end
+
+  def test_discover_bib_files_includes_aux_bibdata_and_subdirectories
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        FileUtils.mkdir_p('refs')
+        File.write('refs/extra.bib', '@article{...}')
+        File.write('junk/main.aux', "\\bibdata{extra}\n")
+
+        builder = LatexBuilder.new('main.tex', {})
+        bibs = builder.send(:discover_bib_files)
+        assert_includes bibs, 'refs/extra.bib'
+      end
+    end
+  end
+
+  def test_capture_pass_output_executes_and_terminates_on_timeout
+    builder = LatexBuilder.new('main.tex', timeout: 1)
+    out, status = builder.send(:capture_pass_output, ['sleep', '5'])
+    refute status.success?
+    assert_includes out, 'Compilation timed out'
   end
 end

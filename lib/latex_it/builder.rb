@@ -31,6 +31,8 @@ class LatexBuilder
     TEXMF TEXMFDBS TEXMFCACHE
   ].freeze
 
+  DEFAULT_PASS_TIMEOUT = 180
+
   def initialize(target, options)
     @options = options
     @bdir = File.dirname(target)
@@ -458,6 +460,37 @@ class LatexBuilder
     FileUtils.rm_f(root_bbl) if File.exist?(root_bbl) && !LaTeXUtils.bbl_has_entries?(root_bbl)
   end
 
+  def pass_environment
+    env = LaTeXCompatibility.compiler_environment(@options).dup
+    env['max_print_line'] ||= '2048'
+    env
+  end
+
+  def capture_pass_output(cmd_args)
+    timeout = (@options[:timeout] || ENV['LATEX_IT_TIMEOUT'] || DEFAULT_PASS_TIMEOUT).to_i
+    env = pass_environment
+    return Open3.capture2e(env, *cmd_args) if timeout <= 0
+
+    Open3.popen2e(env, *cmd_args) do |_stdin, stdout_err, wait_thr|
+      output = ''
+      reader = Thread.new { output = stdout_err.read }
+      unless wait_thr.join(timeout)
+        begin
+          Process.kill('KILL', wait_thr.pid)
+        rescue StandardError
+          nil
+        end
+        reader.kill rescue nil
+        msg = "\n! LaTeX Error: Compilation timed out after #{timeout}s (suspected runaway loop).\n"
+        return [msg, Struct.new(:exitstatus, :success?).new(124, false)]
+      end
+      reader.join
+      [output, wait_thr.value]
+    end
+  rescue StandardError => e
+    ["\n! Process Error: #{e.message}\n", Struct.new(:exitstatus, :success?).new(1, false)]
+  end
+
   def run_latex_pass(suffix)
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     lgx = "#{@pdferr}#{suffix}"
@@ -466,7 +499,7 @@ class LatexBuilder
     cmd_args = build_latex_pass_cmd
     write_pass_header(lgx, cmd_args)
 
-    stdout_stderr, status = Open3.capture2e(LaTeXCompatibility.compiler_environment(@options), *cmd_args)
+    stdout_stderr, status = capture_pass_output(cmd_args)
     st = status.exitstatus || 0
 
     File.open(lgx, 'a') { |f| f.write(stdout_stderr) }
@@ -655,8 +688,33 @@ class LatexBuilder
     FileUtils.cp(source, junk_bbl) unless source == junk_bbl
   end
 
+  def discover_bib_files
+    bibs = Dir['*.bib', 'refs/*.bib', 'bib/*.bib', 'bibliography/*.bib'].select { |f| File.file?(f) }
+    bibs.concat(extract_aux_bib_files)
+    bibs.uniq
+  end
+
+  def extract_aux_bib_files
+    files = []
+    Dir.glob('junk/**/*.aux').each do |aux|
+      LaTeXUtils.safe_read(aux).scan(/\\bibdata\{([^}]+)\}/) do |m|
+        collect_bib_candidates(m.first, files)
+      end
+    end
+    files
+  end
+
+  def collect_bib_candidates(bibdata_str, files)
+    bibdata_str.split(',').map(&:strip).each do |name|
+      stem = name.delete_suffix('.bib')
+      prefixes = ['', 'refs/', 'bib/', 'bibliography/']
+      match = prefixes.map { |pfx| "#{pfx}#{stem}.bib" }.find { |cand| File.file?(cand) }
+      files << match if match
+    end
+  end
+
   def execute_bibliography(tool)
-    Dir['*.bib'].each { |b| FileUtils.cp(b, 'junk/') }
+    discover_bib_files.each { |b| FileUtils.cp(b, 'junk/') }
     if tool == :biber
       Dir.chdir('junk') do
         Open3.capture2e('biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename)
@@ -683,7 +741,7 @@ class LatexBuilder
     return true unless File.exist?(fnbbl) && File.size(fnbbl) > 0
 
     bbl_mtime = File.mtime(fnbbl)
-    bib_files = Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }
+    bib_files = discover_bib_files
     return true if bib_files.any? { |b| File.mtime(b) > bbl_mtime }
 
     log_content = LaTeXUtils.safe_read(loga)
@@ -772,7 +830,17 @@ class LatexBuilder
       end
     end
 
-    FileUtils.cp(src, dst)
+    atomic_copy(src, dst)
     puts "  Updated target: #{dst}" if update_on_diff
+  end
+
+  def atomic_copy(src, dst)
+    tmp = "#{dst}.tmp.#{Process.pid}"
+    FileUtils.cp(src, tmp)
+    File.rename(tmp, dst)
+  rescue StandardError
+    FileUtils.cp(src, dst)
+  ensure
+    FileUtils.rm_f(tmp) if tmp && File.exist?(tmp)
   end
 end

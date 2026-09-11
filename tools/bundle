@@ -42,6 +42,7 @@ module LatexBundler
     json
     open3
     optparse
+    rbconfig
     shellwords
     tmpdir
     time
@@ -55,7 +56,8 @@ module LatexBundler
     lines = content.lines.reject do |line|
       line.start_with?('# frozen_string_literal:') ||
         line.start_with?('#!/usr/bin/env') ||
-        line.match?(/\A\s*require(?:_relative)?\s+['"]/)
+        line.match?(/\A\s*require_relative\s+['"]/) ||
+        (name != 'color.rb' && line.match?(/\A\s*require\s+['"]/))
     end
     result = lines.join.strip
     result = specialize_version_module(result, version) if name == 'version.rb'

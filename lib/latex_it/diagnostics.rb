@@ -81,6 +81,12 @@ module LaTeXDiagnostics
     }
   }.freeze
 
+  LOG_FILE_EXTENSIONS = %w[
+    tex sty cls aux bbl bib dtx def ldf cfg clo toc lof lot png pdf jpg eps fd fontspec out idx code\.tex
+  ].join('|').freeze
+
+  LOG_FILE_PATTERN = %r{\A\((?:"([^"]+)"?|((?:\.{1,2}[\\/][^\s()]+|[a-zA-Z0-9_\-./]+?\.(?:#{LOG_FILE_EXTENSIONS}))\b))}.freeze
+
   def count_errors_in_log(st, loga)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
@@ -216,12 +222,30 @@ module LaTeXDiagnostics
     return if line =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/ ||
               line =~ /^(?:Overfull|Underfull)/ || line =~ /^!\s+/
 
-    file_pattern = /\((?:"([^"]+)"|(\.[\\\/][^\s\(\)]+|[a-zA-Z0-9_\-\.\/]+?\.(?:tex|sty|cls|aux|bbl|bib|dtx|def|ldf|cfg|clo|toc|lof|lot|png|pdf|jpg|eps))\b)/
-    line.scan(file_pattern).map { |m| m.compact.first }.each { |f| file_stack << f }
+    pos = 0
+    len = line.length
+    while pos < len
+      ch = line[pos]
+      if ch == '('
+        sub = line[pos..]
+        if (m = sub.match(LOG_FILE_PATTERN))
+          file_stack.push(m[1] || m[2])
+          pos += m[0].length
+        else
+          file_stack.push(nil)
+          pos += 1
+        end
+      elsif ch == ')'
+        file_stack.pop unless file_stack.empty?
+        pos += 1
+      else
+        pos += 1
+      end
+    end
+  end
 
-    closes = line.scan(/\)/).size
-    opens = line.scan(/\(/).size
-    (closes - opens).times { file_stack.pop if file_stack.size > 1 }
+  def current_log_file(file_stack)
+    file_stack.reverse_each.find { |f| !f.nil? } || "./#{@filename}"
   end
 
   def diagnostic_boundary_line?(line)
@@ -257,7 +281,7 @@ module LaTeXDiagnostics
 
   def extract_warning_location(warn_text, file_stack)
     clean = warn_text.gsub(/\([a-zA-Z0-9_\-]+\)\s*/, '').gsub(/line (\d+)\s+(\d+)\b/, 'line \1\2')
-    file_name = file_stack.last || "./#{@filename}"
+    file_name = current_log_file(file_stack)
     line_no = 0
     line_str = ''
 
@@ -286,7 +310,7 @@ module LaTeXDiagnostics
     end
 
     line_no, line_str = (box_line =~ /lines?\s+(\d+(?:--\d+)?)/i) ? [Regexp.last_match(1).split('--').first.to_i, Regexp.last_match(1)] : [0, '']
-    file_name = file_stack.last || "./#{@filename}"
+    file_name = current_log_file(file_stack)
     formatted = format_diagnostic_line(line_str, box_line, color_m)
     if verbose && !extra_lines.empty?
       formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : highlight_line_numbers(line, color_m) }.join("\n")
@@ -398,7 +422,7 @@ module LaTeXDiagnostics
         err_text = err_block.join("\n")
         line_no = extract_error_line(err_text)
         formatted = format_error_block(err_block, line_no)
-        file_name = err_file || file_stack.last || "./#{@filename}"
+        file_name = err_file || current_log_file(file_stack)
         errors << {
           file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),
           text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: i
@@ -607,7 +631,7 @@ module LaTeXDiagnostics
       next unless line.include?('multiply defined') && line.include?('LaTeX Warning')
 
       text = line.strip
-      file_name = file_stack.last || "./#{@filename}"
+      file_name = current_log_file(file_stack)
       formatted = format_diagnostic_line('', text, :red)
       alerts << {
         file: file_name, line: 0, line_str: '', text: text,

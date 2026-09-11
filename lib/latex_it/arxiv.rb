@@ -387,17 +387,7 @@ class LatexArxivPackager
   end
 
   def arxiv_edit_distance(left, right)
-    previous = (0..right.length).to_a
-    left.each_char.with_index(1) do |left_char, row|
-      current = [row]
-      right.each_char.with_index(1) do |right_char, column|
-        cost = left_char == right_char ? 0 : 1
-        current << [current[column - 1] + 1, previous[column] + 1,
-                    previous[column - 1] + cost].min
-      end
-      previous = current
-    end
-    previous.last
+    LaTeXUtils.edit_distance(left, right)
   end
 
   def arxiv_normalize_name(value)

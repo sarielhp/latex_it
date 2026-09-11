@@ -119,6 +119,23 @@ module LaTeXUtils
     normalized
   end
 
+  def self.edit_distance(left, right)
+    return 0 if left == right
+    return right.length if left.empty?
+    return left.length if right.empty?
+
+    previous = (0..right.length).to_a
+    left.each_char.with_index(1) do |left_char, row|
+      current = [row]
+      right.each_char.with_index(1) do |right_char, col|
+        cost = left_char == right_char ? 0 : 1
+        current << [current[col - 1] + 1, previous[col] + 1, previous[col - 1] + cost].min
+      end
+      previous = current
+    end
+    previous.last
+  end
+
   def self.safe_read(path)
     return '' unless path && File.file?(path)
 

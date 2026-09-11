@@ -23,6 +23,30 @@ class TestErrorCatalog < Minitest::Test
     assert_includes item[:hint], "Undefined command '\\badcommand'"
   end
 
+  def test_classify_undefined_control_sequence_suggests_package
+    text = "./main.tex:5: Undefined control sequence.\nl.5 \\toprule"
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :undefined_control_sequence, item[:id]
+    assert_includes item[:hint], "Command '\\toprule' requires \\usepackage{booktabs}"
+  end
+
+  def test_classify_undefined_control_sequence_fuzzy_matches_typo
+    text = "./main.tex:5: Undefined control sequence.\nl.5 \\alpa"
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :undefined_control_sequence, item[:id]
+    assert_includes item[:hint], "Did you mean '\\alpha'?"
+  end
+
+  def test_classify_undefined_control_sequence_fuzzy_matches_package_macro
+    text = "./main.tex:5: Undefined control sequence.\nl.5 \\includegrahics{fig.pdf}"
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :undefined_control_sequence, item[:id]
+    assert_includes item[:hint], "Did you mean '\\includegraphics'? (requires \\usepackage{graphicx})"
+  end
+
   def test_classify_missing_item
     text = "./main.tex:4: LaTeX Error: Something's wrong--perhaps a missing \\item."
     item = LaTeXErrorCatalog.classify(text, text.lines)

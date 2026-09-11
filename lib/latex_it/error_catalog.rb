@@ -8,6 +8,101 @@
 # ==============================================================================
 
 module LaTeXErrorCatalog
+  PACKAGE_COMMANDS = {
+    'toprule' => 'booktabs',
+    'midrule' => 'booktabs',
+    'bottomrule' => 'booktabs',
+    'cmidrule' => 'booktabs',
+    'specialrule' => 'booktabs',
+    'mathbb' => 'amssymb',
+    'mathfrak' => 'amssymb',
+    'checkmark' => 'amssymb',
+    'triangleq' => 'amssymb',
+    'coloneqq' => 'mathtools',
+    'DeclarePairedDelimiter' => 'mathtools',
+    'bm' => 'bm',
+    'url' => 'hyperref or url',
+    'nolinkurl' => 'hyperref or url',
+    'href' => 'hyperref',
+    'hypersetup' => 'hyperref',
+    'includegraphics' => 'graphicx',
+    'graphicspath' => 'graphicx',
+    'rotatebox' => 'graphicx',
+    'resizebox' => 'graphicx',
+    'color' => 'xcolor',
+    'textcolor' => 'xcolor',
+    'colorbox' => 'xcolor',
+    'definecolor' => 'xcolor',
+    'subcaption' => 'subcaption',
+    'subfloat' => 'subcaption',
+    'cancel' => 'cancel',
+    'sout' => 'ulem',
+    'hl' => 'soul',
+    'lstinline' => 'listings',
+    'lstinputlisting' => 'listings',
+    'tikz' => 'tikz',
+    'node' => 'tikz',
+    'coordinate' => 'tikz',
+    'microtypesetup' => 'microtype',
+    'text' => 'amsmath',
+    'eqref' => 'amsmath',
+    'DeclareMathOperator' => 'amsmath',
+    'boldsymbol' => 'amsmath',
+    'intertext' => 'amsmath'
+  }.freeze
+
+  COMMON_COMMANDS = %w[
+    documentclass usepackage begin end
+    section subsection subsubsection paragraph subparagraph
+    maketitle tableofcontents appendix bibliography bibliographystyle
+    label ref pageref cite citep citet footnote item caption centering
+    textbf textit texttt textsc textsf textsl underline emph
+    normalsize large Large LARGE small footnotesize huge Huge
+    newline newpage clearpage noindent bigskip medskip smallskip
+    alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta
+    iota kappa lambda mu nu xi pi rho sigma tau upsilon phi varphi chi psi omega
+    Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega
+    infty partial nabla times cdot sum prod int iint oint forall exists
+    in notin subset subseteq supset supseteq cup cap setminus
+    leq geq neq approx equiv sim simeq le ge ne
+    to leftarrow rightarrow Leftarrow Rightarrow mapsto iff implies
+    frac sqrt left right over atop lim min max sup inf det exp log ln sin cos tan
+  ].freeze
+
+  def self.suggest_command(raw_tok)
+    return 'Undefined command; check spelling or \\usepackage' if raw_tok.nil? || raw_tok.empty?
+
+    cmd = raw_tok.to_s.strip.sub(/\A\\/, '')
+    return "Undefined command '\\#{cmd}'; check spelling or \\usepackage" if cmd.empty?
+
+    pkg = PACKAGE_COMMANDS[cmd]
+    return "Command '\\#{cmd}' requires \\usepackage{#{pkg}}" if pkg
+
+    suggestion = find_closest_command(cmd)
+    if suggestion
+      sug_pkg = PACKAGE_COMMANDS[suggestion]
+      sug_pkg ? "Did you mean '\\#{suggestion}'? (requires \\usepackage{#{sug_pkg}})" : "Did you mean '\\#{suggestion}'?"
+    else
+      "Undefined command '\\#{cmd}'; check spelling or \\usepackage"
+    end
+  end
+
+  def self.find_closest_command(cmd)
+    return nil if cmd.length < 3
+
+    max_dist = cmd.length <= 4 ? 1 : 2
+    candidates = (COMMON_COMMANDS + PACKAGE_COMMANDS.keys).uniq
+    candidates.select! { |c| (c.length - cmd.length).abs <= max_dist }
+
+    best = candidates.min_by do |c|
+      dist = LaTeXUtils.edit_distance(cmd, c)
+      [dist, c[0] == cmd[0] ? 0 : 1]
+    end
+    return nil unless best
+
+    LaTeXUtils.edit_distance(cmd, best) <= max_dist ? best : nil
+  end
+
   UNDEFINED_CS_EXTRACTOR = lambda do |_match, err_block|
     block_text = err_block.join("\n")
     if block_text =~ /<recently read>\s*(\\\S+)/
@@ -32,7 +127,7 @@ module LaTeXErrorCatalog
       pattern: /Undefined control sequence/i,
       title: 'Undefined Control Sequence',
       token_extractor: UNDEFINED_CS_EXTRACTOR,
-      hint: ->(tok) { tok ? "Undefined command '#{tok}'; check spelling or \\usepackage" : 'Undefined command; check spelling or \\usepackage' },
+      hint: ->(tok) { suggest_command(tok) },
       why: 'LaTeX does not recognize this macro or command name.',
       fix: 'Check for typos or include the package defining this macro in preamble.',
       doc_slug: '02_undefined_control_sequence'

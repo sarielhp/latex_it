@@ -144,7 +144,7 @@ Always execute quality workflows through the provided scripts:
 ### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
 - Ensures working tree is completely clean (aborts if uncommitted changes exist).
 - Runs [`tools/gate --full`](tools/gate) automatically. (Do not run `--full` manually before bumping to avoid duplicate gate runs).
-- Increments version by +0.1.0 in [`lib/latex_it/version.rb`](lib/latex_it/version.rb) and bundled `latex_it`.
+- Increments version by +0.0.1 (patch by default, or `--major` / `--minor`) in [`lib/latex_it/version.rb`](lib/latex_it/version.rb) and bundled `latex_it`.
 - Commits changes, creates a release git tag, and pushes to remote with `--follow-tags`.
 - **Trigger**:
   ```bash

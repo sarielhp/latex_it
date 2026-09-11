@@ -7,7 +7,7 @@
 # Automated version bump and release workflow for latex_it:
 # 1. Validates working tree is 100% clean (aborts if uncommitted changes exist).
 # 2. Runs the full quality gate (tools/gate --full).
-# 3. Increments version by +0.1.0 (major.minor+1.patch).
+# 3. Increments version by +0.0.1 (patch by default, or --major / --minor).
 # 4. Updates lib/latex_it/version.rb and latex_it files.
 # 5. Commits the updated version, tags the release, and pushes to remote.
 # ==============================================================================
@@ -28,7 +28,7 @@ module VersionBumper
   VERSION_FILE = File.join(REPO_ROOT, 'lib', 'latex_it', 'version.rb')
   LATEX_IT_FILE = File.join(REPO_ROOT, 'latex_it')
 
-  def self.run!(dry_run: false)
+  def self.run!(dry_run: false, bump_type: :patch)
     puts "#{BOLD}==> Version Bump Workflow (latex_it)#{RESET}"
 
     Dir.chdir(REPO_ROOT) do
@@ -37,8 +37,8 @@ module VersionBumper
       run_quality_gate!
 
       current_v = read_current_version
-      new_v = compute_next_version(current_v)
-      puts "--> Bumping version: #{YELLOW}#{current_v}#{RESET} -> #{GREEN}#{BOLD}#{new_v}#{RESET}"
+      new_v = compute_next_version(current_v, type: bump_type)
+      puts "--> Bumping version (#{bump_type}): #{YELLOW}#{current_v}#{RESET} -> #{GREEN}#{BOLD}#{new_v}#{RESET}"
 
       if dry_run
         puts "#{CYAN}[Dry Run] Would update lib/latex_it/version.rb, commit, tag v#{new_v}, and push.#{RESET}"
@@ -102,16 +102,17 @@ module VersionBumper
     '0.1.0'
   end
 
-  def self.compute_next_version(version_str)
+  def self.compute_next_version(version_str, type: :patch)
     parts = version_str.split('.').map(&:to_i)
     while parts.size < 3
       parts << 0
     end
-    # Add 0.1.0 (major + 0, minor + 1, patch + 0)
-    major = parts[0]
-    minor = parts[1] + 1
-    patch = parts[2]
-    "#{major}.#{minor}.#{patch}"
+    major, minor, patch = parts
+    case type
+    when :major then "#{major + 1}.0.0"
+    when :minor then "#{major}.#{minor + 1}.0"
+    else             "#{major}.#{minor}.#{patch + 1}"
+    end
   end
 
   def self.apply_version_update(new_v)
@@ -200,13 +201,22 @@ module VersionBumper
 end
 
 options = {
-  dry_run: false
+  dry_run: false,
+  bump_type: :patch
 }
 
 OptionParser.new do |opts|
   opts.banner = 'Usage: ./tools/bump [options]'
   opts.separator ''
   opts.separator 'Options:'
+
+  opts.on('--major', 'Increment major version component (e.g. 1.0.1 -> 2.0.0)') do
+    options[:bump_type] = :major
+  end
+
+  opts.on('--minor', 'Increment minor version component (e.g. 1.0.1 -> 1.1.0)') do
+    options[:bump_type] = :minor
+  end
 
   opts.on('-n', '--dry-run', 'Compute and print next version without modifying files or pushing') do
     options[:dry_run] = true
@@ -218,4 +228,4 @@ OptionParser.new do |opts|
   end
 end.parse!
 
-VersionBumper.run!(dry_run: options[:dry_run]) if __FILE__ == $PROGRAM_NAME
+VersionBumper.run!(dry_run: options[:dry_run], bump_type: options[:bump_type]) if __FILE__ == $PROGRAM_NAME

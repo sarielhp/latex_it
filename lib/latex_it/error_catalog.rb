@@ -112,12 +112,123 @@ module LaTeXErrorCatalog
     end
   end
 
+  MATH_NON_ALIGN_ENVS = (
+    %w[equation equation* gather gather* multline multline* displaymath math] + ['\\[ ... \\]']
+  ).freeze
+
+  TABLE_MATRIX_ENVS = %w[
+    tabular tabular* tabularx tabulary longtable array
+    matrix pmatrix bmatrix Bmatrix vmatrix Vmatrix cases
+  ].freeze
+
+  ALIGN_ENVS = %w[
+    align align* flalign flalign* alignat alignat* split aligned alignedat
+  ].freeze
+
+  def self.suggest_alignment_tab(env)
+    return "'&' outside align*/tabular; switch environment or escape as '\\&'" if env.nil? || env.empty?
+
+    if MATH_NON_ALIGN_ENVS.include?(env)
+      target = env.end_with?('*') || env == '\\[ ... \\]' || %w[displaymath math].include?(env) ? 'align*' : 'align'
+      "Misplaced '&' in '#{env}'; switch to '#{target}' (or use 'aligned' / 'split')"
+    elsif TABLE_MATRIX_ENVS.include?(env)
+      "Extra '&' in '#{env}'; too many columns or missing newline '\\\\'"
+    elsif ALIGN_ENVS.include?(env)
+      "Misplaced '&' in '#{env}'; check for extra '&' or missing '\\\\'"
+    else
+      "Unescaped '&' in text; escape as '\\&'"
+    end
+  end
+
+  def self.find_source_file(file_path)
+    return nil if file_path.nil? || file_path.to_s.strip.empty?
+
+    clean = file_path.to_s.strip.delete_prefix('"').delete_suffix('"')
+    return clean if File.file?(clean)
+
+    base = File.basename(clean)
+    File.file?(base) ? base : nil
+  end
+
+  def self.parse_env_tags(line)
+    clean_line = line.sub(/(?<!\\)%.*\z/, '')
+    matches = []
+    clean_line.scan(/\\(begin|end)\{([a-zA-Z0-9_\*@\-]+)\}|(\\\[|\\\])/) do |b_or_e, env, bracket|
+      if bracket
+        matches << [bracket == '\\[' ? 'begin' : 'end', '\\[ ... \\]']
+      else
+        matches << [b_or_e, env]
+      end
+    end
+    matches
+  end
+
+  def self.process_env_tag(env_stack, type, name)
+    if type == 'end'
+      env_stack << name
+      nil
+    elsif env_stack.include?(name)
+      env_stack.slice!(env_stack.rindex(name)..-1)
+      nil
+    else
+      name
+    end
+  end
+
+  def self.detect_enclosing_environment(file_path, error_line)
+    source_file = find_source_file(file_path)
+    return nil unless source_file && error_line && error_line.to_i > 0
+
+    lines = File.readlines(source_file)
+    idx = [error_line.to_i - 1, lines.size - 1].min
+    return nil if idx < 0
+
+    env_stack = []
+    idx.downto(0) do |i|
+      raw_line = lines[i]
+      raw_line = raw_line.split(/(?<!\\)&/, 2).first if i == idx && raw_line =~ /(?<!\\)&/
+      tags = parse_env_tags(raw_line)
+      tags.reverse_each do |type, name|
+        found = process_env_tag(env_stack, type, name)
+        return found if found
+      end
+    end
+    nil
+  rescue StandardError
+    nil
+  end
+
+  def self.resolve_file_and_line(err_block, file, line)
+    target_file = file
+    target_line = line
+    block_text = err_block.join("\n")
+
+    if (target_file.nil? || target_file.empty?) && block_text =~ /(?:\A|\n)(\S+?):(\d+):\s*Misplaced alignment tab/
+      target_file = Regexp.last_match(1)
+      target_line ||= Regexp.last_match(2).to_i
+    end
+
+    if (target_line.nil? || target_line.to_i <= 0) && block_text =~ /(?:\A|\n).*?:(\d+):|l\.(\d+)/
+      target_line = (Regexp.last_match(1) || Regexp.last_match(2)).to_i
+    end
+
+    [target_file, target_line]
+  end
+
+  def self.extract_misplaced_tab_env(err_block, file, line)
+    resolved_file, resolved_line = resolve_file_and_line(err_block, file, line)
+    detect_enclosing_environment(resolved_file, resolved_line)
+  end
+
   CATALOG = [
     {
       id: :misplaced_alignment_tab,
       pattern: /Misplaced alignment tab character &/i,
       title: 'Misplaced Alignment Tab Character (&)',
-      hint: "'&' outside align*/tabular; switch environment or escape as '\\&'",
+      token_extractor: lambda do |_match, err_block, file = nil, line = nil|
+        extract_misplaced_tab_env(err_block, file, line)
+      end,
+      hint: ->(tok) { suggest_alignment_tab(tok) },
       why: "An alignment tab '&' was encountered outside a table or align environment.",
       fix: "Use an environment that supports '&' (e.g., align*, tabular) or write '\\&'.",
       doc_slug: '01_misplaced_alignment_tab'
@@ -612,13 +723,13 @@ module LaTeXErrorCatalog
     }
   ].freeze
 
-  def self.classify(err_text, err_block = [])
+  def self.classify(err_text, err_block = [], file: nil, line: nil)
     text = err_text.to_s
     CATALOG.each do |entry|
       match = entry[:pattern].match(text)
       next unless match
 
-      token = extract_token(entry, match, err_block)
+      token = extract_token(entry, match, err_block, file: file, line: line)
       hint = resolve_hint(entry[:hint], token)
       return {
         id: entry[:id],
@@ -633,10 +744,13 @@ module LaTeXErrorCatalog
     nil
   end
 
-  def self.extract_token(entry, match, err_block)
-    if entry[:token_extractor]
-      entry[:token_extractor].call(match, err_block)
-    elsif match && match.captures.any?
+  def self.extract_token(entry, match, err_block, file: nil, line: nil)
+    extractor = entry[:token_extractor]
+    return nil unless extractor || (match && match.captures.any?)
+
+    if extractor
+      extractor.arity == 2 ? extractor.call(match, err_block) : extractor.call(match, err_block, file, line)
+    else
       match.captures.first
     end
   end

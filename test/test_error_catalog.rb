@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'tmpdir'
 load File.expand_path('../latex_it', __dir__)
 
 class TestErrorCatalog < Minitest::Test
@@ -12,6 +13,58 @@ class TestErrorCatalog < Minitest::Test
     assert_equal :misplaced_alignment_tab, item[:id]
     assert_includes item[:hint], '&'
     assert_equal '01_misplaced_alignment_tab', item[:doc_slug]
+  end
+
+  def test_classify_misplaced_alignment_tab_in_equation_star
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\n\\begin{equation*}\n  x = 1 & y = 2\n\\end{equation*}\n\\end{document}\n")
+      text = "#{file}:4: Misplaced alignment tab character &.\nl.4   x = 1 &"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 4)
+      assert item
+      assert_equal :misplaced_alignment_tab, item[:id]
+      assert_equal 'equation*', item[:token]
+      assert_includes item[:hint], "Misplaced '&' in 'equation*'; switch to 'align*'"
+    end
+  end
+
+  def test_classify_misplaced_alignment_tab_in_text
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\nHello AT&T world\n\\end{document}\n")
+      text = "#{file}:3: Misplaced alignment tab character &.\nl.3 Hello AT&"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 3)
+      assert item
+      assert_equal :misplaced_alignment_tab, item[:id]
+      assert_equal 'document', item[:token]
+      assert_equal "Unescaped '&' in text; escape as '\\&'", item[:hint]
+    end
+  end
+
+  def test_classify_misplaced_alignment_tab_in_displaymath
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\n\\[\n  x = 1 & y = 2\n\\]\n\\end{document}\n")
+      text = "#{file}:4: Misplaced alignment tab character &.\nl.4   x = 1 &"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 4)
+      assert item
+      assert_equal :misplaced_alignment_tab, item[:id]
+      assert_equal '\\[ ... \\]', item[:token]
+      assert_includes item[:hint], "Misplaced '&' in '\\[ ... \\]'; switch to 'align*'"
+    end
+  end
+
+  def test_classify_misplaced_alignment_tab_in_tabular
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\n\\begin{tabular}{c}\n  a & b \\\\\n\\end{tabular}\n\\end{document}\n")
+      text = "#{file}:4: Misplaced alignment tab character &.\nl.4   a &"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 4)
+      assert item
+      assert_equal :misplaced_alignment_tab, item[:id]
+      assert_equal 'tabular', item[:token]
+      assert_includes item[:hint], "Extra '&' in 'tabular'; too many columns"
+    end
   end
 
   def test_classify_undefined_control_sequence_extracts_token

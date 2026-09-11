@@ -374,9 +374,9 @@ module LaTeXDiagnostics
     err_block = err_block.map(&:rstrip).reject(&:empty?)
     err_text = err_block.join("\n")
     line_no = extract_error_line(err_text)
-    classification = LaTeXErrorCatalog.classify(err_text, err_block)
-    formatted = format_error_block(err_block, line_no, catalog: classification)
     file_name = err_file || current_log_file(file_stack)
+    classification = LaTeXErrorCatalog.classify(err_text, err_block, file: file_name, line: line_no)
+    formatted = format_error_block(err_block, line_no, catalog: classification)
     cat_id = classification ? classification[:id] : :generic
     item = {
       file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),

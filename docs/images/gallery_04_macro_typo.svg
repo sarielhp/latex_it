@@ -105,8 +105,8 @@
         <text x="0" y="280"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">&lt;inserted text&gt;</tspan></text>
         <text x="0" y="300"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">                $</tspan></text>
         <text x="0" y="320"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">l.</tspan><tspan fill="#7dcfff" font-weight="bold">3</tspan><tspan fill="#f7768e" font-weight="bold"> \includegrahics{my_</tspan></text>
-        <text x="0" y="340"><tspan fill="#c0caf5" >   </tspan><tspan fill="#7dcfff" font-weight="bold">▸</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#7dcfff" >Hint: Math symbol (like _ or ^) outside math mode; wrap in</tspan></text>
-        <text x="0" y="360"><tspan fill="#7dcfff" >    </tspan><tspan fill="#7dcfff" >$...$</tspan></text>
+        <text x="0" y="340"><tspan fill="#c0caf5" >   </tspan><tspan fill="#7dcfff" font-weight="bold">▸</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#7dcfff" >Hint: Subscript '_' outside math mode; wrap in $...$ or escape</tspan></text>
+        <text x="0" y="360"><tspan fill="#7dcfff" >    </tspan><tspan fill="#7dcfff" >as '\_'</tspan></text>
         <text x="0" y="380"><tspan fill="#f7768e" font-weight="bold">./paper.tex</tspan><tspan fill="#f7768e" font-weight="bold">:</tspan><tspan fill="#7dcfff" font-weight="bold">3</tspan><tspan fill="#f7768e" font-weight="bold">:</tspan><tspan fill="#f7768e" font-weight="bold"> Extra }, or forgotten $.</tspan></text>
         <text x="0" y="400"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">l.</tspan><tspan fill="#7dcfff" font-weight="bold">3</tspan><tspan fill="#f7768e" font-weight="bold"> \includegrahics{my_figure.png}</tspan></text>
         <text x="0" y="420"><tspan fill="#c0caf5" >   </tspan><tspan fill="#7dcfff" font-weight="bold">▸</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#7dcfff" >Hint: Unmatched closing brace '}'; remove extra '}' or check</tspan></text>
@@ -115,8 +115,8 @@
         <text x="0" y="480"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">&lt;inserted text&gt;</tspan></text>
         <text x="0" y="500"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">                $</tspan></text>
         <text x="0" y="520"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">l.</tspan><tspan fill="#7dcfff" font-weight="bold">4</tspan><tspan fill="#f7768e" font-weight="bold"> \end{document}</tspan></text>
-        <text x="0" y="540"><tspan fill="#c0caf5" >   </tspan><tspan fill="#7dcfff" font-weight="bold">▸</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#7dcfff" >Hint: Math symbol (like _ or ^) outside math mode; wrap in</tspan></text>
-        <text x="0" y="560"><tspan fill="#7dcfff" >    </tspan><tspan fill="#7dcfff" >$...$</tspan></text>
+        <text x="0" y="540"><tspan fill="#c0caf5" >   </tspan><tspan fill="#7dcfff" font-weight="bold">▸</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#7dcfff" >Hint: Subscript '_' outside math mode; wrap in $...$ or escape</tspan></text>
+        <text x="0" y="560"><tspan fill="#7dcfff" >    </tspan><tspan fill="#7dcfff" >as '\_'</tspan></text>
         <text x="0" y="580"><tspan fill="#f7768e" font-weight="bold">===============================================================</tspan></text>
         <text x="0" y="600"><tspan fill="#c0caf5" >See junk/err_xelatex_1 for full error details.</tspan></text>
         <text x="0" y="620"><tspan fill="#c0caf5" ></tspan></text>

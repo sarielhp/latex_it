@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1294" width="1240" height="1294">
+  <defs>
+    <style>
+      .code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; line-height: 20px; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 600; }
+      .badge { font-family: ui-monospace, monospace; font-size: 11.5px; font-weight: 700; }
+    </style>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="1240" height="1294" rx="14" fill="#13141c"/>
+  <g transform="translate(24, 20)" filter="url(#shadow)">
+  <rect width="576" height="1254" rx="10" fill="#1a1b26" stroke="#2f334d" stroke-width="1.5"/>
+  <path d="M 0,10 A 10,10 0 0,1 10,0 L 566,0 A 10,10 0 0,1 576,10 L 576,40 L 0,40 Z" fill="#16161e"/>
+  <circle cx="20" cy="20" r="6" fill="#f7768e"/>
+  <circle cx="38" cy="20" r="6" fill="#e0af68"/>
+  <circle cx="56" cy="20" r="6" fill="#414868"/>
+  <text x="288" y="25" fill="#787c99" text-anchor="middle" class="title">Standard Tool: latexmk</text>
+  <g transform="translate(18, 62)" class="code">
+    <text x="0" y="0"><tspan fill="#7dcfff" font-weight="bold">$ latexmk -xelatex paper.tex</tspan></text>
+        <text x="0" y="20"><tspan fill="#565f89" >Rc files read (in order):</tspan></text>
+        <text x="0" y="40"><tspan fill="#c0caf5" >  /etc/LatexMk</tspan></text>
+        <text x="0" y="60"><tspan fill="#c0caf5" >  /home/sariel/.latexmkrc</tspan></text>
+        <text x="0" y="80"><tspan fill="#565f89" >Latexmk: This is Latexmk, John Collins, 9 March 2026. Version 4.88.</tspan></text>
+        <text x="0" y="100"><tspan fill="#c0caf5" >No existing .aux file, so I'll make a simple one, and require run of</tspan></text>
+        <text x="0" y="120"><tspan fill="#c0caf5" >    </tspan><tspan fill="#c0caf5" >*latex.</tspan></text>
+        <text x="0" y="140"><tspan fill="#565f89" >Latexmk: applying rule 'xelatex'...</tspan></text>
+        <text x="0" y="160"><tspan fill="#565f89" >Rule 'xelatex':  Reasons for rerun</tspan></text>
+        <text x="0" y="180"><tspan fill="#565f89" >Category 'other':</tspan></text>
+        <text x="0" y="200"><tspan fill="#c0caf5" >  Rerun of 'xelatex' forced or previously required:</tspan></text>
+        <text x="0" y="220"><tspan fill="#c0caf5" >    Reason or flag: 'Initial setup'</tspan></text>
+        <text x="0" y="240"><tspan fill="#c0caf5" ></tspan></text>
+        <text x="0" y="260"><tspan fill="#c0caf5" >------------</tspan></text>
+        <text x="0" y="280"><tspan fill="#c0caf5" >Run number 1 of rule 'xelatex'</tspan></text>
+        <text x="0" y="300"><tspan fill="#c0caf5" >------------</tspan></text>
+        <text x="0" y="320"><tspan fill="#c0caf5" >------------</tspan></text>
+        <text x="0" y="340"><tspan fill="#565f89" >Running 'xelatex -no-pdf -halt-on-error -recorder</tspan></text>
+        <text x="0" y="360"><tspan fill="#565f89" >    </tspan><tspan fill="#565f89" >-output-directory=&quot;junk&quot;  &quot;paper.tex&quot;'</tspan></text>
+        <text x="0" y="380"><tspan fill="#c0caf5" >------------</tspan></text>
+        <text x="0" y="400"><tspan fill="#c0caf5" >This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live</tspan></text>
+        <text x="0" y="420"><tspan fill="#c0caf5" >    </tspan><tspan fill="#c0caf5" >2026/Debian) (preloaded format=xelatex)</tspan></text>
+        <text x="0" y="440"><tspan fill="#c0caf5" > restricted \write18 enabled.</tspan></text>
+        <text x="0" y="460"><tspan fill="#c0caf5" >entering extended mode</tspan></text>
+        <text x="0" y="480"><tspan fill="#c0caf5" >(./paper.tex</tspan></text>
+        <text x="0" y="500"><tspan fill="#c0caf5" >LaTeX2e &lt;2026-06-01&gt;</tspan></text>
+        <text x="0" y="520"><tspan fill="#c0caf5" >L3 programming layer &lt;2026-06-18&gt;</tspan></text>
+        <text x="0" y="540"><tspan fill="#c0caf5" >(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls</tspan></text>
+        <text x="0" y="560"><tspan fill="#c0caf5" >Document Class: article 2025/01/22 v1.4n Standard LaTeX document</tspan></text>
+        <text x="0" y="580"><tspan fill="#c0caf5" >    </tspan><tspan fill="#c0caf5" >class</tspan></text>
+        <text x="0" y="600"><tspan fill="#c0caf5" >(/usr/share/texlive/texmf-dist/tex/latex/base/size10.clo))</tspan></text>
+        <text x="0" y="620"><tspan fill="#c0caf5" >(/usr/share/texlive/texmf-dist/tex/latex/l3backend/l3backend-xetex.def)</tspan></text>
+        <text x="0" y="640"><tspan fill="#c0caf5" >(junk/paper.aux)</tspan></text>
+        <text x="0" y="660"><tspan fill="#f7768e" font-weight="bold">! Missing $ inserted.</tspan></text>
+        <text x="0" y="680"><tspan fill="#c0caf5" >&lt;inserted text&gt;</tspan></text>
+        <text x="0" y="700"><tspan fill="#c0caf5" >                $</tspan></text>
+        <text x="0" y="720"><tspan fill="#c0caf5" >l.8 ...tion factor is strictly below $1 + \epsilon</tspan></text>
+        <text x="0" y="740"><tspan fill="#c0caf5" >                                                  $ overall.</tspan></text>
+        <text x="0" y="760"><tspan fill="#c0caf5" >No pages of output.</tspan></text>
+        <text x="0" y="780"><tspan fill="#c0caf5" >Transcript written on junk/paper.log.</tspan></text>
+        <text x="0" y="800"><tspan fill="#565f89" >Latexmk: Getting log file 'junk/paper.log'</tspan></text>
+        <text x="0" y="820"><tspan fill="#565f89" >Latexmk: Examining 'junk/paper.fls'</tspan></text>
+        <text x="0" y="840"><tspan fill="#565f89" >Latexmk: Examining 'junk/paper.log'</tspan></text>
+        <text x="0" y="860"><tspan fill="#565f89" >Latexmk: Log file says no output from latex</tspan></text>
+        <text x="0" y="880"><tspan fill="#565f89" >Latexmk: For rule 'xelatex', no output was made</tspan></text>
+        <text x="0" y="900"><tspan fill="#565f89" >Latexmk: Errors, so I did not complete making targets</tspan></text>
+        <text x="0" y="920"><tspan fill="#f7768e" font-weight="bold">Collected error summary (may duplicate other messages):</tspan></text>
+        <text x="0" y="940"><tspan fill="#c0caf5" >  xelatex: Command for 'xelatex' gave return code 1</tspan></text>
+        <text x="0" y="960"><tspan fill="#c0caf5" >      Refer to 'junk/paper.log' and/or above output for details</tspan></text>
+        <text x="0" y="980"><tspan fill="#c0caf5" ></tspan></text>
+        <text x="0" y="1000"><tspan fill="#565f89" >Latexmk: Sometimes, the -f option can be used to get latexmk</tspan></text>
+        <text x="0" y="1020"><tspan fill="#c0caf5" >  to try to force complete processing.</tspan></text>
+        <text x="0" y="1040"><tspan fill="#c0caf5" >  But normally, you will need to correct the file(s) that caused the</tspan></text>
+        <text x="0" y="1060"><tspan fill="#c0caf5" >  error, and then rerun latexmk.</tspan></text>
+        <text x="0" y="1080"><tspan fill="#c0caf5" >  In some cases, it is best to clean out generated files before</tspan></text>
+        <text x="0" y="1100"><tspan fill="#c0caf5" >    </tspan><tspan fill="#c0caf5" >rerunning</tspan></text>
+        <text x="0" y="1120"><tspan fill="#c0caf5" >  latexmk after you've corrected the files.</tspan></text>
+  </g>
+  <g transform="translate(18, 1212)">
+    <rect width="540" height="32" rx="6" fill="#2d1c24" stroke="#f7768e" stroke-width="1.2"/>
+    <text x="270" y="20" fill="#f7768e" text-anchor="middle" class="badge">❌ Blames line 8 ($1 + \epsilon$) — 4 lines away from the real typo!</text>
+  </g>
+</g>
+
+  <g transform="translate(640, 20)" filter="url(#shadow)">
+  <rect width="576" height="1254" rx="10" fill="#1a1b26" stroke="#384a68" stroke-width="1.5"/>
+  <path d="M 0,10 A 10,10 0 0,1 10,0 L 566,0 A 10,10 0 0,1 576,10 L 576,40 L 0,40 Z" fill="#16161e"/>
+  <circle cx="20" cy="20" r="6" fill="#f7768e"/>
+  <circle cx="38" cy="20" r="6" fill="#e0af68"/>
+  <circle cx="56" cy="20" r="6" fill="#9ece6a"/>
+  <text x="288" y="25" fill="#c0caf5" text-anchor="middle" class="title">latex_it (l)</text>
+  <g transform="translate(18, 62)" class="code">
+    <text x="0" y="0"><tspan fill="#c0caf5" >$ l paper.tex</tspan></text>
+        <text x="0" y="20"><tspan fill="#c0caf5" >      </tspan><tspan fill="#c0caf5" font-weight="bold">xelatex</tspan><tspan fill="#c0caf5" > (1)</tspan></text>
+        <text x="0" y="40"><tspan fill="#c0caf5" >LaTeX process exited with status: 1</tspan></text>
+        <text x="0" y="60"><tspan fill="#c0caf5" ></tspan></text>
+        <text x="0" y="80"><tspan fill="#c0caf5" >===============================================================</tspan></text>
+        <text x="0" y="100"><tspan fill="#f7768e" font-weight="bold"> ERROR: LaTeX Compilation Failed!</tspan></text>
+        <text x="0" y="120"><tspan fill="#f7768e" font-weight="bold">===============================================================</tspan></text>
+        <text x="0" y="140"><tspan fill="#c0caf5" ></tspan></text>
+        <text x="0" y="160"><tspan fill="#f7768e" font-weight="bold">── </tspan><tspan fill="#c0caf5" font-weight="bold">paper.tex</tspan><tspan fill="#c0caf5" > (1 error) </tspan><tspan fill="#f7768e" font-weight="bold">─────────────────────────────────────────────────────────</tspan></text>
+        <text x="0" y="180"><tspan fill="#f7768e" font-weight="bold">./paper.tex</tspan><tspan fill="#f7768e" font-weight="bold">:</tspan><tspan fill="#7dcfff" font-weight="bold">8</tspan><tspan fill="#f7768e" font-weight="bold">:</tspan><tspan fill="#f7768e" font-weight="bold"> Missing $ inserted.</tspan></text>
+        <text x="0" y="200"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">&lt;inserted text&gt;</tspan></text>
+        <text x="0" y="220"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">                $</tspan></text>
+        <text x="0" y="240"><tspan fill="#c0caf5" >   </tspan><tspan fill="#f7768e" font-weight="bold">l.</tspan><tspan fill="#7dcfff" font-weight="bold">8</tspan><tspan fill="#f7768e" font-weight="bold"> ...tion factor is strictly below $1 + \epsilon</tspan></text>
+        <text x="0" y="260"><tspan fill="#c0caf5" >   </tspan><tspan fill="#7dcfff" font-weight="bold">▸</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#7dcfff" >Hint: Unclosed '$' opened on line 4 (col 5); insert closing '$'</tspan></text>
+        <text x="0" y="280"><tspan fill="#f7768e" font-weight="bold">===============================================================</tspan></text>
+        <text x="0" y="300"><tspan fill="#c0caf5" >See junk/err_xelatex_1 for full error details.</tspan></text>
+        <text x="0" y="320"><tspan fill="#c0caf5" ></tspan></text>
+        <text x="0" y="340"><tspan fill="#f7768e" font-weight="bold">Errors: 1</tspan><tspan fill="#c0caf5" >, </tspan><tspan fill="#f7768e" font-weight="bold">Alerts: 1</tspan><tspan fill="#c0caf5" > </tspan><tspan fill="#c0caf5" >(suppressed)</tspan><tspan fill="#c0caf5" >, </tspan><tspan fill="#9ece6a" font-weight="bold">Warnings: 0</tspan><tspan fill="#c0caf5" >, </tspan><tspan fill="#9ece6a" font-weight="bold">Whatevers: 0</tspan></text>
+  </g>
+  <g transform="translate(18, 1212)">
+    <rect width="540" height="32" rx="6" fill="#1c2d24" stroke="#9ece6a" stroke-width="1.2"/>
+    <text x="270" y="20" fill="#9ece6a" text-anchor="middle" class="badge">✔ Inverts paragraph parity: pinpoints unclosed $ on line 4, col 5!</text>
+  </g>
+</g>
+
+</svg>

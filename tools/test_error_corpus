@@ -4,6 +4,7 @@
 require 'open3'
 require 'fileutils'
 require 'rainbow'
+require 'etc'
 require 'rbconfig'
 
 class ErrorCorpusRunner
@@ -22,7 +23,7 @@ class ErrorCorpusRunner
       exit 0
     end
 
-    puts Rainbow("==> Running Error Corpus Test Suite (#{examples.size} cases)...").bold
+    puts Rainbow("==> Running Error Corpus Test Suite (#{examples.size} cases, parallel)...").bold
     passed, failed = execute_suite(examples)
     report_summary(passed, failed, examples.size)
   end
@@ -34,38 +35,55 @@ class ErrorCorpusRunner
   end
 
   def execute_suite(examples)
-    passed = 0
-    failed = []
+    queue = Queue.new
+    examples.each_with_index { |tex_path, idx| queue << [tex_path, idx] }
+    results = Array.new(examples.size)
+    mutex = Mutex.new
+    workers = [Etc.nprocessors, 8].min
 
-    examples.each_with_index do |tex_path, idx|
-      dir = File.dirname(tex_path)
-      name = File.basename(dir)
-      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      success, msg = test_example(dir)
-      elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)
-
-      if success
-        passed += 1
-        puts "  #{Rainbow("[#{idx + 1}/#{examples.size}]").cyan} #{name} ... #{Rainbow('PASS').green} (#{elapsed}s)"
-      else
-        failed << { name: name, error: msg }
-        puts "  #{Rainbow("[#{idx + 1}/#{examples.size}]").cyan} #{name} ... #{Rainbow('FAIL').red.bright} (#{elapsed}s): #{msg}"
-      end
+    threads = Array.new(workers) do
+      Thread.new { process_queue(queue, results, mutex, examples.size) }
     end
+    threads.each(&:join)
 
+    passed = results.count { |r| r[:success] }
+    failed = results.reject { |r| r[:success] }
     [passed, failed]
+  end
+
+  def process_queue(queue, results, mutex, total)
+    loop do
+      item = (queue.pop(true) rescue nil)
+      break unless item
+
+      run_single_test(item, results, mutex, total)
+    end
+  end
+
+  def run_single_test(item, results, mutex, total)
+    tex_path, idx = item
+    dir = File.dirname(tex_path)
+    name = File.basename(dir)
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    success, msg = test_example(dir)
+    elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)
+    results[idx] = { name: name, success: success, error: msg, elapsed: elapsed }
+
+    mutex.synchronize do
+      status_str = success ? Rainbow('PASS').green : Rainbow('FAIL').red.bright
+      puts "  #{Rainbow("[#{idx + 1}/#{total}]").cyan} #{name} ... #{status_str} (#{elapsed}s)"
+    end
   end
 
   def test_example(dir)
     cmd = [RbConfig.ruby, LATEX_IT, '--no-lock', '-1', 'example.tex']
-    out, status = Dir.chdir(dir) do
-      Open3.capture2e(*cmd)
-    end
+    out, status = Open3.capture2e(*cmd, chdir: dir)
     cleanup_junk(dir)
 
     return [false, "Expected non-zero exit code, got #{status.exitstatus}"] if status.success?
     return [false, "Did not report compilation failure: #{out.lines.first(3).join}"] unless out.include?('ERROR: LaTeX Compilation Failed!')
     return [false, 'Failed to extract specific error (used fallback lines)'] if out.include?('Output written on junk/')
+    return [false, 'Failed to extract catalog remediation hint'] unless out.include?('Hint:')
 
     [true, nil]
   rescue StandardError => e

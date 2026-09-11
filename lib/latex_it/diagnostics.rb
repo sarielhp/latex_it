@@ -7,79 +7,10 @@
 # 4-tier categorization (Errors, Alerts, Warnings, Whatevers), and scoring.
 # ==============================================================================
 
+require_relative 'error_catalog'
+
 module LaTeXDiagnostics
-  DIAGNOSTIC_EXPLANATIONS = {
-    multiply_defined_label: {
-      title: 'Alert: Multiply-Defined Label',
-      why: 'Two or more \\label{...} tags share the identical key; references will be ambiguous.',
-      fix: 'Search your .tex sources for \\label{<key>} and rename or delete one.'
-    },
-    overfull_hbox_alert: {
-      title: 'Alert: Severe Overfull \\hbox (≥24pt)',
-      why: 'Content spills significantly (≥24pt / ~8.4mm) into the page margin.',
-      fix: 'Reword text, insert discretionary hyphens \\-, break equations, or resize figures.'
-    },
-    overfull_hbox_warning: {
-      title: 'Warning: Overfull \\hbox',
-      why: 'Line exceeds column width; TeX could not hyphenate within standard tolerances.',
-      fix: 'Reword sentence, insert \\-, or wrap code in \\sloppy / \\emergencystretch.'
-    },
-    overfull_hbox_whatever: {
-      title: 'Whatever: Micro Overfull \\hbox (≤2.5pt)',
-      why: 'Minor margin protrusion (≤2.5pt / ~0.88mm), often memoir TOC page numbers.',
-      fix: 'Harmless typesetting quirk; safely ignored.'
-    },
-    underfull_box: {
-      title: 'Warning: Underfull \\vbox or \\hbox',
-      why: 'LaTeX could not stretch whitespace enough to fill the target dimension.',
-      fix: 'Add \\raggedbottom to preamble, adjust figure heights, or reword text.'
-    },
-    undefined_reference: {
-      title: 'Warning: Undefined Reference',
-      why: 'A \\ref{...} or \\pageref{...} references a label that does not exist in any .aux.',
-      fix: 'Check spelling of the key, ensure target chapter is included, and recompile.'
-    },
-    undefined_citation: {
-      title: 'Warning: Undefined Citation',
-      why: 'A \\cite{...} key was not found in the bibliography database (.bib).',
-      fix: 'Verify key spelling, check \\bibliography / \\addbibresource, and run BibTeX/Biber.'
-    },
-    hyperref_token: {
-      title: 'Whatever: Hyperref PDF Bookmark Token Sanitization',
-      why: 'Math or formatting in a heading was stripped for plain-text PDF bookmarks.',
-      fix: 'Harmless. Use \\texorpdfstring{$math$}{text} in headings to clean cleanly.'
-    },
-    float_specifier: {
-      title: 'Whatever: Float Specifier Auto-Adjusted',
-      why: "'!h' (strictly here) violated page layout rules, so LaTeX added 't' (top of page).",
-      fix: "Harmless. Use '[!htbp]' to give LaTeX standard placement flexibility."
-    },
-    font_shape: {
-      title: 'Whatever: Font Shape Substitution',
-      why: 'Requested font weight/style combination was unavailable; fallback substituted.',
-      fix: 'Harmless fallback. Check font declarations if unexpected styling appears.'
-    },
-    summary_warning: {
-      title: 'Whatever: Redundant Summary Notice',
-      why: 'Document-level summary emitted at end of LaTeX run.',
-      fix: 'Harmless recap; individual items are already reported above.'
-    },
-    inverted_label: {
-      title: 'Alert: Inverted \\label Before \\caption',
-      why: '\\label{...} was placed before \\caption in a float. Cross-references (\\ref) will resolve to the Section number instead of the float number.',
-      fix: 'Move \\label{...} after or inside \\caption{...}.'
-    },
-    unnumbered_label: {
-      title: 'Alert: \\label Inside Unnumbered Math',
-      why: '\\label was placed inside an unnumbered environment (e.g. equation* or align*). Cross-references will bind to the prior section or theorem.',
-      fix: 'Remove \\label or switch to a numbered math environment (equation or align).'
-    },
-    type3_font: {
-      title: 'Alert: Type 3 (Raster Bitmap) Font in PDF',
-      why: 'PDF contains unscaled bitmapped fonts. IEEE, ACM, and arXiv submission portals will reject this document.',
-      fix: 'Ensure scalable vector fonts are used (e.g. \\usepackage[T1]{fontenc} and \\usepackage{lmodern}), or replace bitmap EPS/figures.'
-    }
-  }.freeze
+  DIAGNOSTIC_EXPLANATIONS = LaTeXErrorCatalog::WARNING_EXPLANATIONS
 
   LOG_FILE_EXTENSIONS = %w[
     tex sty cls aux bbl bib dtx def ldf cfg clo toc lof lot png pdf jpg eps fd fontspec out idx code\.tex
@@ -177,20 +108,32 @@ module LaTeXDiagnostics
     left_side + highlight_line_numbers(message, base_color)
   end
 
-  def format_error_block(err_block, line_no, width: 0)
+  def format_error_block(err_block, line_no, width: 0, catalog: nil)
     return err_block.join("\n") if @options[:emacs]
 
     str = line_no.to_s
     indent = ' ' * (width.positive? ? width + 2 : 2)
 
-    err_block.map.with_index do |l, idx|
+    lines = err_block.map.with_index do |l, idx|
       colored = highlight_line_numbers(l, :red, bright: true)
       if idx == 0
         format_first_error_line(l, colored, line_no, str, width)
       else
         "#{indent}#{colored}"
       end
-    end.join("\n")
+    end
+
+    append_error_hint(lines, catalog, indent)
+    lines.join("\n")
+  end
+
+  def append_error_hint(lines, catalog, indent)
+    return unless catalog && catalog[:hint]
+
+    hint_text = "Hint: #{catalog[:hint]}"
+    hint_colored = @options[:color] == false ? hint_text : Rainbow(hint_text).cyan
+    arrow = @options[:color] == false ? '▸' : Rainbow('▸').cyan.bright
+    lines << "#{indent}#{arrow} #{hint_colored}"
   end
 
   def format_first_error_line(l, colored, line_no, str, width)
@@ -205,7 +148,7 @@ module LaTeXDiagnostics
   end
 
   def render_diagnostic_item(item, width: 0)
-    return format_error_block(item[:err_block], item[:line] || 0, width: width) if item[:err_block]
+    return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog]) if item[:err_block]
 
     base_color = item[:base_color] || :yellow
     out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width)
@@ -417,21 +360,30 @@ module LaTeXDiagnostics
 
       is_err, err_file = error_line_match(line)
       if is_err
-        err_block, i = collect_error_block(lines, i)
-        err_block = err_block.map(&:rstrip).reject(&:empty?)
-        err_text = err_block.join("\n")
-        line_no = extract_error_line(err_text)
-        formatted = format_error_block(err_block, line_no)
-        file_name = err_file || current_log_file(file_stack)
-        errors << {
-          file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),
-          text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: i
-        }
+        err_item, i = build_error_entry(lines, i, err_file, file_stack)
+        errors << err_item
       else
         i += 1
       end
     end
     errors
+  end
+
+  def build_error_entry(lines, idx, err_file, file_stack)
+    err_block, next_idx = collect_error_block(lines, idx)
+    err_block = err_block.map(&:rstrip).reject(&:empty?)
+    err_text = err_block.join("\n")
+    line_no = extract_error_line(err_text)
+    classification = LaTeXErrorCatalog.classify(err_text, err_block)
+    formatted = format_error_block(err_block, line_no, catalog: classification)
+    file_name = err_file || current_log_file(file_stack)
+    cat_id = classification ? classification[:id] : :generic
+    item = {
+      file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),
+      text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: next_idx,
+      catalog: classification, catalog_id: cat_id
+    }
+    [item, next_idx]
   end
 
   def overfull_hbox?(item)
@@ -628,7 +580,7 @@ module LaTeXDiagnostics
   end
 
   def format_boxed_explanation(category)
-    expl = DIAGNOSTIC_EXPLANATIONS[category]
+    expl = DIAGNOSTIC_EXPLANATIONS[category] || LaTeXErrorCatalog.find_by_id(category)
     return nil unless expl
 
     cols = terminal_columns
@@ -681,6 +633,7 @@ module LaTeXDiagnostics
   end
 
   def diagnostic_category(item)
+    return item[:catalog_id] if item[:catalog_id] && item[:catalog_id] != :generic
     return item[:alert_type] if item[:alert_type]
 
     txt = item[:text].to_s

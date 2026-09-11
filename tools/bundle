@@ -30,6 +30,7 @@ module LatexBundler
     brace_checker.rb
     flattener.rb
     meta_extractor.rb
+    error_catalog.rb
     diagnostics.rb
     builder.rb
     packager.rb

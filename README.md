@@ -1,6 +1,12 @@
 # latex_it
 
-`latex_it` (often invoked as `l`) is an automated build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
+<p align="center">
+  <a href="https://sarielhp.github.io/latex_it/"><strong>Website & Documentation</strong></a> •
+  <a href="https://github.com/sarielhp/latex_it"><strong>GitHub Repository</strong></a> •
+  <a href="https://sarielhp.github.io/latex_it/docs/gallery.html"><strong>Diagnostic Gallery</strong></a>
+</p>
+
+`latex_it` (often invoked as `l`) is a standalone Ruby script and automated build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
 
 Like `latexmk`, it handles multi-pass compilation and bibliography dependencies automatically — but it is designed specifically to eliminate the two biggest headaches of LaTeX workflows:
 1. **Cluttered directories**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are isolated in a `junk/` directory, keeping your working tree clean.
@@ -69,6 +75,7 @@ l -e        # Show plain-English explanations for errors and warnings
 
 ## Key Features
 
+- **Zero-dependency standalone script**: Written in pure Ruby (`#!/usr/bin/env ruby`) using standard libraries. Distributed as a single self-contained executable with no gem compilation or virtualenv setup required.
 - **Clean directories**: All intermediate files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, etc.) are kept in `junk/`. Only your final `.pdf`, `.bbl`, and `.synctex.gz` stay in the working directory.
 - **Automatic detection**:
   - Finds your main `.tex` file if omitted (checks `.mainfile`, folder name, and `\begin{document}`).

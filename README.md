@@ -20,8 +20,10 @@ Like `latexmk`, it handles multi-pass compilation and bibliography dependencies 
 Install the latest standalone binary directly into `~/bin/l` (no clone or build required):
 
 ```bash
-curl -sSL https://github.com/sarielhp/latex_it/releases/latest/download/latex_it -o ~/bin/l && chmod +x ~/bin/l
+mkdir -p ~/bin && curl -sSL https://github.com/sarielhp/latex_it/releases/latest/download/latex_it -o ~/bin/l && chmod +x ~/bin/l
 ```
+
+*(Ensure `~/bin` is in your `$PATH`. You can also create `ln -s l ~/bin/lw` for fast incremental rebuilds.)*
 
 ### From Source
 
@@ -31,7 +33,7 @@ cd latex_it
 ./tools/install
 ```
 
-*(Installs to `~/bin/latex_it` with `~/bin/l` symlink. Ensure `~/bin` is in your `PATH`.)*
+*(Installs to `~/bin/latex_it` along with all shortcut symlinks (`l`, `lw`, `ll`, `lp`, etc.). Ensure `~/bin` is in your `$PATH`.)*
 
 ### Requirements
 
@@ -87,7 +89,7 @@ Usage: l [options] [document.tex] [-- extra_files...]
 | Option | Description |
 | :--- | :--- |
 | *(none)* | Build the document (auto-detects main file if omitted). |
-| `--fast`, `lw` | Fast incremental mode; reuses previous state and skips unchanged passes. |
+| `--fast` | Fast incremental mode; reuses previous state and skips unchanged passes (or invoke as `lw`). |
 | `-1`, `--force` | Force initial LaTeX run, continuing only if needed for convergence. |
 | `-u`, `--single-pass` | Run exactly one LaTeX pass without BibTeX or extra passes. |
 | `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
@@ -116,6 +118,7 @@ The installer creates several convenient shortcuts based on the executable name:
 | `lp`, `pdflatex` | Build using pdfLaTeX (`--engine=pdflatex`). |
 | `clean_latex`, `latex_clean` | Clean temporary files in current directory. |
 | `latex_file_in_dir` | Print the detected main file in current directory. |
+
 ---
 
 ## Documentation

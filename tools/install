@@ -18,6 +18,7 @@ module Installer
   SRC_BIN     = File.join(REPO_ROOT, 'latex_it')
   TARGET_DIR  = File.expand_path('~/bin')
   TARGET_BIN  = File.join(TARGET_DIR, 'latex_it')
+  SHORTCUTS   = %w[l lw ll lp clean_latex latex_file_in_dir].freeze
   TARGET_LINK = File.join(TARGET_DIR, 'l')
   TEXMF_SOURCE = File.join(REPO_ROOT, 'vendor', 'revtex4')
   TEXMF_TARGET = File.expand_path('~/.local/share/latex_it/texmf')
@@ -29,17 +30,22 @@ module Installer
     puts "==> Installing standalone latex_it bundle to #{TARGET_DIR}..." if verbose
     LatexBundler.write_bundle(TARGET_BIN, verbose: verbose)
 
-    FileUtils.rm_f(TARGET_LINK) if File.exist?(TARGET_LINK) || File.symlink?(TARGET_LINK)
-    Dir.chdir(TARGET_DIR) do
-    FileUtils.ln_s('latex_it', 'l')
-    end
-
+    create_symlinks!
     install_texmf!
 
     if verbose
       verify_verbose!
     else
-      puts 'Program installed: ~/bin/latex_it, ~/bin/l.'
+      puts "Program installed: ~/bin/latex_it, ~/bin/l (shortcuts: #{SHORTCUTS[1..].join(', ')})."
+    end
+  end
+
+  def self.create_symlinks!
+    Dir.chdir(TARGET_DIR) do
+      SHORTCUTS.each do |name|
+        FileUtils.rm_f(name) if File.exist?(name) || File.symlink?(name)
+        FileUtils.ln_s('latex_it', name)
+      end
     end
   end
 

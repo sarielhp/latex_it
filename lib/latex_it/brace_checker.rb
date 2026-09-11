@@ -9,12 +9,89 @@
 
 class LaTeXBraceChecker
   VERBATIM_ENVS = %w[verbatim verbatim* lstlisting minted filecontents filecontents* comment alltt].freeze
+  FLOAT_ENVS = %w[figure figure* table table* algorithm listing subfigure subtable].freeze
+  UNNUMBERED_MATH_ENVS = %w[equation* align* gather* multline* flalign*].freeze
+
+  LABEL_TOKEN_PATTERN = /\\(?:begin\{(figure\*?|table\*?|algorithm|listing|subfigure|subtable|equation\*|align\*|gather\*|multline\*|flalign\*)\}|end\{(figure\*?|table\*?|algorithm|listing|subfigure|subtable|equation\*|align\*|gather\*|multline\*|flalign\*)\}|caption\b|subcaption\b|label\{([^}]+)\})/.freeze
 
   def self.check_file(path)
     return [] unless File.file?(path)
 
     content = LaTeXUtils.safe_read(path)
     new(path, content).scan
+  end
+
+  def self.check_inverted_labels(path)
+    return [] unless File.file?(path)
+
+    content = LaTeXUtils.safe_read(path)
+    scan_inverted_labels(path, content)
+  end
+
+  def self.scan_inverted_labels(path, content)
+    alerts = []
+    float_stack = []
+
+    content.each_line.with_index(1) do |raw_line, line_no|
+      line = raw_line.sub(/(?<!\\)%.*\z/, '')
+      next if line.strip.empty?
+
+      scan_line_for_labels(line, line_no, path, float_stack, alerts)
+    end
+    alerts
+  end
+
+  def self.scan_line_for_labels(line, line_no, path, float_stack, alerts)
+    line.scan(LABEL_TOKEN_PATTERN) do
+      match = Regexp.last_match
+      handle_label_token(match, line_no, path, float_stack, alerts)
+    end
+  end
+
+  def self.handle_label_token(match, line_no, path, float_stack, alerts)
+    full = match[0]
+    if full.start_with?('\\begin')
+      push_label_float(match[1], line_no, float_stack)
+    elsif full.start_with?('\\end')
+      pop_label_float(match[2], float_stack)
+    elsif full.start_with?('\\caption') || full.start_with?('\\subcaption')
+      float_stack.last[:has_caption] = true if float_stack.any?
+    elsif full.start_with?('\\label') && float_stack.any?
+      check_label_alert(path, line_no, match[3], float_stack.last, alerts)
+    end
+  end
+
+  def self.push_label_float(env, line_no, float_stack)
+    float_stack << { env: env, line: line_no, has_caption: false, unnumbered: UNNUMBERED_MATH_ENVS.include?(env) }
+  end
+
+  def self.pop_label_float(env, float_stack)
+    float_stack.pop if float_stack.any? && float_stack.last[:env] == env
+  end
+
+  def self.check_label_alert(path, line_no, key, current_float, alerts)
+    if current_float[:unnumbered]
+      env = current_float[:env]
+      msg = "\\label{#{key}} placed inside unnumbered #{env} environment"
+      alerts << build_label_alert(path, line_no, msg, :unnumbered_label)
+    elsif !current_float[:has_caption]
+      env = current_float[:env]
+      msg = "Inverted \\label{#{key}} before \\caption in #{env} environment"
+      alerts << build_label_alert(path, line_no, msg, :inverted_label)
+    end
+  end
+
+  def self.build_label_alert(path, line_no, msg, alert_type)
+    {
+      file: path,
+      line: line_no,
+      col: 1,
+      line_str: line_no.to_s,
+      text: msg,
+      alert_type: alert_type,
+      base_color: :red,
+      index: 50000 + line_no
+    }
   end
 
   def initialize(path, content)

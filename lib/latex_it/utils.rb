@@ -283,4 +283,56 @@ module LaTeXUtils
     lines << '     l --init-config                Generate a starter .l.jsonc configuration file'
     lines.join("\n")
   end
+
+  def self.pdf_page_count(pdf_path)
+    return 1 unless command_available?('pdfinfo') && File.file?(pdf_path)
+
+    out, status = Open3.capture2e('pdfinfo', pdf_path)
+    return 1 unless status.success?
+
+    out =~ /Pages:\s+(\d+)/ ? Regexp.last_match(1).to_i : 1
+  rescue StandardError
+    1
+  end
+
+  def self.check_type3_fonts(pdf_path)
+    return nil unless command_available?('pdffonts') && File.file?(pdf_path) && File.size(pdf_path) > 0
+
+    stdout, status = Open3.capture2e('pdffonts', pdf_path)
+    return nil unless status.success? && stdout.include?('Type 3')
+
+    names = extract_type3_font_names(stdout)
+    return nil if names.empty?
+
+    pages = find_type3_font_pages(pdf_path)
+    { fonts: names, pages: pages }
+  rescue StandardError
+    nil
+  end
+
+  def self.extract_type3_font_names(stdout)
+    names = []
+    stdout.each_line do |line|
+      next if line.start_with?('name ', '---')
+      next unless line =~ /\s+Type 3\s+/
+
+      parts = line.split
+      names << (parts[0] || '[none]')
+    end
+    names.uniq
+  end
+
+  def self.find_type3_font_pages(pdf_path)
+    total_pages = pdf_page_count(pdf_path)
+    return [] if total_pages > 100
+
+    pages = []
+    (1..total_pages).each do |p|
+      out, status = Open3.capture2e('pdffonts', '-f', p.to_s, '-l', p.to_s, pdf_path)
+      pages << p if status.success? && out.include?('Type 3')
+    end
+    pages
+  rescue StandardError
+    []
+  end
 end

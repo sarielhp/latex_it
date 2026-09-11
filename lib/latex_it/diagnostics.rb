@@ -63,6 +63,21 @@ module LaTeXDiagnostics
       title: 'Whatever: Redundant Summary Notice',
       why: 'Document-level summary emitted at end of LaTeX run.',
       fix: 'Harmless recap; individual items are already reported above.'
+    },
+    inverted_label: {
+      title: 'Alert: Inverted \\label Before \\caption',
+      why: '\\label{...} was placed before \\caption in a float. Cross-references (\\ref) will resolve to the Section number instead of the float number.',
+      fix: 'Move \\label{...} after or inside \\caption{...}.'
+    },
+    unnumbered_label: {
+      title: 'Alert: \\label Inside Unnumbered Math',
+      why: '\\label was placed inside an unnumbered environment (e.g. equation* or align*). Cross-references will bind to the prior section or theorem.',
+      fix: 'Remove \\label or switch to a numbered math environment (equation or align).'
+    },
+    type3_font: {
+      title: 'Alert: Type 3 (Raster Bitmap) Font in PDF',
+      why: 'PDF contains unscaled bitmapped fonts. IEEE, ACM, and arXiv submission portals will reject this document.',
+      fix: 'Ensure scalable vector fonts are used (e.g. \\usepackage[T1]{fontenc} and \\usepackage{lmodern}), or replace bitmap EPS/figures.'
     }
   }.freeze
 
@@ -558,11 +573,14 @@ module LaTeXDiagnostics
   end
 
   def diagnostic_category(item)
+    return item[:alert_type] if item[:alert_type]
+
     txt = item[:text].to_s
     return :multiply_defined_label if txt.include?('multiply defined')
     return classify_overfull_category(item) if overfull_hbox?(item)
-    return :underfull_box if item[:type].to_s.include?('Underfull') || txt =~ /\AUnderfull\s+\\(?:hbox|vbox)/i
-    return ref_cat if (ref_cat = reference_or_cite_category(txt))
+    ref_cat = reference_or_cite_category(txt)
+    return ref_cat if ref_cat
+
     return :hyperref_token if txt.include?('Token not allowed in a PDF string')
     return :float_specifier if txt =~ /float specifier changed to/i
     return :font_shape if txt.include?('Some font shapes were not available') || txt =~ /Font shape .* undefined/i
@@ -610,7 +628,61 @@ module LaTeXDiagnostics
       ab[:base_color] = :red
       ab[:formatted] = format_diagnostic_line(ab[:line_str], ab[:text], :red)
     end
-    extract_label_alerts(clean_content) + alert_boxes
+    extract_label_alerts(clean_content) + alert_boxes + collect_source_label_alerts + collect_type3_font_alerts
+  end
+
+  def collect_source_label_alerts
+    candidates = collect_source_candidates
+    candidates.flat_map do |f|
+      raw_alerts = LaTeXBraceChecker.check_inverted_labels(f)
+      raw_alerts.map do |a|
+        a[:formatted] = format_diagnostic_line(a[:line_str], a[:text], :red)
+        a
+      end
+    end
+  end
+
+  def collect_source_candidates
+    candidates = []
+    candidates << @filename if @filename && File.file?(@filename)
+    if @bfilename && File.exist?("junk/#{@bfilename}.fls") && respond_to?(:extract_fls_dependencies, true)
+      candidates.concat(extract_fls_dependencies("junk/#{@bfilename}.fls").select { |f| f.end_with?('.tex') })
+    end
+    candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
+    candidates.uniq.reject do |f|
+      f.start_with?('styles/', 'macros/', 'pkg/', 'packages/') ||
+        f =~ %r{(?:prefix|preamble|macros|styles)\.tex\z}i
+    end
+  end
+
+  def collect_type3_font_alerts
+    target_pdf = resolve_target_pdf
+    return [] unless target_pdf
+
+    type3 = LaTeXUtils.check_type3_fonts(target_pdf)
+    return [] unless type3
+
+    fonts_str = type3[:fonts].join(', ')
+    pages_str = type3[:pages].empty? ? '' : " on page #{type3[:pages].join(', ')}"
+    msg = "Type 3 (raster bitmap) font detected: #{fonts_str}#{pages_str}"
+    formatted = format_diagnostic_line('', msg, :red)
+    [{
+      file: target_pdf,
+      line: 0,
+      line_str: '',
+      text: msg,
+      formatted: formatted,
+      alert_type: :type3_font,
+      base_color: :red,
+      index: 60000
+    }]
+  end
+
+  def resolve_target_pdf
+    return "#{@bfilename}.pdf" if @bfilename && File.file?("#{@bfilename}.pdf")
+    return "junk/#{@bfilename}.pdf" if @bfilename && File.file?("junk/#{@bfilename}.pdf")
+
+    nil
   end
 
   def whatever_diagnostic?(item)

@@ -64,6 +64,9 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
 - **Unsuppressed Mode (`-a` / `--all`)**:
   - Displays all diagnostics across all tiers (including Whatevers and any configured suppressed warnings).
 - Groups and deduplicates `Overfull \hbox` and `Underfull \vbox` warnings per line, reporting the worst-case badness/pt dimension.
+- **Proactive Semantic Alerts**:
+  - **Inverted `\label` Before `\caption`**: Detects when `\label{...}` appears before `\caption` inside float environments (`figure`, `table`, etc.) or inside unnumbered math (`equation*`, `align*`), preventing silent cross-reference binding to the section counter instead of the float.
+  - **Type 3 (Raster Bitmap) Font Detection**: Inspects the generated PDF via `pdffonts` for Type 3 fonts and identifies offending page numbers, preventing last-minute rejections by IEEE PDF eXpress, ACM TAPS, and arXiv.
 - Provides `--emacs` flag for AUCTeX-compatible log format.
 - Provides `-s` / `--score` mode for quiet status reporting (`Errors: X, Alerts: Y, Warnings: Z, Whatevers: W`).
 

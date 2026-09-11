@@ -252,6 +252,7 @@ class LatexArxivPackager
     new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
 
     if compile_stat.success? && File.file?(new_pdf)
+      check_arxiv_type3_fonts(new_pdf)
       return false unless verify_arxiv_pdf_match(reference_pdf, new_pdf)
       return false unless verify_arxiv_authors_match(new_pdf)
 
@@ -268,6 +269,15 @@ class LatexArxivPackager
       warn compile_out
       false
     end
+  end
+
+  def check_arxiv_type3_fonts(pdf_path)
+    type3 = LaTeXUtils.check_type3_fonts(pdf_path)
+    return unless type3
+
+    pages_str = type3[:pages].empty? ? '' : " on page #{type3[:pages].join(', ')}"
+    warn Rainbow("[ALERT] arXiv package PDF contains Type 3 (raster bitmap) fonts: #{type3[:fonts].join(', ')}#{pages_str}.").yellow.bright
+    warn Rainbow('        arXiv/IEEE submission portals may reject this document. Use vector fonts (e.g. lmodern).').yellow
   end
 
   def verify_arxiv_pdf_match(reference_pdf, rebuilt_pdf)

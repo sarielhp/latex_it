@@ -91,7 +91,15 @@ The installer creates several convenient shortcuts based on the executable name:
 
 ## Installation
 
-Run the install script to copy `latex_it` to `~/bin/` and set up the `l` symlink:
+### Standalone Download (No Clone Needed)
+Download the latest standalone executable directly into `~/bin/` (aliased as `l`):
+
+```bash
+curl -sSL https://github.com/sarielhp/latex_it/releases/latest/download/latex_it -o ~/bin/l && chmod +x ~/bin/l
+```
+
+### From Source
+Clone the repository and run the local installer:
 
 ```bash
 ./tools/install

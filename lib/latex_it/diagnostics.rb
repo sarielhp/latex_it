@@ -245,7 +245,7 @@ module LaTeXDiagnostics
   end
 
   def current_log_file(file_stack)
-    file_stack.reverse_each.find { |f| !f.nil? } || "./#{@filename}"
+    file_stack.reverse_each.find { |f| !f.nil? } || @filename
   end
 
   def diagnostic_boundary_line?(line)
@@ -346,7 +346,7 @@ module LaTeXDiagnostics
     raw_warnings = []
     seen_warnings = {}
     lines = content.lines
-    file_stack = ["./#{@filename}"]
+    file_stack = [@filename]
     i = 0
 
     while i < lines.size
@@ -371,7 +371,7 @@ module LaTeXDiagnostics
   end
 
   def error_line_match(line)
-    if line =~ /^([^\s:]+):(\d+):\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use|.*error)/i
+    if line =~ /^([^\s:]+):(\d+):\s+(?!warning\b)(?!\(see\b)\S+/i
       [true, Regexp.last_match(1)]
     elsif line =~ /^!\s+\S+/ || line =~ /^Runaway argument\?/ || line =~ /^Error:\s+/i
       [true, nil]
@@ -386,7 +386,7 @@ module LaTeXDiagnostics
     while i < lines.size && err_block.size < 6
       curr = lines[i]
       break if curr =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i ||
-               curr =~ /^.+:\d+:\s+(?:(?:LaTeX|Package|Class)\s+Error:|Undefined control sequence|Error:|Runaway argument\?|Missing\s|Extra\s|You can't use|.*error)/i ||
+               curr =~ /^.+:\d+:\s+(?!warning\b)/i ||
                curr =~ /^!\s+\S+/ || curr =~ /^Runaway argument\?/ ||
                curr =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/ ||
                curr =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/ ||
@@ -403,7 +403,7 @@ module LaTeXDiagnostics
     errors = []
     clean_content = LaTeXUtils.filter_subcommand_noise(content)
     lines = clean_content.lines
-    file_stack = ["./#{@filename}"]
+    file_stack = [@filename]
     i = 0
 
     while i < lines.size
@@ -443,48 +443,112 @@ module LaTeXDiagnostics
   def sort_diagnostic_items(warnings, errors)
     overfull_warnings, other_warnings = warnings.partition { |w| overfull_hbox?(w) }
 
-    sorted_other = other_warnings.sort_by { |w| [w[:file] || "./#{@filename}", w[:line] || 0, w[:index] || 0] }
+    sorted_other = other_warnings.sort_by { |w| [format_display_path(w[:file]), w[:line] || 0, w[:index] || 0] }
     sorted_overfull = overfull_warnings.sort_by do |w|
       sev = w[:severity] || extract_box_severity(w[:text].to_s)
-      [w[:file] || "./#{@filename}", sev.to_f, w[:line] || 0, w[:index] || 0]
+      [format_display_path(w[:file]), sev.to_f, w[:line] || 0, w[:index] || 0]
     end
-    sorted_errors = errors.sort_by { |e| [e[:file] || "./#{@filename}", e[:line] || 0, e[:index] || 0] }
+    sorted_errors = errors.sort_by { |e| [format_display_path(e[:file]), e[:line] || 0, e[:index] || 0] }
 
     all_items = sorted_other + sorted_overfull + sorted_errors
     all_sorted = all_items.sort_by do |item|
       idx = item[:index] || 0
-      [idx.negative? ? 0 : 1, item[:file] || "./#{@filename}", item[:line] || 0, idx]
+      [idx.negative? ? 0 : 1, format_display_path(item[:file]), item[:line] || 0, idx]
     end
 
     [all_sorted, sorted_other.size + sorted_overfull.size, sorted_errors.size]
   end
 
-  def print_diagnostics_body(warnings, errors, fallback_lines: [])
+  def print_diagnostics_body(warnings, errors, fallback_lines: [], tier_label: nil)
     all_sorted, num_warnings, num_errors = sort_diagnostic_items(warnings, errors)
     max_width = all_sorted.map { |item| item[:line_str].to_s.length }.max || 0
 
-    current_file = nil
+    header_counts = count_items_by_header(all_sorted, tier_label)
+    current_header = nil
     all_sorted.each do |item|
-      current_file = render_diagnostic_entry(item, max_width, current_file)
+      current_header = render_diagnostic_entry(item, max_width, current_header, tier_label, header_counts)
     end
 
-    render_diagnostic_fallback(all_sorted, fallback_lines, current_file)
+    render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label)
     [num_warnings, num_errors]
   end
 
-  def render_diagnostic_entry(item, max_width, current_file)
-    item_file = item[:file] || "./#{@filename}"
-    if item_file != current_file
-      puts ')' if current_file
-      puts "(#{item_file}"
-      current_file = item_file
+  def count_items_by_header(all_sorted, tier_label)
+    counts = Hash.new(0)
+    all_sorted.each do |item|
+      f = format_display_path(item[:file])
+      lbl = tier_label_for(item, tier_label)
+      counts[[f, lbl]] += 1
+    end
+    counts
+  end
+
+  def render_diagnostic_entry(item, max_width, current_header, tier_label = nil, header_counts = nil)
+    item_file = format_display_path(item[:file])
+    lbl = tier_label_for(item, tier_label)
+    header_key = @options[:emacs] ? item_file : [item_file, lbl]
+
+    if header_key != current_header
+      if @options[:emacs]
+        puts ')' if current_header
+        puts "(#{item_file}"
+      else
+        count = header_counts ? header_counts[header_key] : 1
+        puts ''
+        puts format_file_separator(item_file, lbl, count)
+      end
+      current_header = header_key
     end
 
     rendered = render_diagnostic_item(item, width: max_width).rstrip
     puts rendered unless rendered.empty?
 
     explain_diagnostic_item(item) if @options[:explain]
-    current_file
+    current_header
+  end
+
+  def tier_label_for(item, tier_label)
+    return tier_label if tier_label
+    return 'errors' if item[:err_block]
+    return 'alerts' if item[:base_color] == :red
+    return 'whatevers' if item[:base_color] == :cyan
+
+    'warnings'
+  end
+
+  def format_file_separator(item_file, tier_label, count)
+    count_str = format_tier_count_label(count, tier_label)
+    uncolored_prefix = "── #{item_file} (#{count_str}) "
+    cols = terminal_columns
+    dash_count = [cols - uncolored_prefix.length, 3].max
+    dashes = '─' * dash_count
+
+    color = tier_color(tier_label)
+    lead = Rainbow('── ').send(color).bright
+    file_part = Rainbow(item_file).bold
+    count_part = " (#{count_str}) "
+    tail = Rainbow(dashes).send(color).bright
+    "#{lead}#{file_part}#{count_part}#{tail}"
+  end
+
+  def format_tier_count_label(count, tier_label)
+    name = case tier_label.to_s
+           when 'alerts' then count == 1 ? 'alert' : 'alerts'
+           when 'warnings' then count == 1 ? 'warning' : 'warnings'
+           when 'errors' then count == 1 ? 'error' : 'errors'
+           when 'whatevers' then count == 1 ? 'whatever' : 'whatevers'
+           else tier_label.to_s
+           end
+    "#{count} #{name}"
+  end
+
+  def tier_color(tier_label)
+    case tier_label.to_s
+    when 'alerts', 'errors' then :red
+    when 'warnings' then :yellow
+    when 'whatevers' then :cyan
+    else :yellow
+    end
   end
 
   def explain_diagnostic_item(item)
@@ -496,18 +560,38 @@ module LaTeXDiagnostics
     puts box if box
   end
 
-  def render_diagnostic_fallback(all_sorted, fallback_lines, current_file)
+  def render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label = nil)
     if all_sorted.empty? && !fallback_lines.empty?
-      puts "(./#{@filename}"
-      fallback_lines.each do |l|
-        next if l.strip.empty?
-
-        puts @options[:emacs] ? l.strip : highlight_line_numbers(l.strip, :red, bright: true)
-      end
-      puts ')'
-    elsif current_file
+      render_fallback_lines(fallback_lines, tier_label)
+    elsif current_header && @options[:emacs]
       puts ')'
     end
+  end
+
+  def render_fallback_lines(fallback_lines, tier_label = nil)
+    disp = format_display_path(@filename)
+    if @options[:emacs]
+      puts "(#{disp}"
+    else
+      lbl = tier_label || 'errors'
+      puts ''
+      puts format_file_separator(disp, lbl, 1)
+    end
+    fallback_lines.each do |l|
+      next if l.strip.empty?
+
+      puts @options[:emacs] ? l.strip : highlight_line_numbers(l.strip, :red, bright: true)
+    end
+    puts ')' if @options[:emacs]
+  end
+
+  def format_display_path(file)
+    path = (file || @filename).to_s
+    path = @filename.to_s if path.empty? || path == '.'
+    cwd_prefix = "#{Dir.pwd}/"
+    path = path.delete_prefix(cwd_prefix) if path.start_with?(cwd_prefix)
+    path = path.delete_prefix('./') if path.start_with?('./')
+    path
   end
 
   def terminal_columns
@@ -625,7 +709,7 @@ module LaTeXDiagnostics
     alerts = []
     clean_content = LaTeXUtils.filter_subcommand_noise(content)
     lines = clean_content.lines
-    file_stack = ["./#{@filename}"]
+    file_stack = [@filename]
     lines.each_with_index do |line, i|
       track_log_file(line, file_stack)
       next unless line.include?('multiply defined') && line.include?('LaTeX Warning')
@@ -777,7 +861,7 @@ module LaTeXDiagnostics
     brace_errors = check_source_braces
     errors = brace_errors + extract_errors(content)
     fallback = errors.empty? ? content.lines.last(15) : []
-    _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback)
+    _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback, tier_label: 'errors')
 
     puts Rainbow('===============================================================').red.bright
     puts "See #{loga} for full error details."
@@ -841,7 +925,7 @@ module LaTeXDiagnostics
   end
 
   def print_diagnostic_banner(counts)
-    puts '----------------------------------------------------------'
+    puts ''
     overfull_s = counts[:overfull] > 0 ? Rainbow("Overfull: #{counts[:overfull]}").magenta : "Overfull: #{counts[:overfull]}"
     underfull_s = counts[:underfull] > 0 ? Rainbow("Underfull: #{counts[:underfull]}").cyan : "Underfull: #{counts[:underfull]}"
     bib_s = counts[:cbib] > 0 ? Rainbow("Bibtex warns/errors: #{counts[:cbib]}").yellow.bright : "Bibtex warns/errors: #{counts[:cbib]}"
@@ -849,7 +933,6 @@ module LaTeXDiagnostics
     refs_s = counts[:undef_ref] > 0 ? Rainbow("Undef refs: #{counts[:undef_ref]}").red.bright : "Undef refs: #{counts[:undef_ref]}"
     mult_s = counts[:mult_def] > 0 ? Rainbow("Lab multi-def: #{counts[:mult_def]}").red.bright : "Lab multi-def: #{counts[:mult_def]}"
     puts "#{overfull_s} | #{underfull_s} | #{bib_s} | #{cite_s} | #{refs_s} | #{mult_s}"
-    puts '----------------------------------------------------------'
   end
 
   def append_bib_diagnostics!(warn_items, err_items)
@@ -905,7 +988,7 @@ module LaTeXDiagnostics
 
   def render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
     if errors > 0 || !err_items.empty?
-      _num_warnings, num_errors = print_diagnostics_body([], err_items)
+      _num_warnings, num_errors = print_diagnostics_body([], err_items, tier_label: 'errors')
       [num_errors, errors].max
     else
       render_non_error_tiers(alert_items, reg_warns, what_items)
@@ -918,28 +1001,19 @@ module LaTeXDiagnostics
     suppress_warnings = @options[:suppress_warnings] == true
     suppress_whatevers = @options[:suppress_whatevers] != false
 
-    if !suppress_alerts && !alert_items.empty?
-      puts Rainbow('Alerts found:').red.bright
-      print_diagnostics_body([], alert_items)
-    end
-    if !suppress_warnings && !reg_warns.empty?
-      puts Rainbow('Warnings found:').yellow.bright if !alert_items.empty? && !suppress_alerts
-      print_diagnostics_body(reg_warns, [])
-    end
-    if !suppress_whatevers && !what_items.empty?
-      render_whatevers_tier(what_items)
-    end
+    print_diagnostics_body([], alert_items, tier_label: 'alerts') if !suppress_alerts && !alert_items.empty?
+    print_diagnostics_body(reg_warns, [], tier_label: 'warnings') if !suppress_warnings && !reg_warns.empty?
+    render_whatevers_tier(what_items) if !suppress_whatevers && !what_items.empty?
   end
 
   def render_whatevers_tier(what_items)
-    puts Rainbow('Whatevers found:').cyan.bright
     formatted = what_items.map do |wh|
       wh_copy = wh.dup
       wh_copy[:base_color] = :cyan
       wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan)
       wh_copy
     end
-    print_diagnostics_body(formatted, [])
+    print_diagnostics_body(formatted, [], tier_label: 'whatevers')
   end
 
   def summarize_and_check_werror(errors, alerts, warnings, whatevers)

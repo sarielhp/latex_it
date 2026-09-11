@@ -29,11 +29,13 @@ This document provides architectural guidelines, core invariants, development wo
   - [`tools/setup_ruby_dev`](tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
   - [`tools/install`](tools/install) (aliased as `tool/install`): Bundles `latex_it` into a standalone binary at `~/bin/latex_it` with `~/bin/l` symlink.
   - [`tools/bump`](tools/bump) (aliased as `tool/bump`): Validates clean git tree, runs `tools/gate --full`, increments version, commits, tags, and pushes.
+  - [`tools/test_error_corpus`](tools/test_error_corpus): Standalone on-demand test runner verifying real-world error fixtures in `docs/errors/`.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
 - **Documentation & Configuration**:
   - [`VERSION`](VERSION): Plaintext file tracking the canonical project version.
   - [`README.md`](README.md): User-facing feature reference, options, and architecture guide.
+  - [`ERRORS.md`](ERRORS.md) / [`docs/errors/`](docs/errors/): Catalog of TeX/LaTeX error signatures, causes, and reproducers.
   - [`AGENTS.md`](AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
 
 ---

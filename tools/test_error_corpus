@@ -1,0 +1,97 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'open3'
+require 'fileutils'
+require 'rainbow'
+require 'rbconfig'
+
+class ErrorCorpusRunner
+  ROOT = File.expand_path('..', __dir__)
+  LATEX_IT = File.join(ROOT, 'latex_it')
+  CORPUS_DIR = File.join(ROOT, 'docs', 'errors')
+
+  def self.run
+    new.run
+  end
+
+  def run
+    examples = discover_examples
+    if examples.empty?
+      puts Rainbow('No error examples found in docs/errors/').yellow
+      exit 0
+    end
+
+    puts Rainbow("==> Running Error Corpus Test Suite (#{examples.size} cases)...").bold
+    passed, failed = execute_suite(examples)
+    report_summary(passed, failed, examples.size)
+  end
+
+  private
+
+  def discover_examples
+    Dir.glob(File.join(CORPUS_DIR, '*/example.tex')).sort
+  end
+
+  def execute_suite(examples)
+    passed = 0
+    failed = []
+
+    examples.each_with_index do |tex_path, idx|
+      dir = File.dirname(tex_path)
+      name = File.basename(dir)
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      success, msg = test_example(dir)
+      elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)
+
+      if success
+        passed += 1
+        puts "  #{Rainbow("[#{idx + 1}/#{examples.size}]").cyan} #{name} ... #{Rainbow('PASS').green} (#{elapsed}s)"
+      else
+        failed << { name: name, error: msg }
+        puts "  #{Rainbow("[#{idx + 1}/#{examples.size}]").cyan} #{name} ... #{Rainbow('FAIL').red.bright} (#{elapsed}s): #{msg}"
+      end
+    end
+
+    [passed, failed]
+  end
+
+  def test_example(dir)
+    cmd = [RbConfig.ruby, LATEX_IT, '--no-lock', '-1', 'example.tex']
+    out, status = Dir.chdir(dir) do
+      Open3.capture2e(*cmd)
+    end
+    cleanup_junk(dir)
+
+    return [false, "Expected non-zero exit code, got #{status.exitstatus}"] if status.success?
+    return [false, "Did not report compilation failure: #{out.lines.first(3).join}"] unless out.include?('ERROR: LaTeX Compilation Failed!')
+    return [false, 'Failed to extract specific error (used fallback lines)'] if out.include?('Output written on junk/')
+
+    [true, nil]
+  rescue StandardError => e
+    [false, e.message]
+  end
+
+  def cleanup_junk(dir)
+    junk = File.join(dir, 'junk')
+    FileUtils.rm_rf(junk) if File.exist?(junk)
+    %w[pdf aux log synctex.gz fls out].each do |ext|
+      f = File.join(dir, "example.#{ext}")
+      FileUtils.rm_f(f) if File.exist?(f)
+    end
+  end
+
+  def report_summary(passed, failed, total)
+    puts ''
+    if failed.empty?
+      puts Rainbow("✔ All #{total} error corpus tests passed successfully!").green.bright
+      exit 0
+    else
+      puts Rainbow("✘ #{failed.size} of #{total} tests failed:").red.bright
+      failed.each { |f| puts "  - #{f[:name]}: #{f[:error]}" }
+      exit 1
+    end
+  end
+end
+
+ErrorCorpusRunner.run if __FILE__ == $PROGRAM_NAME

@@ -492,8 +492,39 @@ class TestLatexItCLI < Minitest::Test
     assert_equal './main.tex', errors.first[:file]
 
     out, = capture_io { builder.send(:print_diagnostics_body, warnings, errors) }
-    assert_includes out, '(./chapters/ch1.tex'
-    assert_includes out, '(./chapters/ch2.tex'
+    plain = strip_ansi(out)
+    assert_includes plain, '── chapters/ch1.tex (1 warning) ──'
+    assert_includes plain, '── chapters/ch2.tex (1 warning) ──'
+    assert_includes plain, '── main.tex (1 error) ──'
+    refute_match(/^\(/, plain)
+    refute_match(/^\)/, plain)
+    refute_includes plain, './'
+
+    builder_emacs = LatexBuilder.new('main.tex', emacs: true)
+    out_emacs, = capture_io { builder_emacs.send(:print_diagnostics_body, warnings, errors) }
+    assert_includes out_emacs, "(chapters/ch1.tex\n"
+    assert_includes out_emacs, "(chapters/ch2.tex\n"
+    assert_includes out_emacs, "(main.tex\n"
+    assert_match(/^\)/, out_emacs)
+    refute_includes out_emacs, './'
+  end
+
+  def test_extract_errors_handles_generic_file_line_error
+    log_content = <<~LOG
+      ./talagrand.tex:294: Misplaced alignment tab character &.
+      l.294         &
+                     s \\in \\CHSetY{\\pnt}{\\SetA_\\OldOm}
+      ./talagrand.tex:298: Misplaced alignment tab character &.
+      l.298         &
+    LOG
+
+    builder = LatexBuilder.new('talagrand.tex', {})
+    errors = builder.send(:extract_errors, log_content)
+    assert_equal 2, errors.size
+    assert_equal './talagrand.tex', errors[0][:file]
+    assert_equal 294, errors[0][:line]
+    assert_includes errors[0][:text], 'Misplaced alignment tab character &'
+    assert_equal 298, errors[1][:line]
   end
 
   def test_diagnostics_correctly_attributes_file_with_inline_package_parens
@@ -787,7 +818,8 @@ class TestLatexItCLI < Minitest::Test
       end
 
       plain = strip_ansi(out)
-      assert_includes plain, 'Alerts found:'
+      assert_includes plain, '(1 alert)'
+      assert_includes plain, '(2 warnings)'
       assert_includes plain, 'Label `sec:dup` multiply defined.'
       assert_includes plain, 'Reference `sec:unknown` undefined'
       assert_includes plain, 'Errors: 0'
@@ -805,7 +837,8 @@ class TestLatexItCLI < Minitest::Test
       end
 
       plain_supp = strip_ansi(out_supp)
-      assert_includes plain_supp, 'Alerts found:'
+      assert_includes plain_supp, '(1 alert)'
+      refute_includes plain_supp, 'warnings)'
       assert_includes plain_supp, 'Label `sec:dup` multiply defined.'
       refute_includes plain_supp, 'Reference `sec:unknown` undefined'
       assert_includes plain_supp, 'Warnings: 2 (suppressed)'
@@ -833,7 +866,8 @@ class TestLatexItCLI < Minitest::Test
       end
 
       plain = strip_ansi(out)
-      assert_includes plain, 'Alerts found:'
+      assert_includes plain, '(1 alert)'
+      assert_includes plain, '(1 warning)'
       assert_includes plain, 'Overfull \hbox (35.0pt too wide)'
       assert_includes plain, 'Overfull \hbox (10.0pt too wide)'
       assert_includes plain, 'Errors: 0'
@@ -851,7 +885,8 @@ class TestLatexItCLI < Minitest::Test
 
       # Under 50pt threshold, both are warnings (0 alerts)
       plain_custom = strip_ansi(out_custom)
-      refute_includes plain_custom, 'Alerts found:'
+      refute_includes plain_custom, 'alert)'
+      assert_includes plain_custom, '(2 warnings)'
       assert_includes plain_custom, 'Overfull \hbox (35.0pt too wide)'
       assert_includes plain_custom, 'Overfull \hbox (10.0pt too wide)'
       assert_includes plain_custom, 'Errors: 0'
@@ -898,7 +933,7 @@ class TestLatexItCLI < Minitest::Test
       end
 
       plain_all = strip_ansi(out_all)
-      assert_includes plain_all, 'Whatevers found:'
+      assert_includes plain_all, '(4 whatevers)'
       assert_includes plain_all, '2.09996pt too wide'
       assert_includes plain_all, 'Token not allowed in a PDF string'
       assert_includes plain_all, 'float specifier changed to'

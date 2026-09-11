@@ -7,7 +7,8 @@ Like `latexmk`, it handles multi-pass compilation and bibliography dependencies 
 2. **Cryptic output**: Low-level engine noise is filtered out, separating real errors and layout flaws from harmless background warnings and offering plain-English suggestions for fixes.
 
 <p align="center">
-  <img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%">
+  <a href="docs/gallery.md"><img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
+  <em>Explore more real-world examples in the <a href="docs/gallery.md">Diagnostic Showcase Gallery</a>.</em>
 </p>
 
 ---
@@ -118,6 +119,7 @@ Ensure `~/bin` is in your `PATH`.
 
 For technical details, configuration options, and advanced features, see:
 
+- **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
 - **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.
 - **[docs/diagnostics.md](docs/diagnostics.md)**: Diagnostic tiers, error explanations, threshold settings, and semantic checks.
 - **[docs/errors/README.md](docs/errors/README.md)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.

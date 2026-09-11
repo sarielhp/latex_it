@@ -26,8 +26,98 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout, 'Usage: l [options]'
     assert_includes stdout, '--engine'
     assert_includes stdout, '--fast'
-    assert_includes stdout, '-Werror'
     assert_includes stdout, '--deps'
+    assert_includes stdout, '-u, --single-pass'
+    assert_includes stdout, '-1, --force'
+    assert_includes stdout, '-m, --main'
+    assert_includes stdout, '--lua'
+    assert_includes stdout, '--xe'
+    assert_includes stdout, '-d, --diff'
+    assert_includes stdout, '-t, --verify'
+    assert_includes stdout, '--no-env'
+    assert_includes stdout, '-W, --werror'
+    assert_includes stdout, '-E, --examples'
+
+    # Verify redundant aliases are not present in help output
+    refute_includes stdout, '--one-pass'
+    refute_includes stdout, '--quick'
+    refute_includes stdout, '--find-main'
+    refute_includes stdout, '--file'
+    refute_includes stdout, '--lualatex'
+    refute_includes stdout, '--xelatex'
+    refute_includes stdout, '--update-on-diff'
+    refute_includes stdout, '--test'
+    refute_includes stdout, '--env-free'
+    refute_includes stdout, '--envfree'
+  end
+
+  def test_examples_flag
+    stdout, status = Open3.capture2(BIN, '-E')
+    assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
+    assert_includes stdout, 'Detailed Examples & Common Workflows:'
+    assert_includes stdout, 'l -1'
+    assert_includes stdout, 'l -u'
+    assert_includes stdout, 'l -z'
+    assert_includes stdout, 'l --arxiv'
+
+    stdout_long, status_long = Open3.capture2(BIN, '--examples')
+    assert status_long.success?
+    assert_equal stdout, stdout_long
+
+    stdout_both, status_both = Open3.capture2(BIN, '-h', '-E')
+    assert status_both.success?
+    assert_includes stdout_both, 'Compilation Options:'
+    assert_includes stdout_both, 'Detailed Examples & Common Workflows:'
+  end
+
+  def test_canonical_cli_flags_and_anti_alias
+    canonical_flags = %w[-u --single-pass -1 --force -m --main --lua --xe -d --diff -t --verify --no-env -W --werror]
+    canonical_flags.each do |flag|
+      _, stderr, status = Open3.capture3(BIN, flag, 'nonexistent_doc_test.tex')
+      refute_match(/invalid option/i, stderr, "Canonical flag #{flag} should be a valid option")
+      refute_match(/ambiguous option/i, stderr, "Canonical flag #{flag} should not be ambiguous")
+      assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless %w[-m --main].include?(flag)
+    end
+
+    removed_aliases = %w[--one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff --test --env-free --envfree]
+    removed_aliases.each do |alias_flag|
+      _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
+      assert_match(/invalid option/i, stderr, "Removed alias #{alias_flag} should be rejected")
+      refute status.success?
+    end
+  end
+
+  def test_difference_between_u_and_1_passes
+    Dir.mktmpdir do |dir|
+      tex = File.join(dir, 'paper.tex')
+      File.write(tex, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        Section \\ref{sec:intro}
+        \\section{Intro}\\label{sec:intro}
+        \\end{document}
+      TEX
+      # Run with -u: forces single pass only and stops (1 pass)
+      out_u, _ = Open3.capture2e(BIN, '-u', 'paper.tex', chdir: dir)
+      assert_includes out_u, 'xelatex'
+      refute_includes out_u, 'xelatex (2)'
+
+      # Clear junk and target
+      FileUtils.rm_rf(File.join(dir, 'junk'))
+      FileUtils.rm_f(File.join(dir, 'paper.pdf'))
+
+      # Initial build with standard convergence
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+
+      # When targets are up to date, standard build runs 0 passes
+      out_cached, _ = Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+      assert_includes out_cached, 'All targets (paper.pdf) are up-to-date.'
+
+      # When run with -1, it forces the first pass and rebuilds
+      out_force, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      assert_includes out_force, 'xelatex (1)'
+      refute_includes out_force, 'All targets (paper.pdf) are up-to-date.'
+    end
   end
 
   def test_pdflatex_is_supported_engine
@@ -312,7 +402,11 @@ class TestLatexItCLI < Minitest::Test
       Dir.chdir(dir) do
         assert builder.send(:targets_up_to_date?), 'Expected build to be up to date'
 
-        # Test single_pass forces rebuild
+        # Test force (-u / --force) forces rebuild
+        force_builder = LatexBuilder.new('paper.tex', force: true)
+        refute force_builder.send(:targets_up_to_date?)
+
+        # Test single_pass (-1 / --single-pass) forces rebuild
         single_builder = LatexBuilder.new('paper.tex', single_pass: true)
         refute single_builder.send(:targets_up_to_date?)
 

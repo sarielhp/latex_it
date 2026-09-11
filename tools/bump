@@ -126,11 +126,23 @@ module VersionBumper
       File.write(LATEX_IT_FILE, updated) if updated != content
       puts "  [#{GREEN}OK#{RESET}] Updated #{LATEX_IT_FILE}"
     end
+
+    # 3. Update lib/latex_it/version.rb fallback string if present
+    version_rb = File.join(REPO_ROOT, 'lib/latex_it/version.rb')
+    if File.file?(version_rb)
+      content = File.read(version_rb)
+      updated = content.sub(/(: '\d+\.\d+\.\d+')/, ": '#{new_v}'")
+      File.write(version_rb, updated) if updated != content
+      puts "  [#{GREEN}OK#{RESET}] Updated #{version_rb}"
+    end
   end
 
   def self.git_commit_and_push!(new_v)
     puts "--> Committing version bump to git..."
-    Open3.capture2('git', 'add', 'VERSION', 'latex_it')
+    files_to_add = ['VERSION', 'latex_it']
+    version_rb = File.join(REPO_ROOT, 'lib/latex_it/version.rb')
+    files_to_add << 'lib/latex_it/version.rb' if File.file?(version_rb)
+    Open3.capture2('git', 'add', *files_to_add)
     commit_msg = "Bump version to #{new_v}"
     out, status = Open3.capture2e('git', 'commit', '-m', commit_msg)
     unless status.success?

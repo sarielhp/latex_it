@@ -1,0 +1,51 @@
+# frozen_string_literal: true
+
+# ==============================================================================
+# lib/latex_it/compatibility.rb
+#
+# Vendor compatibility environment injection (REVTeX 4.0 fallback).
+# ==============================================================================
+
+module LaTeXCompatibility
+  REPO_TEXMF = File.expand_path('../../vendor/revtex4', __dir__).freeze
+  INSTALLED_TEXMF = File.expand_path('~/.local/share/latex_it/texmf').freeze
+
+  def self.texmf_dirs(options = {})
+    return [] if ENV['LATEX_IT_DISABLE_BUNDLED_REVTeX'] == '1'
+
+    cfg = options[:revtex4].is_a?(Hash) ? options[:revtex4] : {}
+    return [] if cfg['enabled'] == false
+
+    configured = Array(cfg['texmf_dirs']).map { |path| File.expand_path(path.to_s) }
+    candidates = [INSTALLED_TEXMF, REPO_TEXMF] + configured
+    candidates.select { |path| File.directory?(path) }.uniq
+  end
+
+  def self.compiler_environment(options, base = ENV.to_h)
+    dirs = texmf_dirs(options)
+    return base if dirs.empty?
+
+    input = dirs.map { |dir| File.join(dir, 'tex', 'latex', 'revtex4') }
+    old = base['TEXINPUTS'].to_s
+    input << old unless old.empty?
+    env = base.dup
+    env['TEXINPUTS'] = input.join(File::PATH_SEPARATOR) + File::PATH_SEPARATOR
+    env['BIBINPUTS'] = input.join(File::PATH_SEPARATOR) + File::PATH_SEPARATOR if base.key?('BIBINPUTS')
+    env
+  end
+
+  def self.files_used_by_fls(fls_path, options)
+    dirs = texmf_dirs(options)
+    return [] unless File.file?(fls_path) && !dirs.empty?
+
+    roots = dirs.map { |dir| File.expand_path(dir) }
+    File.read(fls_path).each_line.filter_map do |line|
+      next unless line.start_with?('INPUT ')
+
+      path = File.expand_path(line.delete_prefix('INPUT ').strip)
+      roots.any? { |root| path.start_with?(root + File::SEPARATOR) } ? path : nil
+    end.uniq
+  rescue StandardError
+    []
+  end
+end

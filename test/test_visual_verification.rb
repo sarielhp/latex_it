@@ -150,22 +150,30 @@ class TestVisualVerification < Minitest::Test
     with_packager do |packager|
       zip = File.join(Dir.pwd, 'archive.zip')
       File.write(zip, 'archive')
-      calls = 0
-      compile = lambda do |*args|
-        calls += 1
-        next ['', Status.new(0)] if calls == 1
-
-        kwargs = args.last.is_a?(Hash) ? args.last : {}
-        File.write(File.join(kwargs[:chdir], 'paper.pdf'), 'rebuilt')
-        ['', Status.new(0)]
-      end
+      compile = build_short_circuit_compile
       visual = lambda { flunk 'visual check should be short-circuited' }
-      packager.stub(:verify_arxiv_pdf_match, false) do
-        packager.stub(:verify_arxiv_pdf_visual_match, visual) do
-          LaTeXUtils.stub(:command_available?, true) do
-            Open3.stub(:capture2e, compile) do
-              refute packager.send(:verify_arxiv_sandbox!, zip, File.join(Dir.pwd, 'paper.pdf'))
-            end
+      run_short_circuit_verification(packager, zip, compile, visual)
+    end
+  end
+
+  def build_short_circuit_compile
+    calls = 0
+    lambda do |*args|
+      calls += 1
+      next ['', Status.new(0)] if calls == 1
+
+      kwargs = args.last.is_a?(Hash) ? args.last : {}
+      File.write(File.join(kwargs[:chdir], 'paper.pdf'), 'rebuilt')
+      ['', Status.new(0)]
+    end
+  end
+
+  def run_short_circuit_verification(packager, zip, compile, visual)
+    packager.stub(:verify_arxiv_pdf_match, false) do
+      packager.stub(:verify_arxiv_pdf_visual_match, visual) do
+        LaTeXUtils.stub(:command_available?, true) do
+          Open3.stub(:capture2e, compile) do
+            refute packager.send(:verify_arxiv_sandbox!, zip, File.join(Dir.pwd, 'paper.pdf'))
           end
         end
       end

@@ -59,20 +59,34 @@ module ArxivPaperTest
   end
 
   def self.archive_files(bytes)
+    entries = read_tar_entries(bytes)
+    validate_directory_collisions(entries)
+    entries.compact
+  end
+
+  def self.read_tar_entries(bytes)
     entries = {}
     Gem::Package::TarReader.new(StringIO.new(bytes)) do |tar|
       tar.each do |entry|
-        name = member(entry.full_name)
-        next if entry.directory? && name.empty?
-        raise Error, 'empty archive member' if name.empty?
-        raise Error, "duplicate archive member #{name}" if entries.key?(name)
-        raise Error, "archive member is not a regular file or directory: #{name}" unless entry.file? || entry.directory?
-        raise Error, "archive member exceeds 100 MiB: #{name}" if entry.header.size > MAX_BYTES
-
-        entries[name] = entry.directory? ? nil : entry.read
-        raise Error, 'archive contains too many entries' if entries.size > 20_000
+        record_tar_member(entry, entries)
       end
     end
+    entries
+  end
+
+  def self.record_tar_member(entry, entries)
+    name = member(entry.full_name)
+    return if entry.directory? && name.empty?
+    raise Error, 'empty archive member' if name.empty?
+    raise Error, "duplicate archive member #{name}" if entries.key?(name)
+    raise Error, "archive member is not a regular file or directory: #{name}" unless entry.file? || entry.directory?
+    raise Error, "archive member exceeds 100 MiB: #{name}" if entry.header.size > MAX_BYTES
+
+    entries[name] = entry.directory? ? nil : entry.read
+    raise Error, 'archive contains too many entries' if entries.size > 20_000
+  end
+
+  def self.validate_directory_collisions(entries)
     entries.each_key do |name|
       parts = name.split('/')
       (1...parts.length).each do |length|
@@ -80,7 +94,6 @@ module ArxivPaperTest
         raise Error, "file/directory collision at #{parent}" if entries[parent]
       end
     end
-    entries.compact
   end
 
   def self.extract(bytes, destination, requested)

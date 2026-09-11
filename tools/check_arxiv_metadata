@@ -86,28 +86,37 @@ module ArxivMetadataReport
     expanded = gzip?(bytes) ? inflate(bytes) : bytes
     return { source_name => expanded } unless tar_bytes?(expanded)
 
+    extract_tar_tex_files(expanded, source_name)
+  rescue Gem::Package::TarInvalidError, Zlib::Error, EOFError => e
+    raise Error, "invalid source archive #{source_name}: #{e.message}"
+  end
+
+  def self.extract_tar_tex_files(expanded, source_name)
     files = {}
     total = 0
     Gem::Package::TarReader.new(StringIO.new(expanded)) do |tar|
       tar.each do |entry|
-        name = entry.full_name.to_s
-        raise Error, "unsafe archive member #{name.inspect}" unless safe_name?(name)
-        next if entry.directory?
-        raise Error, "archive member is not a regular file: #{name}" unless entry.file?
-        raise Error, "archive member exceeds #{MAX_BYTES} bytes: #{name}" if entry.header.size > MAX_BYTES
-
-        data = entry.read
-        total += data.bytesize
-        raise Error, "archive expands beyond #{MAX_BYTES} bytes" if total > MAX_BYTES
-
-        files[name] = data if File.extname(name).casecmp('.tex').zero?
+        total = process_tar_source_entry(entry, total, files)
       end
     end
     raise Error, "source archive #{source_name} contains no regular .tex files" if files.empty?
 
     files
-  rescue Gem::Package::TarInvalidError, Zlib::Error, EOFError => e
-    raise Error, "invalid source archive #{source_name}: #{e.message}"
+  end
+
+  def self.process_tar_source_entry(entry, total, files)
+    name = entry.full_name.to_s
+    raise Error, "unsafe archive member #{name.inspect}" unless safe_name?(name)
+    return total if entry.directory?
+    raise Error, "archive member is not a regular file: #{name}" unless entry.file?
+    raise Error, "archive member exceeds #{MAX_BYTES} bytes: #{name}" if entry.header.size > MAX_BYTES
+
+    data = entry.read
+    new_total = total + data.bytesize
+    raise Error, "archive expands beyond #{MAX_BYTES} bytes" if new_total > MAX_BYTES
+
+    files[name] = data if File.extname(name).casecmp('.tex').zero?
+    new_total
   end
 
   def self.gzip?(bytes)

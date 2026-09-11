@@ -72,22 +72,32 @@ class TestRepairFailures < Minitest::Test
   def test_arxiv_text_check_rejects_extraction_failure_and_ignores_successful_stderr
     with_project do |builder|
       packager = LatexArxivPackager.new(builder)
-      [0, 1].each do |failed_index|
-        results = [['same text', '', Status.new(0)], ['same text', '', Status.new(0)]]
-        results[failed_index] = ['same text', 'Extraction failed', Status.new(1)]
-        _, err = capture_io do
-          LaTeXUtils.stub(:command_available?, true) do
-            Open3.stub(:capture3, ->(*_args) { results.shift }) do
-              refute packager.send(:verify_arxiv_pdf_match, 'paper.pdf', 'junk/paper.pdf')
-            end
-          end
-        end
-        assert_includes err, 'Extraction failed'
-      end
-      results = [['same text', 'warning A', Status.new(0)], ['same text', 'warning B', Status.new(0)]]
-      capture_io do
-        LaTeXUtils.stub(:command_available?, true) do
-          Open3.stub(:capture3, ->(*_args) { results.shift }) do
+      assert_arxiv_text_check_failures(packager)
+      assert_arxiv_text_check_success_with_warnings(packager)
+    end
+  end
+
+  def assert_arxiv_text_check_failures(packager)
+    [0, 1].each do |failed_index|
+      results = [['same text', '', Status.new(0)], ['same text', '', Status.new(0)]]
+      results[failed_index] = ['same text', 'Extraction failed', Status.new(1)]
+      _, err = stub_extraction_and_verify(packager, results, refute_match: true)
+      assert_includes err, 'Extraction failed'
+    end
+  end
+
+  def assert_arxiv_text_check_success_with_warnings(packager)
+    results = [['same text', 'warning A', Status.new(0)], ['same text', 'warning B', Status.new(0)]]
+    stub_extraction_and_verify(packager, results, refute_match: false)
+  end
+
+  def stub_extraction_and_verify(packager, results, refute_match: true)
+    capture_io do
+      LaTeXUtils.stub(:command_available?, true) do
+        Open3.stub(:capture3, ->(*_args) { results.shift }) do
+          if refute_match
+            refute packager.send(:verify_arxiv_pdf_match, 'paper.pdf', 'junk/paper.pdf')
+          else
             assert packager.send(:verify_arxiv_pdf_match, 'paper.pdf', 'junk/paper.pdf')
           end
         end
@@ -130,17 +140,25 @@ class TestRepairFailures < Minitest::Test
 
   def test_archive_command_failure_does_not_announce_success
     [LatexPackager, LatexArxivPackager].each do |klass|
-      with_project do |builder|
-        File.write('paper.bbl', '\\bibitem{old} Previous')
-        packager = klass.new(builder)
-        out, err = capture_io do
-          Open3.stub(:capture2e, ['injected zip failure', Status.new(7)]) do
-            builder.stub(:run_in_current_directory!, true) { refute packager.package! }
-          end
-        end
-        refute_includes out, 'Created portable zip'
-        refute_includes out, 'Preparation Complete'
-        assert_includes err, 'injected zip failure'
+      verify_archive_command_failure(klass)
+    end
+  end
+
+  def verify_archive_command_failure(klass)
+    with_project do |builder|
+      File.write('paper.bbl', '\bibitem{old} Previous')
+      packager = klass.new(builder)
+      out, err = capture_archive_failure(packager, builder)
+      refute_includes out, 'Created portable zip'
+      refute_includes out, 'Preparation Complete'
+      assert_includes err, 'injected zip failure'
+    end
+  end
+
+  def capture_archive_failure(packager, builder)
+    capture_io do
+      Open3.stub(:capture2e, ['injected zip failure', Status.new(7)]) do
+        builder.stub(:run_in_current_directory!, true) { refute packager.package! }
       end
     end
   end

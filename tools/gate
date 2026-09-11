@@ -10,8 +10,8 @@ module QualityGate
   COLORS = { green: "\e[32m", red: "\e[31m", cyan: "\e[36m", bold: "\e[1m", reset: "\e[0m" }.freeze
   FAST_TESTS = %w[
     test_arxiv_cycle.rb test_arxiv_runner_review.rb test_arxiv_worker.rb
-    test_author_verification.rb test_compatibility.rb test_repair_failures.rb
-    test_sample_arxiv.rb test_sample_arxiv_review.rb
+    test_author_verification.rb test_code_metrics.rb test_compatibility.rb
+    test_repair_failures.rb test_sample_arxiv.rb test_sample_arxiv_review.rb
   ].freeze
   MEDIUM_TESTS = %w[
     test_arxiv.rb test_latex_it.rb test_metadata_report_review.rb
@@ -43,7 +43,7 @@ module QualityGate
 
   def self.check_syntax!
     puts "--> #{color(:cyan, '[1/2]')} Ruby syntax verification (ruby -cw)..."
-    files = ['latex_it'] + Dir.glob('tools/*').select { |path| ruby_script?(path) } + Dir.glob('test/**/*.rb')
+    files = ['latex_it'] + Dir.glob('lib/**/*.rb') + Dir.glob('tools/*').select { |path| ruby_script?(path) } + Dir.glob('test/**/*.rb')
     files.uniq.each do |file|
       output, status = Open3.capture2e('ruby', '-cw', file)
       next if status.success?

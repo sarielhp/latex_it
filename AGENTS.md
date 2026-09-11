@@ -7,20 +7,28 @@ This document provides architectural guidelines, core invariants, development wo
 ## 1. Core Architecture & Repository Layout
 
 - **Primary Executable**: [`latex_it`](latex_it)
-  - Standalone, high-performance Ruby executable (`#!/usr/bin/env ruby`).
+  - Modular Ruby executable (`#!/usr/bin/env ruby`) with zero-build development workflow (`require_relative 'lib/latex_it/...'`).
   - Supports symlink personalities (`l`, `lw`, `ll`, `llua`, `latex_clean`, `latex_file_in_dir`, `latex_env_free`).
-- **Core Modules & Classes**:
-  - `LaTeXConfig`: Unified JSONC configuration loader (`.l.jsonc`, `~/.config/latex_it/config.jsonc`), auto-template creator, and quote-aware JSONC parser.
-  - `LaTeXUtils`: Engine detection & validation, main file discovery heuristics, TeX environment sanitization, noise filtering, and directory cleanup.
-  - `LaTeXBraceChecker`: Lexical environment-scoped brace validator, `{]` mismatch detector, and AUCTeX error message formatter.
-  - `LatexBuilder`: Compilation lifecycle manager, pass scheduler, `junk/` directory isolation, bibliography handling, lockfile protection, and diagnostic log analysis.
-  - `LatexPackager`: Portable zip archive bundler (`-z`), active figure source discovery (`.fig`, `.ipe`, `.isy`, etc.), styles isolation, and `/tmp` sandbox verifier (`-t`).
-  - **CLI Dispatcher**: Symlink personality detection and option parsing with `OptionParser`.
+- **Modular Core Library (`lib/latex_it/`)**:
+  - `version.rb`: Canonical version string, executable path, and constants.
+  - `color.rb`: ANSI color rendering via `Rainbow` with graceful plain-text `NullString` fallback.
+  - `compatibility.rb`: Environment adjustments for vendor styles (e.g. `revtex4`).
+  - `config.rb`: Unified JSONC configuration loader (`.l.jsonc`, `~/.config/latex_it/config.jsonc`) and quote-aware parser.
+  - `utils.rb`: Engine detection, main file discovery heuristics, noise filtering, and directory cleanup.
+  - `brace_checker.rb`: Lexical environment-scoped brace validator and AUCTeX formatter.
+  - `flattener.rb`: TeX input tree resolution, comment stripping, and flattening.
+  - `meta_extractor.rb`: Paper metadata parsing (title, authors, abstract, comments).
+  - `diagnostics.rb`: LaTeX compilation log diagnostic analysis, AUCTeX error extraction, and 4-tier categorization.
+  - `builder.rb`: Compilation lifecycle manager, pass scheduler, `junk/` isolation, and lockfile protection.
+  - `packager.rb`: Portable zip archive bundler (`-z`), active figure source discovery, and styles isolation.
+  - `arxiv.rb`: Sanitized, flattened arXiv submission packager and sandbox verification.
 - **Workflow & Quality Tooling** (`tools/` / `tool/`):
-  - [`tools/gate`](tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax and tests.
+  - [`tools/audit_code`](tools/audit_code): High-performance AST metrics auditor enforcing cognitive complexity, depth, and method sizing.
+  - [`tools/bundle`](tools/bundle): Compiles modular `lib/` components into a single standalone executable.
+  - [`tools/gate`](tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax, code metrics, and tests.
   - [`tools/setup_ruby_dev`](tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
-  - [`tools/install`](tools/install) (aliased as `tool/install`): Installs `latex_it` to `~/bin/latex_it` and configures `~/bin/l` symlink.
-  - [`tools/bump`](tools/bump) (aliased as `tool/bump`): Validates 100% clean git working tree, runs `tools/gate --full`, increments version by +0.1.0 in [`VERSION`](VERSION) and `latex_it`, commits, tags, and pushes to remote.
+  - [`tools/install`](tools/install) (aliased as `tool/install`): Bundles `latex_it` into a standalone binary at `~/bin/latex_it` with `~/bin/l` symlink.
+  - [`tools/bump`](tools/bump) (aliased as `tool/bump`): Validates clean git tree, runs `tools/gate --full`, increments version, commits, tags, and pushes.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
 - **Documentation & Configuration**:
@@ -32,14 +40,19 @@ This document provides architectural guidelines, core invariants, development wo
 
 ## 2. Invariants & Strict Rules
 
-- **Method Length — Hard Limit 80 Lines**:
-  No Ruby method may exceed **80 lines**. Function length is a correctness metric. Decompose long methods in-place into private helpers before moving modules.
+- **Function Complexity & Sizing Invariant (Cognitive Complexity + Tiered Sizing)**:
+  - **Cognitive Complexity — Hard Limit ≤ 15**: Methods must not exceed a cognitive complexity score of 15. Control jumps, nested branches, and state-dependent logic must be decomposed into named helpers.
+  - **Nesting Depth — Hard Limit ≤ 4**: No code may be indented more than 4 control-flow levels deep (`def` -> level 1 -> level 2 -> level 3 -> level 4). Reaching level 5 requires immediate helper extraction. Allows natural resource blocks (`Dir.chdir`, `with_lock`) and nested algorithms (like 2D loops or edit distance).
+  - **Tiered Length Ceiling**:
+    - **Algorithmic / Logic Functions**: **Hard limit 80 lines**.
+    - **Declarative / "Dumb" Functions**: **Up to 120 lines** allowed IF and ONLY IF Cognitive Complexity is ≤ 5 (e.g. CLI `OptionParser` option declarations, configuration dictionaries, or pure linear step pipelines).
+  - **Data vs Logic Separation**: Large lookup dictionaries, explanation mappings, and static string tables must live in frozen module constants, never inside function bodies.
 - **File Sizing Guidelines**:
   Keep methods concise and maintain modular files in the **300–700 line** range (soft warning at 800 lines, hard limit 1100 lines). Never split a file across a method body.
 - **Language Policy**:
   All scripts, tooling, and test runners must be written in idiomatic **Ruby** (`#!/usr/bin/env ruby`). Do not introduce Python, Bash, Sed, or Awk scripts.
-- **Canonical Interface & Anti-Alias Bloat**:
-  Maintain a minimal, well-documented CLI hierarchy. Do not add undocumented switches or unadvertised legacy aliases without updating [`README.md`](README.md).
+- **Canonical Interface & Anti-Alias Policy (Strict No Redundant Aliases)**:
+  Maintain a strictly minimal, clean CLI hierarchy without redundant aliases. Aliases blow up the command-line interface of a program. Every command-line option must have at most one canonical long name and optionally at most one single-letter shortcut (e.g. `-1, --force`, `-u, --single-pass`). Never add multiple single-letter shortcuts (e.g. `-u` and `-1` to the same command) or multiple long option names (e.g. `--single-pass` and `--one-pass`) to the same command. A single-letter shortcut is fine, but two single-letter shortcuts to the same command are strictly prohibited.
 - **Isolated Build Output (`junk/`)**:
   All intermediate build artifacts must remain confined to `junk/`. Only final targets (`<file>.pdf`, `<file>.bbl`, `<file>.synctex.gz`) are exported to the project root. Cache preservation happens exclusively via `junk/old/`.
 - **Engine Support**:
@@ -59,8 +72,9 @@ Any modifications to compilation logic must honor the following invariants:
 
 1. **Intelligent Convergence Pass Model**:
    - **Default**: Tracks source dependencies via `-recorder` (`.fls`) and SHA256 build state. Exits in 0 passes if targets are up to date; runs 1 pass if citations/labels are stable; runs pre-primary BibTeX/Biber if `.bib` changed; and only executes extra passes (up to `-n`, default 3) when `.aux` changes or rerun is requested in logs.
+   - **Force Rebuild (`-1` / `--force`)**: Bypasses the initial up-to-date check and forces the first LaTeX pass, continuing with subsequent passes and BibTeX only if needed for convergence.
+   - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled (forces a single rebuild pass and exits immediately).
    - **Fast Incremental (`--fast` / `lw`)**: Aliased to reuse build state cache and avoid redundant recompilations.
-   - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled (forces rebuild when targets are up to date).
 2. **Bibliography Safety**:
    - Detect tool automatically: Biber (via `.bcf` / `.run.xml`) or BibTeX (via `\bibdata` and `\citation` in `.aux`).
    - Root `.bbl` is only overwritten if the generated `junk/*.bbl` contains valid bibliography entries (`\bibitem` or `\entry`).
@@ -75,7 +89,7 @@ Any modifications to compilation logic must honor the following invariants:
    - Default `inject_styles: false` places styles in root for universal journal compatibility without modifying `.tex` source code.
 5. **Sandbox Portability Verification (`-t` / `--verify`)**:
    - Unpacks bundle into `/tmp/latex_it_verify_XXXX` sandbox.
-   - Compiles with `latex_it --env-free` (wiping ambient `TEXINPUTS`, `BIBINPUTS`, `TEXMFHOME`).
+   - Compiles with `latex_it --no-env` (wiping ambient `TEXINPUTS`, `BIBINPUTS`, `TEXMFHOME`).
    - Compares PDF text layout against bundled PDF with `pdftotext -layout`.
 
 ---

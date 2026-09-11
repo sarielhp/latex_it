@@ -36,12 +36,14 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
 ### 5. Intelligent Convergence & Compilation Modes
 - **Intelligent Pass Model (Default)**:
   Dynamically tracks source dependencies (via `-recorder` / `.fls`) and checksums to eliminate redundant compiler passes:
-  - **Zero Passes**: If all source files are unchanged and targets are up to date, exits immediately in milliseconds (`All targets are up-to-date. (Use 'l -u' to force rebuild)`).
+  - **Zero Passes**: If all source files are unchanged and targets are up to date, exits immediately in milliseconds (`All targets are up-to-date. (Use 'l -1' to force rebuild)`).
   - **1 Pass**: For simple documents or edits that do not alter cross-references or citations.
   - **Pre-primary Bibliography**: Runs BibTeX/Biber before LaTeX if only `.bib` changed, updating the document in a single LaTeX pass.
   - **2–3 Passes**: Only executed when `.aux` changes, new citations are introduced, or rerun requests appear in compiler logs.
-- **Single-Pass Mode (`-u` / `--single-pass` / `--quick`)**:
-  Forces exactly one LaTeX pass without bibliography or extra iterations (also useful to force a rebuild).
+- **Force Mode (`-1` / `--force`)**:
+  Bypasses the initial up-to-date check and forces the first LaTeX pass, continuing with subsequent passes and BibTeX only if needed for convergence.
+- **Single-Pass Mode (`-u` / `--single-pass`)**:
+  Executes exactly one LaTeX pass without bibliography or extra iterations (forces a single rebuild pass and exits immediately).
 - **Fast Incremental Mode (`--fast` / `lw`)**:
   Explicit alias ensuring incremental caching behavior.
 
@@ -72,7 +74,7 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
   - Strict precedence: `CLI Flags > Local (.l.jsonc) > Global (~/.config/latex_it/config.jsonc) > Defaults`.
   - Legacy `.config_latex` supported as fallback.
 - Supports custom macro injections via `LATEXOPTS` or `LATEXOPTIONS`.
-- Provides `--no-env` (`--env-free`) to sanitize TeX-related environment variables (`TEXINPUTS`, `BIBINPUTS`, etc.) to prevent environment pollution.
+- Provides `--no-env` to sanitize TeX-related environment variables (`TEXINPUTS`, `BIBINPUTS`, etc.) to prevent environment pollution.
 - Automatic concurrency control with path-hashed lockfile protection (`--[no-]lock`, default: enabled).
 
 ### 9. Portable Paper Archive & Verification (`-z` and `-t`)
@@ -87,7 +89,7 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
     - Pass arbitrary supplementary files or globs after `--` to bundle them directly (e.g. `l -z -- notes.txt code/*.py`).
 - **Sandbox Portability Verification (`-t` / `--verify`)**:
   - Unpacks the zip in an isolated `/tmp` directory.
-  - Runs `latex_it --env-free` with an isolated HOME and TeX configuration tree.
+  - Runs `latex_it --no-env` with an isolated HOME and TeX configuration tree.
   - Compares the test build against the bundled PDF using `pdftotext -layout` when available; otherwise reports that comparison was skipped.
   - Archive creation, extraction, compilation, and PDF comparison failures produce a nonzero exit status.
 
@@ -99,7 +101,7 @@ If no target `.tex` file is explicitly passed, `latex_it` discovers the main doc
     Empty `%` markers retain TeX whitespace semantics. Repeated inputs remain repeated, input cycles are reported, and standard verbatim/listing environments and `\verb` examples are preserved literally.
   - **Active Figures Only**: Consults compiler recorder (`.fls`) to bundle only active `.pdf`/`.png` graphic files, strictly excluding raw figure sources (`.fig`, `.ipe`, `.svg`, etc.) and target PDF.
   - **BibLaTeX Version Shielding**: Detects `biblatex` and automatically bundles local distribution files (`biblatex.sty`, `biblatex.cfg`, `*.bbx`, `*.cbx`, `*.lbx`) to shield against arXiv's `wrong format version` compilation mismatch.
-  - **Verification Sandbox**: Automatically extracts the archive to `/tmp`, compiles with the selected engine and `latex_it --env-free`, and requires exact `pdftotext -layout` equality with the fresh local build plus exact equality of every corresponding page rendered by `pdftoppm` at 150 DPI. Missing `pdftotext`/`pdftoppm`, failed extraction or rendering, missing PDFs, changed text layout, or changed rendered pages fail verification. Use `--no-arxiv-verify` to bypass all checks, or `--no-arxiv-visual-verify` to keep text-only verification. Visual verification requires the `pdftoppm` command from Poppler.
+  - **Verification Sandbox**: Automatically extracts the archive to `/tmp`, compiles with the selected engine and `latex_it --no-env`, and requires exact `pdftotext -layout` equality with the fresh local build plus exact equality of every corresponding page rendered by `pdftoppm` at 150 DPI. Missing `pdftotext`/`pdftoppm`, failed extraction or rendering, missing PDFs, changed text layout, or changed rendered pages fail verification. Use `--no-arxiv-verify` to bypass all checks, or `--no-arxiv-visual-verify` to keep text-only verification. Visual verification requires the `pdftoppm` command from Poppler.
   - **Author Verification**: Extracts all author names from the original source and requires every name to appear on the rebuilt PDF's first page. Missing, malformed, or placeholder (`Unknown`/`Anonymous`) authors fail verification before visual comparison.
     Matching tolerates case, whitespace, punctuation, and normalized accents/umlauts. Small spelling differences produce edit-distance suggestions but still fail verification. This check also runs with `--no-arxiv-visual-verify`; only `--no-arxiv-verify` bypasses it.
 - **Metadata Extraction (`--meta`)**:
@@ -131,35 +133,35 @@ The script inspects `$PROGRAM_NAME` and changes default behavior based on the ex
 Usage: l [options] [document.tex] [-- extra_files...]
 
 Compilation Options:
-    -m, --main, --find-main, --file  Print the detected main LaTeX file and exit
+    -m, --main                       Print the detected main LaTeX file and exit
     -C, --clean-only                 Clean auxiliary and junk files in directory and exit without building
         --fast                       Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed
     -a, --all                        Show all diagnostics across all tiers (including Whatevers and Warnings)
     -e, --explain                    Display boxed plain-English explanations for diagnostics on first occurrence
         --engine ENGINE              LaTeX compiler: xelatex (default), lualatex, or pdflatex
-        --lua, --lualatex            Shortcut for --engine=lualatex
-        --xe, --xelatex              Shortcut for --engine=xelatex (default)
+        --lua                        Shortcut for --engine=lualatex
+        --xe                         Shortcut for --engine=xelatex (default)
         --pdf                        Generate PDF output (default behavior)
         --pdflatex                   Shortcut for --engine=pdflatex
-    -u, --single-pass, --quick       Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)
-    -d, --diff, --update-on-diff     Only replace target PDF if text content changed
+    -u, --single-pass                Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)
+    -1, --force                      Force initial LaTeX run, continuing with subsequent passes only if needed
+    -d, --diff                       Only replace target PDF if text content changed
     -c, --clean                      Clean temporary build files (junk/, .bbl, .aux) before building
     -b, --[no-]bib                   Force or skip BibTeX pass (default: auto-detect)
     -n, --passes NUM                 Number of compilation passes (1-3, default: 3)
     -T, --time                       Show execution time diagnostics per pass
-    -t, --verify, --test             Verify self-contained portability of generated zip in /tmp sandbox
+    -t, --verify                     Verify self-contained portability of generated zip in /tmp sandbox
     -z, --zip                        Create self-contained portable zip archive of paper
         --zip-name NAME              Specify custom output name for zip archive
         --[no-]inject-styles         Enable/disable isolating styles into styles/ and injecting \input@path
         --init-config                Create a local .l.jsonc configuration template in the current directory
         --[no-]color                 Enable or disable colored terminal output (default: auto)
         --[no-]lock                  Enable or disable lockfile concurrency protection (default: enabled)
-    -s, --score                      [-score] Suppress stdout and output error/warning count from the last LaTeX run
-        --no-env, --env-free, --envfree
-                                     [-no-env, -env-free] Reset environment variables used by LaTeX/BibTeX/Biber
+    -s, --score                      Suppress stdout and output error/warning count from the last LaTeX run
+        --no-env                     Reset environment variables used by LaTeX/BibTeX/Biber
         --emacs                      Format warnings/errors for Emacs AUCTeX integration (suppress line/W: prefixes)
     -v, --verbose                    Verbose output (e.g. show box text snippets)
-    -W, --werror                     [-Werror] Treat compilation warnings as fatal errors and exit with non-zero code
+    -W, --werror                     Treat compilation warnings as fatal errors and exit with non-zero code
     -M, --deps                       Print Makefile dependency rule for the document and exit
         --alert-hbox PT              Overfull hbox threshold in pt to classify as Alert (default: 24.0)
         --whatever-pt PT             Overfull hbox threshold in pt to classify as Whatever (default: 2.5)
@@ -173,6 +175,7 @@ arXiv Preparation Options:
         --[no-]biblatex-shield       Enable/disable bundling local biblatex distribution files
 
     -V, --version                    Show version
+    -E, --examples                   Show detailed usage examples and common workflows
     -h, --help                       Show this help message
 ```
 

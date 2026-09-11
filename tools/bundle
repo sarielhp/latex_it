@@ -1,0 +1,153 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/bundle
+#
+# Bundles modular lib/latex_it/ components into a standalone single-file executable.
+# Usage:
+#   tools/bundle               # outputs bundled script to stdout
+#   tools/bundle -o <path>     # writes to output path and chmod 0755
+#   tools/bundle --check       # bundles and verifies syntax with ruby -cw
+# ==============================================================================
+
+require 'fileutils'
+require 'open3'
+require 'optparse'
+
+module LatexBundler
+  REPO_ROOT = File.expand_path('..', __dir__)
+  VERSION_FILE = File.join(REPO_ROOT, 'VERSION')
+  ENTRY_FILE = File.join(REPO_ROOT, 'latex_it')
+  LIB_DIR = File.join(REPO_ROOT, 'lib', 'latex_it')
+
+  MODULE_ORDER = %w[
+    version.rb
+    color.rb
+    compatibility.rb
+    config.rb
+    utils.rb
+    brace_checker.rb
+    flattener.rb
+    meta_extractor.rb
+    diagnostics.rb
+    builder.rb
+    packager.rb
+    arxiv.rb
+  ].freeze
+
+  STD_REQUIRES = %w[
+    digest
+    fileutils
+    json
+    open3
+    optparse
+    shellwords
+    tmpdir
+    time
+  ].freeze
+
+  def self.current_version
+    File.file?(VERSION_FILE) ? File.read(VERSION_FILE).strip : '0.14.0'
+  end
+
+  def self.clean_module_content(name, content, version)
+    lines = content.lines.reject do |line|
+      line.start_with?('# frozen_string_literal:') ||
+        line.start_with?('#!/usr/bin/env') ||
+        line.match?(/\A\s*require(?:_relative)?\s+['"]/)
+    end
+    result = lines.join.strip
+    result = specialize_version_module(result, version) if name == 'version.rb'
+    result
+  end
+
+  def self.specialize_version_module(content, version)
+    content.sub(/VERSION = .*\n/, "VERSION = '#{version}'\n")
+           .sub(/EXECUTABLE = .*\n/, "EXECUTABLE = File.expand_path(__FILE__).freeze\n")
+  end
+
+  def self.extract_cli_content(entry_content)
+    lines = entry_content.lines.reject do |line|
+      line.start_with?('# frozen_string_literal:') ||
+        line.start_with?('#!/usr/bin/env') ||
+        line.match?(/\A\s*require(?:_relative)?\s+['"]/)
+    end
+    lines.join.strip
+  end
+
+  def self.bundle
+    version = current_version
+    header = generate_header(version)
+    modules_code = MODULE_ORDER.map do |mod_name|
+      path = File.join(LIB_DIR, mod_name)
+      raise "Missing module file: #{path}" unless File.file?(path)
+
+      clean_module_content(mod_name, File.read(path), version)
+    end
+
+    cli_code = extract_cli_content(File.read(ENTRY_FILE))
+    "#{header}\n\n#{modules_code.join("\n\n")}\n\n#{cli_code}\n"
+  end
+
+  def self.generate_header(version)
+    reqs = STD_REQUIRES.map { |r| "require '#{r}'" }.join("\n")
+    <<~HEADER.strip
+      #!/usr/bin/env ruby
+      # frozen_string_literal: true
+
+      # ==============================================================================
+      # latex_it (v#{version}) - Standalone Bundle
+      # Generated automatically by tools/bundle. Do not edit directly.
+      # Edit source files in lib/latex_it/ and latex_it, then run tools/bundle.
+      # ==============================================================================
+
+      #{reqs}
+    HEADER
+  end
+
+  def self.check_bundle
+    content = bundle
+    stdout, status = Open3.capture2e('ruby', '-cw', stdin_data: content)
+    unless status.success?
+      warn "Bundle syntax check failed:\n#{stdout}"
+      return false
+    end
+    puts "Bundle verified: Syntax OK (#{content.lines.size} lines)"
+    true
+  end
+
+  def self.write_bundle(output_path, verbose: true)
+    content = bundle
+    FileUtils.mkdir_p(File.dirname(output_path))
+    File.write(output_path, content)
+    File.chmod(0o755, output_path)
+    puts "Wrote standalone bundle to #{output_path} (#{content.lines.size} lines)" if verbose
+  end
+
+  def self.run(argv = ARGV)
+    output_path = nil
+    check_mode = false
+
+    parser = OptionParser.new do |opts|
+      opts.banner = 'Usage: tools/bundle [options]'
+      opts.on('-o', '--output PATH', 'Write bundled executable to specified file') { |v| output_path = v }
+      opts.on('-c', '--check', 'Verify syntax of the bundled output') { check_mode = true }
+      opts.on('-h', '--help', 'Show this help message') do
+        puts opts
+        exit 0
+      end
+    end
+    parser.parse!(argv)
+
+    if check_mode
+      exit(check_bundle ? 0 : 1)
+    elsif output_path
+      write_bundle(output_path)
+    else
+      puts bundle
+    end
+  end
+end
+
+LatexBundler.run if __FILE__ == $PROGRAM_NAME

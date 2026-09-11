@@ -1,0 +1,196 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/audit_code
+#
+# High-performance AST code metrics auditor using RubyVM::AbstractSyntaxTree.
+# Enforces:
+# 1. Nesting Depth <= 4
+# 2. Cognitive Complexity <= 15
+# 3. Method Length <= 80 lines (or <= 120 lines if Cognitive Complexity <= 5)
+# ==============================================================================
+
+require 'optparse'
+
+module CodeMetricsAuditor
+  DEFAULT_MAX_DEPTH = 4
+  DEFAULT_MAX_COMPLEXITY = 15
+  DEFAULT_MAX_LOGIC_LINES = 80
+  DEFAULT_MAX_DECLARATIVE_LINES = 120
+  DECLARATIVE_COMPLEXITY_CEILING = 5
+
+  MethodViolation = Struct.new(:file, :name, :line, :lines, :depth, :complexity, :reasons)
+
+  def self.calculate_method_metrics(body_node)
+    max_depth = 0
+    cog_complexity = 0
+
+    walker = lambda do |n, depth, is_flat_continuation|
+      return unless n.is_a?(RubyVM::AbstractSyntaxTree::Node)
+
+      branch_type = [:IF, :WHILE, :UNTIL, :CASE, :ITER].include?(n.type)
+      cur_depth = is_flat_continuation ? depth : (depth + (branch_type ? 1 : 0))
+      max_depth = [max_depth, cur_depth].max
+
+      case n.type
+      when :IF
+        cog_complexity += is_flat_continuation ? 1 : (1 + [0, cur_depth - 1].max)
+      when :WHILE, :UNTIL, :CASE, :RESCUE
+        cog_complexity += (1 + [0, cur_depth - 1].max)
+      when :AND, :OR
+        cog_complexity += 1
+      end
+
+      n.children.each_with_index do |child, i|
+        next unless child.is_a?(RubyVM::AbstractSyntaxTree::Node)
+
+        flat = (n.type == :IF && i == 2 && child.type == :IF) ||
+               (n.type == :WHEN && i == 2 && child.type == :WHEN)
+        walker.call(child, cur_depth, flat)
+      end
+    end
+
+    walker.call(body_node, 0, false)
+    [max_depth, cog_complexity]
+  end
+
+  def self.extract_method_info(node)
+    if node.type == :DEFN
+      name = node.children[0]
+      scope = node.children[1]
+      [name, node.first_lineno, node.last_lineno, scope.children[2]]
+    elsif node.type == :DEFS
+      name = "self.#{node.children[1]}"
+      scope = node.children[2]
+      [name, node.first_lineno, node.last_lineno, scope.children[2]]
+    end
+  end
+
+  def self.check_method_node(file, node, options, violations, all_methods)
+    name, first_l, last_l, body = extract_method_info(node)
+    lines = last_l - first_l + 1
+    depth, cc = calculate_method_metrics(body)
+
+    all_methods << { file: file, name: name, line: first_l, lines: lines, depth: depth, cc: cc }
+
+    reasons = evaluate_violations(lines, depth, cc, options)
+    return if reasons.empty?
+
+    violations << MethodViolation.new(file, name, first_l, lines, depth, cc, reasons)
+  end
+
+  def self.evaluate_violations(lines, depth, cc, options)
+    reasons = []
+    reasons << "depth #{depth} > #{options[:max_depth]}" if depth > options[:max_depth]
+    reasons << "complexity #{cc} > #{options[:max_complexity]}" if cc > options[:max_complexity]
+
+    if cc <= DECLARATIVE_COMPLEXITY_CEILING
+      reasons << "lines #{lines} > #{options[:max_declarative_lines]}" if lines > options[:max_declarative_lines]
+    elsif lines > options[:max_logic_lines]
+      reasons << "lines #{lines} > #{options[:max_logic_lines]}"
+    end
+    reasons
+  end
+
+  def self.audit_file(file, options, violations, all_methods)
+    return unless File.file?(file)
+
+    ast = RubyVM::AbstractSyntaxTree.parse_file(file) rescue nil
+    return unless ast
+
+    walker = lambda do |node|
+      return unless node.is_a?(RubyVM::AbstractSyntaxTree::Node)
+
+      if node.type == :DEFN || node.type == :DEFS
+        check_method_node(file, node, options, violations, all_methods)
+      end
+      node.children.each { |child| walker.call(child) if child.is_a?(RubyVM::AbstractSyntaxTree::Node) }
+    end
+
+    walker.call(ast)
+  end
+
+  def self.collect_target_files(paths)
+    if paths.empty?
+      targets = []
+      targets << 'latex_it' if File.file?('latex_it')
+      targets.concat(Dir.glob('lib/**/*.rb'))
+      targets.concat(Dir.glob('tools/*').select { |p| File.file?(p) && (File.extname(p) == '.rb' || ruby_executable?(p)) })
+      return targets.uniq
+    end
+
+    paths.flat_map do |p|
+      if File.directory?(p)
+        Dir.glob(File.join(p, '**', '*.rb'))
+      elsif File.file?(p)
+        [p]
+      else
+        Dir.glob(p)
+      end
+    end.uniq
+  end
+
+  def self.ruby_executable?(path)
+    first_line = File.open(path, &:gets) rescue nil
+    first_line&.start_with?('#!/usr/bin/env ruby')
+  end
+
+  def self.run(args = ARGV)
+    options = parse_cli_options(args)
+    files = collect_target_files(args)
+    violations = []
+    all_methods = []
+
+    files.each { |f| audit_file(f, options, violations, all_methods) }
+
+    report_results(violations, all_methods, options)
+    violations.empty? ? 0 : 1
+  end
+
+  def self.parse_cli_options(args)
+    options = {
+      max_depth: DEFAULT_MAX_DEPTH,
+      max_complexity: DEFAULT_MAX_COMPLEXITY,
+      max_logic_lines: DEFAULT_MAX_LOGIC_LINES,
+      max_declarative_lines: DEFAULT_MAX_DECLARATIVE_LINES,
+      verbose: false
+    }
+
+    parser = OptionParser.new do |opts|
+      opts.banner = 'Usage: tools/audit_code [options] [files...]'
+      opts.on('--max-depth N', Integer, "Max nesting depth (default: #{DEFAULT_MAX_DEPTH})") { |v| options[:max_depth] = v }
+      opts.on('--max-complexity N', Integer, "Max cognitive complexity (default: #{DEFAULT_MAX_COMPLEXITY})") { |v| options[:max_complexity] = v }
+      opts.on('--max-logic-lines N', Integer, "Max lines for logic methods (default: #{DEFAULT_MAX_LOGIC_LINES})") { |v| options[:max_logic_lines] = v }
+      opts.on('--max-declarative-lines N', Integer, "Max lines for declarative methods (default: #{DEFAULT_MAX_DECLARATIVE_LINES})") { |v| options[:max_declarative_lines] = v }
+      opts.on('-v', '--verbose', 'Show all audited methods') { options[:verbose] = true }
+      opts.on('-h', '--help', 'Show this help message') do
+        puts opts
+        exit 0
+      end
+    end
+    parser.parse!(args)
+    options
+  end
+
+  def self.report_results(violations, all_methods, options)
+    if options[:verbose]
+      puts "Audited #{all_methods.length} methods across files."
+      all_methods.sort_by { |m| -m[:cc] }.first(20).each do |m|
+        puts "  %-25s %-30s (L%4d): lines=%3d, depth=%d, complexity=%2d" % [m[:file], m[:name], m[:line], m[:lines], m[:depth], m[:cc]]
+      end
+      puts ''
+    end
+
+    if violations.empty?
+      puts "\e[32m✔ Code metrics check passed: #{all_methods.length} methods compliant.\e[0m"
+    else
+      puts "\e[31m❌ Found #{violations.length} code metric violations across #{all_methods.length} methods:\e[0m"
+      violations.each do |v|
+        puts "  \e[33m#{v.file}:#{v.line}\e[0m - \e[1m#{v.name}\e[0m: #{v.reasons.join(', ')} [lines=#{v.lines}, depth=#{v.depth}, complexity=#{v.complexity}]"
+      end
+    end
+  end
+end
+
+exit CodeMetricsAuditor.run if $PROGRAM_NAME == __FILE__

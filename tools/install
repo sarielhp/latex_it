@@ -11,6 +11,7 @@
 require 'fileutils'
 require 'open3'
 require 'optparse'
+require_relative 'bundle'
 
 module Installer
   REPO_ROOT   = File.expand_path('..', __dir__)
@@ -25,9 +26,8 @@ module Installer
     verify_source!
     FileUtils.mkdir_p(TARGET_DIR)
 
-    puts "==> Installing latex_it to #{TARGET_DIR}..." if verbose
-    FileUtils.cp(SRC_BIN, TARGET_BIN)
-    File.chmod(0o755, TARGET_BIN)
+    puts "==> Installing standalone latex_it bundle to #{TARGET_DIR}..." if verbose
+    LatexBundler.write_bundle(TARGET_BIN, verbose: verbose)
 
     FileUtils.rm_f(TARGET_LINK) if File.exist?(TARGET_LINK) || File.symlink?(TARGET_LINK)
     Dir.chdir(TARGET_DIR) do

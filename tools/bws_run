@@ -8,7 +8,7 @@ require 'tmpdir'
 require 'find'
 require 'open3'
 
-PROFILE = File.expand_path('../profiles/bws-latex-write.json', __dir__)
+PROFILE = File.expand_path('profiles/bws-latex-write.json', __dir__)
 DEFAULT_LATEX_IT = File.expand_path('../latex_it', __dir__)
 DEFAULT_BWS = ENV.fetch('BWS_BIN', 'bws')
 

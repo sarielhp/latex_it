@@ -17,7 +17,7 @@ require 'zlib'
 module ArxivPaperTest
   MAX_BYTES = 100 * 1024 * 1024
   ROOT = File.expand_path('..', __dir__)
-  FIXUP_DIR = File.join(ROOT, 'fixups', 'arxiv')
+  FIXUP_DIR = File.join(ROOT, 'test', 'fixups', 'arxiv')
   RESERVED = %w[.git .bws .bws.jsonc .bws-home .latex_it_bws_bin .sandbox-config junk].freeze
   class Error < StandardError; end
 

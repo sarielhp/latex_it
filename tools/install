@@ -5,7 +5,7 @@
 # tools/install
 #
 # Copies latex_it to ~/bin/ and creates symbolic link ~/bin/l -> latex_it.
-# Usage: ./tools/install (or ./tool/install)
+# Usage: ./tools/install
 # ==============================================================================
 
 require 'fileutils'

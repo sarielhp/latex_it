@@ -22,20 +22,21 @@ This document provides architectural guidelines, core invariants, development wo
   - `builder.rb`: Compilation lifecycle manager, pass scheduler, `junk/` isolation, and lockfile protection.
   - `packager.rb`: Portable zip archive bundler (`-z`), active figure source discovery, and styles isolation.
   - `arxiv.rb`: Sanitized, flattened arXiv submission packager and sandbox verification.
-- **Workflow & Quality Tooling** (`tools/` / `tool/`):
+- **Workflow & Quality Tooling** (`tools/`):
   - [`tools/audit_code`](tools/audit_code): High-performance AST metrics auditor enforcing cognitive complexity, depth, and method sizing.
   - [`tools/bundle`](tools/bundle): Compiles modular `lib/` components into a single standalone executable.
   - [`tools/gate`](tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax, code metrics, and tests.
   - [`tools/setup_ruby_dev`](tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.
-  - [`tools/install`](tools/install) (aliased as `tool/install`): Bundles `latex_it` into a standalone binary at `~/bin/latex_it` with `~/bin/l` symlink.
-  - [`tools/bump`](tools/bump) (aliased as `tool/bump`): Validates clean git tree, runs `tools/gate --full`, increments version, commits, tags, and pushes.
+  - [`tools/install`](tools/install): Bundles `latex_it` into a standalone binary at `~/bin/latex_it` with `~/bin/l` symlink.
+  - [`tools/bump`](tools/bump): Validates clean git tree, runs `tools/gate --full`, increments version, commits, tags, and pushes.
   - [`tools/test_error_corpus`](tools/test_error_corpus): Standalone on-demand test runner verifying real-world error fixtures in `docs/errors/`.
 - **Automated Test Suite** (`test/`):
   - `test/test_*.rb`: Fast regression and end-to-end tests using `minitest`.
+  - `test/fixups/`: ArXiv test repair records and schema.
 - **Documentation & Configuration**:
   - [`VERSION`](VERSION): Plaintext file tracking the canonical project version.
   - [`README.md`](README.md): User-facing feature reference, options, and architecture guide.
-  - [`ERRORS.md`](ERRORS.md) / [`docs/errors/`](docs/errors/): Catalog of TeX/LaTeX error signatures, causes, and reproducers.
+  - [`docs/`](docs/): Comprehensive technical guides (`arxiv.md`, `diagnostics.md`, `configuration.md`, `architecture.md`, `sandbox_testing.md`) and [`docs/errors/`](docs/errors/) error catalog.
   - [`AGENTS.md`](AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
 
 ---
@@ -139,8 +140,6 @@ Always execute quality workflows through the provided scripts:
 - **Trigger**:
   ```bash
   ./tools/install
-  # Or via symlink:
-  ./tool/install
   ```
 
 ### 5. `tools/bump` (Version Bump, Tag & Push Workflow)
@@ -151,8 +150,6 @@ Always execute quality workflows through the provided scripts:
 - **Trigger**:
   ```bash
   ./tools/bump
-  # Or via symlink:
-  ./tool/bump
   ```
 
 ---

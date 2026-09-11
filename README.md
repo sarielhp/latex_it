@@ -129,3 +129,9 @@ For technical details, configuration options, and advanced features, see:
 - **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and environment variables.
 - **[docs/architecture.md](docs/architecture.md)**: Internal design, build lifecycle, and modular Ruby structure.
 - **[docs/sandbox_testing.md](docs/sandbox_testing.md)**: Sandboxed testing (`bws_run`), portable paper bundles (`-z`), and REVTeX 4.0 support.
+
+---
+
+## Credits
+
+Program, documentation and everything else really, were written using AI tools (mainly `antigravity-cli`).

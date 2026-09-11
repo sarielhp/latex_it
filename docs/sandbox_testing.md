@@ -27,7 +27,7 @@ l -z paper.tex -- notes.txt data/*.csv
 
 ### Styles Organization (`--inject-styles`)
 - **Default (`false`)**: Harvested styles are placed in the archive root for compatibility across journal submission portals.
-- **Opt-in (`--inject-styles`)**: Harvested styles are placed into a `styles/` subfolder, and `\def\input@path{{styles/}{./}}` is added to the staged `.tex` file.
+- **Opt-in (`--inject-styles`)**: Harvested styles are placed into a `styles/` subfolder, and `{% raw %}\def\input@path{{styles/}{./}}{% endraw %}` is added to the staged `.tex` file.
 
 ### Portability Verification (`-t` / `--verify`)
 To confirm that an archive builds on another machine without ambient dependencies:

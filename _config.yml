@@ -1,0 +1,9 @@
+title: latex_it
+description: Fast, isolated, intelligent LaTeX compilation manager
+theme: jekyll-theme-primer
+
+exclude:
+  - vendor/
+  - junk/
+  - tools/
+  - test/

@@ -25,7 +25,7 @@ Errors during compilation originate in one of three layers:
 
 ---
 
-## 3. Master Error Index (30 Errors)
+## 3. Master Error Index (55 Errors)
 
 | # | Error Message / Pattern | Layer | Cause & Summary | Support | Reproducer & Details |
 |---|:--- |:--- |:--- |:--- |:--- |
@@ -59,6 +59,31 @@ Errors during compilation originate in one of three layers:
 | **28** | `Package amsmath Error: Multiple \tag` | Package | Multiple `\tag{...}` labels assigned to a single equation line. | **Catalog Hint** | [`28_amsmath_multiple_tag`](28_amsmath_multiple_tag/) |
 | **29** | `Package xcolor Error: Undefined color` | Package | Requested color name not defined or loaded via `\usepackage[dvipsnames]{xcolor}`. | **Catalog Hint** | [`29_undefined_color`](29_undefined_color/) |
 | **30** | `LaTeX Error: \begin{foo} ended by \end{bar}` | LaTeX Kernel | Mismatched environment tags (e.g. `\begin{itemize}` closed by `\end{enumerate}`). | **Pre-Flight / Hint** | [`30_mismatched_environment`](30_mismatched_environment/) |
+| **31** | `Missing } inserted` | TeX Primitive | TeX reached EOF or end of group while macro argument or math construct was missing closing `}`. | **Catalog Hint** | [`31_missing_closing_brace`](31_missing_closing_brace/) |
+| **32** | `Missing \endcsname inserted` | TeX Primitive | Macro inside `\csname ... \endcsname` expanded into unexpandable or invalid control sequence. | **Catalog Hint** | [`32_missing_endcsname`](32_missing_endcsname/) |
+| **33** | `You can't use '\hrule' here` | TeX Primitive | Vertical rule `\hrule` used in horizontal/math mode. Solution: use `\rule` or switch to vertical mode. | **Catalog Hint** | [`33_cant_use_hrule_here`](33_cant_use_hrule_here/) |
+| **34** | `You can't use '\spacefactor' in math mode` | TeX Primitive | Spacefactor macro or punctuation modifier invoked in math mode instead of text mode. | **Catalog Hint** | [`34_cant_use_spacefactor`](34_cant_use_spacefactor/) |
+| **35** | `Illegal parameter number in definition of \foo` | TeX Primitive | Referenced `#n` exceeds number of declared macro parameters, or unescaped `#` inside macro body. | **Catalog Hint** | [`35_illegal_parameter_number`](35_illegal_parameter_number/) |
+| **36** | `LaTeX Error: Two \documentclass commands` | LaTeX Kernel | Document preamble contains multiple `\documentclass` declarations. | **Catalog Hint** | [`36_two_documentclass_commands`](36_two_documentclass_commands/) |
+| **37** | `LaTeX Error: \verb illegal in command argument` | LaTeX Kernel | Verbatim macro `\verb` passed inside another command's argument; use `\texttt` or `\cprotect`. | **Catalog Hint** | [`37_verb_illegal_in_argument`](37_verb_illegal_in_argument/) |
+| **38** | `LaTeX Error: \caption outside float` | LaTeX Kernel | `\caption` used outside floating environment (`figure`, `table`); use `\captionof` from `caption` package. | **Catalog Hint** | [`38_caption_outside_float`](38_caption_outside_float/) |
+| **39** | `Use of \foo doesn't match its definition` | TeX Primitive | Macro with delimited argument syntax called with missing or mismatched delimiter tokens. | **Catalog Hint** | [`39_use_of_doesnt_match_definition`](39_use_of_doesnt_match_definition/) |
+| **40** | `Ambiguous; you need another { and }` | TeX Primitive | TeX `\over` or `\atop` used multiple times in same formula without grouping braces `{ ... }`. | **Catalog Hint** | [`40_ambiguous_math_fractions`](40_ambiguous_math_fractions/) |
+| **41** | `You can't use '\eqno' in math mode` | TeX Primitive | Display-math tag command `\eqno` used in inline math `$ ... $`; switch to `\[ ... \]` or `equation`. | **Catalog Hint** | [`41_cant_use_eqno_in_math`](41_cant_use_eqno_in_math/) |
+| **42** | `Package babel Error: Unknown language 'foo'` | Package | Specified babel language option not supported or hyphenation patterns not installed. | **Catalog Hint** | [`42_package_babel_unknown_language`](42_package_babel_unknown_language/) |
+| **43** | `Bad register code` | TeX Primitive | Allocation index out of range for count, dimen, or box register (valid 0–255 in TeX, 0–65535 in e-TeX). | **Catalog Hint** | [`43_bad_register_code`](43_bad_register_code/) |
+| **44** | `LaTeX Error: \include cannot be nested` | LaTeX Kernel | An `\include{...}` file attempted to call `\include{...}`; use `\input{...}` for nested files. | **Catalog Hint** | [`44_nested_include`](44_nested_include/) |
+| **45** | `LaTeX Error: No counter 'foo' defined` | LaTeX Kernel | Manipulating or printing counter `\foo` that was never created via `\newcounter{foo}`. | **Catalog Hint** | [`45_no_counter_defined`](45_no_counter_defined/) |
+| **46** | `LaTeX Error: Command \foo undefined` | LaTeX Kernel | `\renewcommand{\foo}` called for a macro name that does not exist; use `\newcommand`. | **Catalog Hint** | [`46_command_undefined`](46_command_undefined/) |
+| **47** | `File ended while scanning use of \foo` | TeX Primitive | Reached EOF before encountering closing brace or delimiter for macro argument. | **Catalog Hint** | [`47_file_ended_while_scanning`](47_file_ended_while_scanning/) |
+| **48** | `Package amsmath Error: \split wont work here` | Package | `split` environment placed outside enclosing multiline math environment (`equation`, `align`, `gather`). | **Catalog Hint** | [`48_package_amsmath_split_wont_work`](48_package_amsmath_split_wont_work/) |
+| **49** | `Package amsmath Error: \intertext only allowed in alignment env` | Package | `\intertext` or `\shortintertext` called outside an amsmath alignment environment (`align`, `gather`). | **Catalog Hint** | [`49_package_amsmath_invalid_intertext`](49_package_amsmath_invalid_intertext/) |
+| **50** | `LaTeX Error: Unknown float option 'foo'` | LaTeX Kernel | Invalid positioning specifier in float brackets; allowed are `h`, `t`, `b`, `p`, `!`, `H`. | **Catalog Hint** | [`50_unknown_float_option`](50_unknown_float_option/) |
+| **51** | `Package tikz Error: ';' expected` | Package | TikZ drawing path or command terminated without mandatory closing semicolon `;`. | **Catalog Hint** | [`51_package_tikz_missing_semicolon`](51_package_tikz_missing_semicolon/) |
+| **52** | `Package pgfkeys Error: I do not know the key 'foo'` | Package | Unknown configuration key passed to TikZ/PGF macro; check spelling or load required TikZ library. | **Catalog Hint** | [`52_package_pgfkeys_unknown_key`](52_package_pgfkeys_unknown_key/) |
+| **53** | `LaTeX Error: Not allowed in LR mode` | LaTeX Kernel | Vertical or display elements (lists, displays, paragraphs) placed inside an LR box (`\mbox`, `\fbox`). | **Catalog Hint** | [`53_not_allowed_in_lr_mode`](53_not_allowed_in_lr_mode/) |
+| **54** | `Package enumitem Error: Key 'foo' is not defined` | Package | Unknown styling key passed to `enumitem` list options or `\setlist`. | **Catalog Hint** | [`54_package_enumitem_key_undefined`](54_package_enumitem_key_undefined/) |
+| **55** | `Package kvsetkeys Error: Undefined key 'foo'` | Package | Unknown key passed to key-value options parser used by packages like `geometry` or `hyperref`. | **Catalog Hint** | [`55_package_kvsetkeys_undefined_key`](55_package_kvsetkeys_undefined_key/) |
 
 ---
 
@@ -72,6 +97,6 @@ The reproducer cases in this directory provide verification fixtures. Each subdi
 To keep continuous integration and quality gates fast, the error corpus is executed **on demand** and completely decoupled from `tools/gate`:
 
 ```bash
-# Run standalone verification across all 30 error corpus reproducers
+# Run standalone verification across all 55 error corpus reproducers
 rtk ./tools/test_error_corpus
 ```

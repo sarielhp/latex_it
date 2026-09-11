@@ -239,6 +239,189 @@ class TestErrorCatalog < Minitest::Test
     assert_includes item[:hint], 'itemize vs enumerate'
   end
 
+  def test_classify_missing_closing_brace
+    text = "./main.tex:3: Missing } inserted."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :missing_closing_brace, item[:id]
+  end
+
+  def test_classify_missing_endcsname
+    text = "./main.tex:3: Missing \\endcsname inserted."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :missing_endcsname, item[:id]
+  end
+
+  def test_classify_cant_use_hrule_here
+    text = "./main.tex:3: You can't use `\\hrule' here except with leaders."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :cant_use_hrule_here, item[:id]
+  end
+
+  def test_classify_cant_use_spacefactor
+    text = "./main.tex:3: You can't use `\\spacefactor' in vertical mode."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :cant_use_spacefactor, item[:id]
+  end
+
+  def test_classify_illegal_parameter_number
+    text = "./main.tex:3: Illegal parameter number in definition of \\foo."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :illegal_parameter_number, item[:id]
+  end
+
+  def test_classify_two_documentclass_commands
+    text = "./main.tex:3: LaTeX Error: Two \\documentclass or \\documentstyle commands."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :two_documentclass_commands, item[:id]
+  end
+
+  def test_classify_verb_illegal_in_argument
+    text = "./main.tex:3: LaTeX Error: \\verb illegal in argument."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :verb_illegal_in_argument, item[:id]
+  end
+
+  def test_classify_caption_outside_float
+    text = "./main.tex:3: LaTeX Error: \\caption outside float."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :caption_outside_float, item[:id]
+  end
+
+  def test_classify_use_of_doesnt_match_definition
+    text = "./main.tex:3: Use of \\foo doesn't match its definition."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :use_of_doesnt_match_definition, item[:id]
+  end
+
+  def test_classify_ambiguous_math_fractions
+    text = "./main.tex:3: Ambiguous; you need another { and }."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :ambiguous_math_fractions, item[:id]
+  end
+
+  def test_classify_cant_use_eqno_in_math
+    text = "./main.tex:3: You can't use `\\eqno' in math mode."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :cant_use_eqno_in_math, item[:id]
+  end
+
+  def test_classify_package_babel_unknown_language
+    text = "./main.tex:3: Package babel Error: Unknown option 'unknownlangxyz'."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_babel_unknown_language, item[:id]
+    assert_equal 'unknownlangxyz', item[:token]
+  end
+
+  def test_classify_bad_register_code
+    text = "./main.tex:3: Bad register code (-1)."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :bad_register_code, item[:id]
+  end
+
+  def test_classify_nested_include
+    text = "./main.tex:3: LaTeX Error: \\include cannot be nested."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :nested_include, item[:id]
+  end
+
+  def test_classify_no_counter_defined
+    text = "./main.tex:3: LaTeX Error: No counter 'mycounter' defined."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :no_counter_defined, item[:id]
+    assert_equal 'mycounter', item[:token]
+  end
+
+  def test_classify_command_undefined
+    text = "./main.tex:3: LaTeX Error: Command \\foo undefined."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :command_undefined, item[:id]
+  end
+
+  def test_classify_file_ended_while_scanning
+    text = "! File ended while scanning use of \\foo."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :file_ended_while_scanning, item[:id]
+    assert_equal '\\foo', item[:token]
+  end
+
+  def test_classify_package_amsmath_split_wont_work
+    text = "./main.tex:3: Package amsmath Error: \\begin{split} won't work here."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_amsmath_split_wont_work, item[:id]
+  end
+
+  def test_classify_package_amsmath_invalid_intertext
+    text = "./main.tex:3: Package amsmath Error: Invalid use of \\intertext."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_amsmath_invalid_intertext, item[:id]
+  end
+
+  def test_classify_unknown_float_option
+    text = "./main.tex:3: LaTeX Error: Unknown float option 'H'."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :unknown_float_option, item[:id]
+    assert_equal 'H', item[:token]
+    assert_includes item[:hint], 'usepackage{float}'
+  end
+
+  def test_classify_package_tikz_missing_semicolon
+    text = "./main.tex:3: Package tikz Error: Giving up on this path. Did you forget a semicolon?"
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_tikz_missing_semicolon, item[:id]
+  end
+
+  def test_classify_package_pgfkeys_unknown_key
+    text = "./main.tex:3: Package pgfkeys Error: I do not know the key '/tikz/badkey', to which you passed '1'."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_pgfkeys_unknown_key, item[:id]
+    assert_equal '/tikz/badkey', item[:token]
+  end
+
+  def test_classify_not_allowed_in_lr_mode
+    text = "./main.tex:3: LaTeX Error: Not allowed in LR mode."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :not_allowed_in_lr_mode, item[:id]
+  end
+
+  def test_classify_package_enumitem_key_undefined
+    text = "./main.tex:3: Package enumitem Error: badkey undefined."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_enumitem_key_undefined, item[:id]
+    assert_equal 'badkey', item[:token]
+  end
+
+  def test_classify_package_kvsetkeys_undefined_key
+    text = "./main.tex:3: Package kvsetkeys Error: Undefined key `mybadkey'."
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :package_kvsetkeys_undefined_key, item[:id]
+    assert_equal 'mybadkey', item[:token]
+  end
+
   def test_classify_unknown_error_returns_nil
     text = "./main.tex:10: Some totally unheard of exotic error message."
     item = LaTeXErrorCatalog.classify(text, text.lines)

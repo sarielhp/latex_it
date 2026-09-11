@@ -122,7 +122,8 @@ module LaTeXUtils
   def self.safe_read(path)
     return '' unless path && File.file?(path)
 
-    File.read(path, mode: 'r:binary', invalid: :replace, undef: :replace)
+    raw = File.read(path, mode: 'r:binary', invalid: :replace, undef: :replace)
+    raw.force_encoding('UTF-8').scrub
   rescue StandardError
     ''
   end

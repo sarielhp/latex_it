@@ -289,6 +289,231 @@ module LaTeXErrorCatalog
       why: 'An environment was opened with \\begin{foo} but closed with \\end{bar}.',
       fix: 'Ensure the environment name in \\end matches the opening \\begin.',
       doc_slug: '30_mismatched_environment'
+    },
+    {
+      id: :missing_closing_brace,
+      pattern: /Missing \} inserted/i,
+      title: 'Missing } inserted',
+      hint: "Unclosed math group or argument; insert matching '}'",
+      why: 'A group or macro argument was opened with { but never closed before math mode or the line ended.',
+      fix: 'Add the missing closing brace } before ending math or group.',
+      doc_slug: '31_missing_closing_brace'
+    },
+    {
+      id: :missing_endcsname,
+      pattern: /Missing \\endcsname inserted/i,
+      title: 'Missing \\endcsname inserted',
+      hint: "Unclosed \\csname; terminate macro name with '\\endcsname'",
+      why: 'A \\csname command was evaluated without finding a matching \\endcsname.',
+      fix: 'Add \\endcsname to close the dynamic macro name.',
+      doc_slug: '32_missing_endcsname'
+    },
+    {
+      id: :cant_use_hrule_here,
+      pattern: /You can't use `?\\hrule'? here/i,
+      title: "You can't use \\hrule here except with leaders",
+      hint: "\\hrule inside \\hbox; use '\\vrule' in horizontal boxes or move \\hrule outside",
+      why: 'A horizontal rule \\hrule was placed inside a horizontal box (\\hbox).',
+      fix: 'Use \\vrule for vertical rules in \\hbox, or place \\hrule in vertical mode.',
+      doc_slug: '33_cant_use_hrule_here'
+    },
+    {
+      id: :cant_use_spacefactor,
+      pattern: /You can't use `?\\spacefactor'? in vertical mode/i,
+      title: "You can't use \\spacefactor in vertical mode",
+      hint: '\\spacefactor in vertical mode; set within paragraph or text mode',
+      why: '\\spacefactor controls spacing between words and is only meaningful in horizontal mode.',
+      fix: 'Ensure \\spacefactor is used within a paragraph.',
+      doc_slug: '34_cant_use_spacefactor'
+    },
+    {
+      id: :illegal_parameter_number,
+      pattern: /Illegal parameter number in definition of (\S+)/i,
+      title: 'Illegal parameter number in definition',
+      hint: ->(tok) { tok ? "Macro '#{tok}' uses parameters (#1) without declaring argument count [n]" : 'Macro uses parameters without declaring argument count' },
+      why: 'A macro definition referenced #1 or #2 but omitted the parameter count declaration.',
+      fix: 'Declare the number of arguments: \\newcommand{\\cmd}[1]{...}.',
+      doc_slug: '35_illegal_parameter_number'
+    },
+    {
+      id: :two_documentclass_commands,
+      pattern: /Two \\documentclass(?: or \\documentstyle)? commands/i,
+      title: 'LaTeX Error: Two \\documentclass commands',
+      hint: 'Multiple \\documentclass declarations; keep only one in preamble',
+      why: 'A LaTeX document can only have exactly one \\documentclass command.',
+      fix: 'Remove the redundant \\documentclass declaration.',
+      doc_slug: '36_two_documentclass_commands'
+    },
+    {
+      id: :verb_illegal_in_argument,
+      pattern: /\\verb illegal in argument/i,
+      title: 'LaTeX Error: \\verb illegal in argument',
+      hint: "\\verb inside command argument; use '\\texttt' or 'cprotect' package",
+      why: '\\verb changes character category codes and cannot be passed inside command arguments.',
+      fix: 'Use \\texttt{...} instead of \\verb, or load the cprotect package.',
+      doc_slug: '37_verb_illegal_in_argument'
+    },
+    {
+      id: :caption_outside_float,
+      pattern: /\\caption outside float/i,
+      title: 'LaTeX Error: \\caption outside float',
+      hint: "\\caption outside figure/table; place in float or use '\\captionof' from 'caption' package",
+      why: '\\caption was placed in standard text outside a figure or table environment.',
+      fix: 'Move inside \\begin{figure} / \\begin{table}, or use \\captionof{figure}{...}.',
+      doc_slug: '38_caption_outside_float'
+    },
+    {
+      id: :use_of_doesnt_match_definition,
+      pattern: /Use of (\S+) doesn't match its definition/i,
+      title: "Use of command doesn't match its definition",
+      hint: ->(tok) { tok ? "Argument mismatch for delimited macro '#{tok}'; check delimiter syntax" : "Argument mismatch for delimited macro; check delimiter syntax" },
+      why: 'A delimited macro was defined with custom argument syntax but invoked with different delimiters.',
+      fix: 'Match the macro delimiter structure (e.g. \\cmd(arg) instead of \\cmd{arg}).',
+      doc_slug: '39_use_of_doesnt_match_definition'
+    },
+    {
+      id: :ambiguous_math_fractions,
+      pattern: /Ambiguous; you need another \{ and \}/i,
+      title: 'Ambiguous; you need another { and }',
+      hint: "Multiple '\\over' in same group; add braces or use '\\frac{a}{b}'",
+      why: 'Multiple \\over commands in the same math subformula created ambiguity.',
+      fix: 'Enclose each fraction in braces: ${{a \\over b} \\over c}$ or use \\frac.',
+      doc_slug: '40_ambiguous_math_fractions'
+    },
+    {
+      id: :cant_use_eqno_in_math,
+      pattern: /You can't use `?\\eqno'? in math mode/i,
+      title: "You can't use \\eqno in math mode",
+      hint: "\\eqno used in inline math; use display math '\\[ ... \\]' or '\\tag'",
+      why: '\\eqno attaches an equation number and is only valid in display math ($$).',
+      fix: 'Switch from inline math ($...$) to display math (\\[ ... \\] or equation).',
+      doc_slug: '41_cant_use_eqno_in_math'
+    },
+    {
+      id: :package_babel_unknown_language,
+      pattern: /Package babel Error: Unknown (?:language|option) [`']([^`'.]+)['`]/i,
+      title: 'Package babel Error: Unknown language',
+      hint: ->(tok) { tok ? "Unknown babel language '#{tok}'; check spelling or texlive-lang" : 'Unknown babel language; check spelling or texlive-lang' },
+      why: 'The language option passed to babel is not defined or installed.',
+      fix: 'Verify language spelling (e.g. english, french, german) and install language packs.',
+      doc_slug: '42_package_babel_unknown_language'
+    },
+    {
+      id: :bad_register_code,
+      pattern: /Bad register code/i,
+      title: 'Bad register code',
+      hint: 'Register number out of bounds; must be non-negative (use \\newcount)',
+      why: 'A TeX register number was negative or exceeded the maximum register index.',
+      fix: 'Use non-negative register numbers or allocate with \\newcount / \\newdimen.',
+      doc_slug: '43_bad_register_code'
+    },
+    {
+      id: :nested_include,
+      pattern: /\\include cannot be nested/i,
+      title: 'LaTeX Error: \\include cannot be nested',
+      hint: "\\include called inside included file; replace secondary with '\\input'",
+      why: '\\include manages page clears and aux files and cannot be called recursively.',
+      fix: 'Use \\input{...} instead of \\include{...} inside secondary files.',
+      doc_slug: '44_nested_include'
+    },
+    {
+      id: :no_counter_defined,
+      pattern: /No counter [`']([^`']+)['`] defined/i,
+      title: 'LaTeX Error: No counter defined',
+      hint: ->(tok) { tok ? "Counter '#{tok}' does not exist; declare with \\newcounter{#{tok}}" : 'Counter does not exist; declare with \\newcounter' },
+      why: 'A counter operation was performed on an undeclared counter name.',
+      fix: 'Declare the counter with \\newcounter{...} or check spelling.',
+      doc_slug: '45_no_counter_defined'
+    },
+    {
+      id: :command_undefined,
+      pattern: /Command `?(\\?\S+?)'? undefined/i,
+      title: 'LaTeX Error: Command undefined',
+      hint: ->(tok) { tok ? "Command '#{tok}' is not defined; use \\newcommand instead of \\renewcommand" : 'Command is not defined; use \\newcommand instead of \\renewcommand' },
+      why: '\\renewcommand was used on a macro that has not yet been declared.',
+      fix: 'Use \\newcommand to define the command or check for typos in the name.',
+      doc_slug: '46_command_undefined'
+    },
+    {
+      id: :file_ended_while_scanning,
+      pattern: /File ended while scanning (?:use|text) of (\\\S+?|\S+?)\.?$/i,
+      title: 'File ended while scanning macro',
+      hint: ->(tok) { tok ? "Unclosed brace in argument of '#{tok}'; add missing '}' before EOF" : "Unclosed brace before end of file; add missing '}'" },
+      why: 'End of file was reached while TeX was still looking for a closing brace.',
+      fix: 'Add the missing closing curly brace } to terminate the macro argument.',
+      doc_slug: '47_file_ended_while_scanning'
+    },
+    {
+      id: :package_amsmath_split_wont_work,
+      pattern: /\\begin\{split\} won't work here/i,
+      title: "Package amsmath Error: \\begin{split} won't work here",
+      hint: "\\begin{split} outside display math; wrap inside '\\begin{equation}'",
+      why: 'split environment is only allowed inside an existing math display (equation, gather).',
+      fix: 'Wrap \\begin{split} ... \\end{split} inside \\begin{equation} ... \\end{equation}.',
+      doc_slug: '48_package_amsmath_split_wont_work'
+    },
+    {
+      id: :package_amsmath_invalid_intertext,
+      pattern: /Invalid use of \\intertext/i,
+      title: 'Package amsmath Error: Invalid use of \\intertext',
+      hint: "\\intertext inside 'equation'; switch to '\\begin{align}' or move outside",
+      why: '\\intertext can only be used inside multi-line alignment environments like align.',
+      fix: 'Use align instead of equation, or place text outside the math environment.',
+      doc_slug: '49_package_amsmath_invalid_intertext'
+    },
+    {
+      id: :unknown_float_option,
+      pattern: /Unknown float option [`']([^`']+)['`]/i,
+      title: 'LaTeX Error: Unknown float option',
+      hint: ->(tok) { tok == 'H' ? "Float option '[H]' requires '\\usepackage{float}'" : "Invalid float option '#{tok}'; use [!htbp]" },
+      why: 'An unrecognized float placement specifier was provided.',
+      fix: 'Load \\usepackage{float} for [H] placement, or use standard specifiers [!htbp].',
+      doc_slug: '50_unknown_float_option'
+    },
+    {
+      id: :package_tikz_missing_semicolon,
+      pattern: /Giving up on this path\. Did you forget a semicolon\?/i,
+      title: 'Package tikz Error: Missing semicolon',
+      hint: "Missing semicolon ';' at end of TikZ path command; append ';'",
+      why: 'A TikZ \\draw, \\node, or \\path command was not terminated with a semicolon.',
+      fix: 'Append a semicolon ; to the end of the path statement.',
+      doc_slug: '51_package_tikz_missing_semicolon'
+    },
+    {
+      id: :package_pgfkeys_unknown_key,
+      pattern: /Package pgfkeys Error: I do not know the key [`']([^`']+)['`]/i,
+      title: 'Package pgfkeys Error: Unknown key',
+      hint: ->(tok) { tok ? "Unknown pgfkeys option '#{tok}'; check spelling or load library" : 'Unknown pgfkeys option; check spelling or load library' },
+      why: 'A key passed to a TikZ/PGF command is not recognized.',
+      fix: 'Check the key spelling or load the required library (\\usetikzlibrary{...}).',
+      doc_slug: '52_package_pgfkeys_unknown_key'
+    },
+    {
+      id: :not_allowed_in_lr_mode,
+      pattern: /Not allowed in LR mode/i,
+      title: 'LaTeX Error: Not allowed in LR mode',
+      hint: 'Block environment in LR mode; provide required arguments (e.g. \\begin{thebibliography}{99})',
+      why: 'A paragraph-level or list environment was invoked inside horizontal LR mode.',
+      fix: 'Check for missing mandatory arguments to environments or move outside LR box.',
+      doc_slug: '53_not_allowed_in_lr_mode'
+    },
+    {
+      id: :package_enumitem_key_undefined,
+      pattern: /Package enumitem Error: (\S+) undefined/i,
+      title: 'Package enumitem Error: Key undefined',
+      hint: ->(tok) { tok ? "Undefined enumitem key '#{tok}'; check documentation (e.g. label, leftmargin)" : 'Undefined enumitem key; check documentation' },
+      why: 'An invalid option key was passed to an enumitem list environment.',
+      fix: 'Use valid enumitem options like label, leftmargin, itemsep, or topsep.',
+      doc_slug: '54_package_enumitem_key_undefined'
+    },
+    {
+      id: :package_kvsetkeys_undefined_key,
+      pattern: /Package kvsetkeys Error: Undefined key `?([^']+)'?/i,
+      title: 'Package kvsetkeys Error: Undefined key',
+      hint: ->(tok) { tok ? "Undefined setup key '#{tok}'; check macro setup options" : 'Undefined setup key; check macro setup options' },
+      why: 'An unknown key was passed to a package setup command (e.g. \\hypersetup).',
+      fix: 'Verify option name spelling in the setup declaration.',
+      doc_slug: '55_package_kvsetkeys_undefined_key'
     }
   ].freeze
 

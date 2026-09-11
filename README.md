@@ -1,10 +1,10 @@
 # latex_it
 
-`latex_it` (often invoked via the shortcut `l`) is a command-line build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
+`latex_it` (often invoked as `l`) is an automated build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
 
-It directly addresses the two most frustrating problems with LaTeX workflows:
-1. **Excessive verbosity**: It suppresses low-level compiler chatter and isolates all auxiliary build artifacts in a `junk/` directory, keeping your working tree clean.
-2. **Cryptic errors and warnings**: It differentiates between critical issues (syntax errors, broken references, severe layout flaws) and harmless background noise, providing clear diagnostics and plain-English suggestions for fixes.
+Like `latexmk`, it handles multi-pass compilation and bibliography dependencies automatically — but it is designed specifically to eliminate the two biggest headaches of LaTeX workflows:
+1. **Cluttered directories**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are isolated in a `junk/` directory, keeping your working tree clean.
+2. **Cryptic output**: Low-level engine noise is filtered out, separating real errors and layout flaws from harmless background warnings and offering plain-English suggestions for fixes.
 
 ---
 
@@ -31,15 +31,15 @@ l -e        # Show plain-English explanations for errors and warnings
 
 ---
 
-## Why use `latex_it`?
+## Key Features
 
-- **Clean directories**: All intermediate files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, etc.) are kept in an isolated `junk/` directory. Only your final `.pdf`, `.bbl`, and `.synctex.gz` stay in the working directory.
+- **Clean directories**: All intermediate files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, etc.) are kept in `junk/`. Only your final `.pdf`, `.bbl`, and `.synctex.gz` stay in the working directory.
 - **Automatic detection**:
-  - Finds your main `.tex` file if you don't specify one (checks `.mainfile`, folder name, and `\begin{document}`).
+  - Finds your main `.tex` file if omitted (checks `.mainfile`, folder name, and `\begin{document}`).
   - Selects the right engine (`xelatex`, `lualatex`, or `pdflatex`) from magic comments or loaded packages.
-  - Detects whether your project uses Biber or BibTeX and runs them when citations change.
-- **Fast builds**: Checks file modification times and checksums. If nothing changed, it exits immediately without rebuilding.
-- **Clear diagnostics**: Categorizes compiler output into Errors, Alerts, and Warnings, filtering out low-level TeX engine noise. Adding `-e` shows plain-English suggestions on how to fix issues.
+  - Automatically runs Biber or BibTeX when citations or `.bib` files change.
+- **Fast incremental builds**: Tracks file checksums and exits immediately if nothing changed, avoiding redundant compiler passes.
+- **Actionable diagnostics**: Categorizes compiler output into Errors, Alerts, and Warnings. Adding `-e` shows plain-English suggestions on how to fix issues.
 - **arXiv packaging**: Run `l --arxiv` to produce a flattened, comment-free zip archive ready for upload to arXiv (see [docs/arxiv.md](docs/arxiv.md)).
 
 ---

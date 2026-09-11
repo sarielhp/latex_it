@@ -3,8 +3,8 @@
 `latex_it` parses raw compiler logs from `xelatex`, `lualatex`, and `pdflatex` to present clean, categorized diagnostic messages. Instead of wading through hundreds of lines of TeX console output, errors and warnings are categorized into clear tiers with actionable remediation hints.
 
 <p align="center">
-  <a href="gallery.md"><img src="images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
-  <em>See the <a href="gallery.md">Diagnostic Showcase Gallery</a> for more side-by-side comparisons on real errors.</em>
+  <a href="gallery.html"><img src="images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
+  <em>See the <a href="gallery.html">Diagnostic Showcase Gallery</a> for more side-by-side comparisons on real errors.</em>
 </p>
 
 ---

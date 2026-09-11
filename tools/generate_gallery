@@ -354,6 +354,14 @@ module GalleryGenerator
     end
 
     <<~MARKDOWN
+      ---
+      layout: default
+      title: Diagnostic Showcase Gallery
+      permalink: /docs/gallery.html
+      redirect_from:
+        - /docs/gallery.md
+      ---
+
       # Diagnostic Showcase Gallery
 
       This gallery presents **unedited, real-world terminal runs** comparing standard LaTeX compilation tools (`latexmk` on `xelatex`) directly against `latex_it`.

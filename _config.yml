@@ -2,6 +2,10 @@ title: latex_it
 description: Fast, isolated, intelligent LaTeX compilation manager
 theme: jekyll-theme-primer
 
+plugins:
+  - jekyll-redirect-from
+  - jekyll-relative-links
+
 exclude:
   - vendor/
   - junk/

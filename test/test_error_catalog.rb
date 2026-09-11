@@ -116,6 +116,63 @@ class TestErrorCatalog < Minitest::Test
     assert_includes item[:hint], '$'
   end
 
+  def test_classify_missing_dollar_subscript_in_text
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\nVariable x_1 is here.\n\\end{document}\n")
+      text = "#{file}:3: Missing $ inserted.\nl.3 Variable x_\n               1 is here."
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 3)
+      assert item
+      assert_equal :missing_dollar, item[:id]
+      assert_includes item[:hint], "Subscript '_' outside math mode"
+    end
+  end
+
+  def test_classify_missing_dollar_unclosed_single
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\nHere is an unclosed $x + y = z formula.\n\nNext paragraph.\n\\end{document}\n")
+      text = "#{file}:4: Missing $ inserted.\nl.4"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 4)
+      assert item
+      assert_equal :missing_dollar, item[:id]
+      assert_includes item[:hint], "Unclosed '$' opened on line 3"
+    end
+  end
+
+  def test_classify_missing_dollar_unclosed_propagation
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      content = [
+        "\\documentclass{article}",
+        "\\begin{document}",
+        "Let $x be an arbitrary variable.",
+        "We can compute $y = f(x)$ easily.",
+        "Finally, we see that $z > 0$ holds.",
+        "",
+        "\\end{document}"
+      ].join("\n")
+      File.write(file, content)
+      text = "#{file}:6: Missing $ inserted.\nl.6"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 6)
+      assert item
+      assert_equal :missing_dollar, item[:id]
+      assert_includes item[:hint], "Unclosed '$' opened on line 3"
+    end
+  end
+
+  def test_classify_missing_dollar_currency
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      File.write(file, "\\documentclass{article}\n\\begin{document}\nThe ticket costs $50 each.\n\nNext paragraph.\n\\end{document}\n")
+      text = "#{file}:4: Missing $ inserted.\nl.4"
+      item = LaTeXErrorCatalog.classify(text, text.lines, file: file, line: 4)
+      assert item
+      assert_equal :missing_dollar, item[:id]
+      assert_includes item[:hint], "Literal '$' in '$50'; escape as '\\$'"
+    end
+  end
+
   def test_classify_extra_closing_brace
     text = "./main.tex:12: Too many }'s."
     item = LaTeXErrorCatalog.classify(text, text.lines)

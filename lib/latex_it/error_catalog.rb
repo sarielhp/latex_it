@@ -203,7 +203,7 @@ module LaTeXErrorCatalog
     target_line = line
     block_text = err_block.join("\n")
 
-    if (target_file.nil? || target_file.empty?) && block_text =~ /(?:\A|\n)(\S+?):(\d+):\s*Misplaced alignment tab/
+    if (target_file.nil? || target_file.empty?) && block_text =~ /(?:\A|\n)(\S+?):(\d+):/
       target_file = Regexp.last_match(1)
       target_line ||= Regexp.last_match(2).to_i
     end
@@ -218,6 +218,135 @@ module LaTeXErrorCatalog
   def self.extract_misplaced_tab_env(err_block, file, line)
     resolved_file, resolved_line = resolve_file_and_line(err_block, file, line)
     detect_enclosing_environment(resolved_file, resolved_line)
+  end
+
+  def self.find_paragraph_bounds(lines, err_idx)
+    idx = [err_idx, lines.size - 1].min
+    idx -= 1 while idx > 0 && (lines[idx].strip.empty? || lines[idx].strip =~ /\A(?:\\par|\s*\\end\{)/)
+
+    start_idx = idx
+    while start_idx > 0 && (idx - start_idx) < 25
+      prev = lines[start_idx - 1].strip
+      break if prev.empty? || prev =~ /\A\\par\b/ || prev =~ /\A\\(?:section|chapter|subsection|subsubsection)\b/
+      break if prev =~ /\A\\(?:begin|end)\{/
+
+      start_idx -= 1
+    end
+
+    [start_idx, idx]
+  end
+
+  def self.extract_dollars_in_range(lines, start_idx, end_idx)
+    dollars = []
+    (start_idx..end_idx).each do |l_idx|
+      line = lines[l_idx].sub(/(?<!\\)%.*\z/, '').gsub(/\$\$/, '  ')
+      line.enum_for(:scan, /(?<!\\)\$/).each do
+        col = Regexp.last_match.begin(0) + 1
+        rest = line[col..] || ''
+        curr = rest.match(/\A(\d+(?:[.,]\d+)?)/)
+        dollars << { line_idx: l_idx, file_line: l_idx + 1, col: col, currency: curr ? curr[1] : nil }
+      end
+    end
+    dollars
+  end
+
+  def self.score_math_chunk(chunk, spans_lines)
+    clean = chunk.gsub(/\\text\{[^}]*\}/, '')
+    penalty = 0
+    penalty += 100 if clean =~ /\.\s+[A-Z]/
+    words = clean.split(/\s+/)
+    penalty += (words.size * 5) if words.size > 3
+    penalty += 15 if spans_lines
+    penalty
+  end
+
+  def self.calculate_pairing_penalty(lines, remaining)
+    total = 0
+    (0...remaining.size).step(2) do |p_idx|
+      d_open = remaining[p_idx]
+      d_close = remaining[p_idx + 1]
+      spans = d_open[:line_idx] != d_close[:line_idx]
+
+      chunk = if !spans
+        lines[d_open[:line_idx]][d_open[:col]...(d_close[:col] - 1)] || ''
+      else
+        lines[d_open[:line_idx]..d_close[:line_idx]].join(' ')
+      end
+      total += score_math_chunk(chunk, spans)
+    end
+    total
+  end
+
+  def self.find_best_unclosed_dollar(lines, dollars)
+    return dollars.first if dollars.size == 1
+
+    best_cand = nil
+    best_score = Float::INFINITY
+
+    dollars.each_with_index do |cand, c_idx|
+      remaining = dollars.dup
+      remaining.delete_at(c_idx)
+      penalty = calculate_pairing_penalty(lines, remaining)
+      penalty -= 20 if cand[:currency]
+
+      if penalty < best_score
+        best_score = penalty
+        best_cand = cand
+      end
+    end
+
+    best_cand
+  end
+
+  def self.diagnose_text_math_token(line)
+    clean = line.to_s.sub(/(?<!\\)%.*\z/, '')
+    if clean =~ /(?<!\\)_/
+      "Subscript '_' outside math mode; wrap in $...$ or escape as '\\_'"
+    elsif clean =~ /(?<!\\)\^/
+      "Superscript '^' outside math mode; wrap in $...$ or escape as '\\^'"
+    else
+      match = clean.match(/\\([a-zA-Z]+)/)
+      if match && COMMON_COMMANDS.include?(match[1])
+        "Math command '\\#{match[1]}' outside math mode; wrap in $...$"
+      else
+        "Math symbol (like _ or ^) outside math mode; wrap in $...$"
+      end
+    end
+  end
+
+  def self.detect_missing_dollar(file_path, error_line)
+    source_file = find_source_file(file_path)
+    return nil unless source_file && error_line && error_line.to_i > 0
+
+    lines = File.readlines(source_file)
+    err_idx = [error_line.to_i - 1, lines.size - 1].min
+    return nil if err_idx < 0
+
+    start_idx, end_idx = find_paragraph_bounds(lines, err_idx)
+    dollars = extract_dollars_in_range(lines, start_idx, end_idx)
+
+    if dollars.size.odd?
+      cand = find_best_unclosed_dollar(lines, dollars)
+      if cand[:currency]
+        "Literal '$' in '$#{cand[:currency]}'; escape as '\\$' for currency"
+      else
+        "Unclosed '$' opened on line #{cand[:file_line]} (col #{cand[:col]}); insert closing '$'"
+      end
+    else
+      candidate_line = (lines[end_idx] || lines[err_idx]).to_s
+      diagnose_text_math_token(candidate_line)
+    end
+  rescue StandardError
+    nil
+  end
+
+  def self.suggest_missing_dollar(tok)
+    tok || "Math symbol (like _ or ^) outside math mode; wrap in $...$"
+  end
+
+  def self.extract_missing_dollar_info(err_block, file, line)
+    resolved_file, resolved_line = resolve_file_and_line(err_block, file, line)
+    detect_missing_dollar(resolved_file, resolved_line)
   end
 
   CATALOG = [
@@ -256,9 +385,12 @@ module LaTeXErrorCatalog
       id: :missing_dollar,
       pattern: /Missing \$ inserted/i,
       title: 'Missing $ inserted',
-      hint: 'Math symbol (like _ or ^) outside math mode; wrap in $...$',
-      why: "A math-mode token (such as an underscore '_', superscript '^', or greek letter) was used in text mode.",
-      fix: "Enclose in math delimiters ($...$) or escape literal characters (e.g., '\\_').",
+      token_extractor: lambda do |_match, err_block, file = nil, line = nil|
+        extract_missing_dollar_info(err_block, file, line)
+      end,
+      hint: ->(tok) { suggest_missing_dollar(tok) },
+      why: "A math-mode token was used in text mode or an unclosed '$' crossed a paragraph break.",
+      fix: "Close the open '$' delimiter, enclose math in $...$, or escape literal characters (e.g., '\\_').",
       doc_slug: '04_missing_dollar'
     },
     {

@@ -54,6 +54,17 @@ module RubyDevSetup
     status.success?
   end
 
+  def self.ensure_agents_symlink
+    repo_root = File.expand_path('..', __dir__)
+    agents_link = File.join(repo_root, 'AGENTS.md')
+    target = File.join('docs', 'AGENTS.md')
+    return unless File.file?(File.join(repo_root, target))
+    return if File.symlink?(agents_link) && File.readlink(agents_link) == target
+
+    FileUtils.rm_f(agents_link) if File.exist?(agents_link) || File.symlink?(agents_link)
+    FileUtils.ln_s(target, agents_link)
+  end
+
   def self.check_path_environment
     puts "#{BOLD}==> Checking Environment & PATH Configuration#{RESET}"
     paths = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
@@ -255,6 +266,7 @@ OptionParser.new do |opts|
 end.parse!
 
 RubyDevSetup.check_path_environment
+RubyDevSetup.ensure_agents_symlink
 RubyDevSetup::GemChecker.verify_and_install(check_only: options[:check_only], verbose: options[:verbose])
 RubyDevSetup::CliChecker.verify_and_install(check_only: options[:check_only], verbose: options[:verbose])
 puts "#{RubyDevSetup::BOLD}==> Setup verification complete!#{RubyDevSetup::RESET}"

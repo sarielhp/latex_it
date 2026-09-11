@@ -13,6 +13,34 @@ Like `latexmk`, it handles multi-pass compilation and bibliography dependencies 
 
 ---
 
+## Installation
+
+### Standalone Executable (Recommended)
+
+Install the latest standalone binary directly into `~/bin/l` (no clone or build required):
+
+```bash
+curl -sSL https://github.com/sarielhp/latex_it/releases/latest/download/latex_it -o ~/bin/l && chmod +x ~/bin/l
+```
+
+### From Source
+
+```bash
+git clone https://github.com/sarielhp/latex_it.git
+cd latex_it
+./tools/install
+```
+
+*(Installs to `~/bin/latex_it` with `~/bin/l` symlink. Ensure `~/bin` is in your `PATH`.)*
+
+### Requirements
+
+- **Ruby**: 2.7 or newer.
+- **TeX Distribution**: TeX Live, MacTeX, or compatible (`xelatex`, `lualatex`, or `pdflatex`).
+- **Optional**: `poppler-utils` (provides `pdftotext` for `-d` / `--diff` text diffing).
+
+---
+
 ## Quick Start
 
 Run `l` inside any LaTeX project directory:
@@ -87,32 +115,6 @@ The installer creates several convenient shortcuts based on the executable name:
 | `lp`, `pdflatex` | Build using pdfLaTeX (`--engine=pdflatex`). |
 | `clean_latex`, `latex_clean` | Clean temporary files in current directory. |
 | `latex_file_in_dir` | Print the detected main file in current directory. |
-
----
-
-## Installation
-
-### Standalone Download (No Clone Needed)
-Download the latest standalone executable directly into `~/bin/` (aliased as `l`):
-
-```bash
-curl -sSL https://github.com/sarielhp/latex_it/releases/latest/download/latex_it -o ~/bin/l && chmod +x ~/bin/l
-```
-
-### From Source
-Clone the repository and run the local installer:
-
-```bash
-./tools/install
-```
-
-Ensure `~/bin` is in your `PATH`.
-
-### Requirements
-- **Ruby**: 2.7 or newer.
-- **TeX System**: TeX Live, MacTeX, or compatible distribution with `xelatex`, `lualatex`, or `pdflatex`.
-- **Optional**: `poppler-utils` (provides `pdftotext` for PDF diffing and `pdftoppm` for visual verification).
-
 ---
 
 ## Documentation

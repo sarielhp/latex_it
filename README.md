@@ -1,6 +1,10 @@
 # latex_it
 
-`latex_it` (often invoked via the shortcut `l`) is a command-line build tool for LaTeX documents. It manages compilation with `xelatex`, `lualatex`, or `pdflatex`, keeps your working directory free of temporary files, detects your main document automatically, and reports errors with clear, actionable hints.
+`latex_it` (often invoked via the shortcut `l`) is a command-line build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
+
+It directly addresses the two most frustrating problems with LaTeX workflows:
+1. **Excessive verbosity**: It suppresses low-level compiler chatter and isolates all auxiliary build artifacts in a `junk/` directory, keeping your working tree clean.
+2. **Cryptic errors and warnings**: It differentiates between critical issues (syntax errors, broken references, severe layout flaws) and harmless background noise, providing clear diagnostics and plain-English suggestions for fixes.
 
 ---
 

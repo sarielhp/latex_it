@@ -5,6 +5,7 @@ require 'minitest/autorun'
 require 'minitest/mock'
 require 'tmpdir'
 require 'open3'
+require 'stringio'
 
 load File.expand_path('../latex_it', __dir__)
 
@@ -156,5 +157,53 @@ class TestDeepDiagnostics < Minitest::Test
     expl_font = LaTeXDiagnostics::DIAGNOSTIC_EXPLANATIONS[:type3_font]
     assert_includes expl_font[:title], 'Type 3'
     assert_includes expl_font[:fix], 'scalable'
+  end
+
+  def test_report_errors_routes_to_stderr_stream
+    Dir.mktmpdir('latex_it_test_stderr_') do |dir|
+      log_file = File.join(dir, 'err_xelatex_1')
+      File.write(log_file, <<~LOG)
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        ! LaTeX Error: File `missing.sty` not found.
+        )
+      LOG
+
+      builder = LatexBuilder.new('main.tex', {})
+      out, err = capture_io do
+        assert_raises(SystemExit) do
+          builder.report_errors(log_file)
+        end
+      end
+
+      assert_empty out
+      assert_includes err, 'ERROR: LaTeX Compilation Failed!'
+      assert_includes err, 'LaTeX Error: File `missing.sty` not found.'
+      assert_includes err, 'Errors: 1'
+    end
+  end
+
+  def test_report_errors_accepts_custom_io
+    Dir.mktmpdir('latex_it_test_custom_io_') do |dir|
+      log_file = File.join(dir, 'err_xelatex_1')
+      File.write(log_file, <<~LOG)
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        ! LaTeX Error: File `missing.sty` not found.
+        )
+      LOG
+
+      custom_io = StringIO.new
+      builder = LatexBuilder.new('main.tex', {})
+      assert_raises(SystemExit) do
+        builder.report_errors(log_file, io: custom_io)
+      end
+
+      content = custom_io.string
+      assert_includes content, 'ERROR: LaTeX Compilation Failed!'
+      assert_includes content, 'LaTeX Error: File `missing.sty` not found.'
+      assert_includes content, "See #{log_file} for full error details."
+      assert_includes content, 'Errors: 1'
+    end
   end
 end

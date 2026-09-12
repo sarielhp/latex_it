@@ -61,7 +61,7 @@ module LatexCLI
   rescue OptionParser::ParseError => e
     warn "#{prog_name}: #{e.message}"
     warn parser.banner
-    warn "Try '#{prog_name} -h' for the full list of options."
+    warn "Try '#{prog_name} -h' for condensed help, or '#{prog_name} --help-all' for all options."
     exit 2
   end
 
@@ -166,6 +166,7 @@ module LatexCLI
       single_pass: false,
       show_examples: false,
       show_help: false,
+      show_help_all: false,
       show_main: false,
       clean_only: false,
       fast: is_lw || cfg['fast'] == true,
@@ -213,13 +214,14 @@ module LatexCLI
   end
 
   def self.normalize_argv!(argv)
+    argv.delete('--fast')
     argv.map! do |arg|
       case arg
       when '-Werror' then '--werror'
       when '-emacs' then '--emacs'
-      when '-pdflatex' then '--pdflatex'
-      when '-xelatex' then '--xe'
-      when '-lualatex' then '--lua'
+      when '--pdflatex', '-pdflatex' then '--engine=pdflatex'
+      when '--xe', '-xelatex' then '--engine=xelatex'
+      when '--lua', '-lualatex' then '--engine=lualatex'
       when '-help' then '--help'
       when '-version' then '--version'
       else arg
@@ -244,7 +246,6 @@ module LatexCLI
   def self.add_compilation_options_primary(opts, options)
     opts.on('-m', '--main', 'Print the detected main LaTeX file and exit') { options[:show_main] = true }
     opts.on('-C', '--clean-only', 'Clean auxiliary and junk files in directory and exit without building') { options[:clean_only] = true }
-    opts.on('--fast', 'Accepted for compatibility; incremental rebuilds are automatic') { options[:fast] = true }
     opts.on('-a', '--all', 'Show all diagnostics across all tiers (including Whatevers and Warnings)') do
       options[:all] = true
       options[:suppress_whatevers] = false
@@ -256,11 +257,6 @@ module LatexCLI
       options[:engine] = LaTeXUtils.normalize_engine(v)
       options[:engine_explicit] = true
     end
-    opts.on('--lua', 'Shortcut for --engine=lualatex') { options[:engine] = 'lualatex'; options[:engine_explicit] = true }
-    opts.on('--xe', 'Shortcut for --engine=xelatex (default)') { options[:engine] = 'xelatex'; options[:engine_explicit] = true }
-    opts.on('--pdf', 'Generate PDF output (default behavior)') { # No-op
-    }
-    opts.on('--pdflatex', 'Shortcut for --engine=pdflatex') { options[:engine] = 'pdflatex'; options[:engine_explicit] = true }
   end
 
   def self.add_compilation_options_secondary(opts, options)
@@ -312,7 +308,32 @@ module LatexCLI
       exit 0
     end
     opts.on('-E', '--examples', 'Show detailed usage examples and common workflows') { options[:show_examples] = true }
-    opts.on('-h', '--help', 'Show this help message') { options[:show_help] = true }
+    opts.on('-h', '--help', 'Show condensed help (see --help-all for full list)') { options[:show_help] = true }
+    opts.on('--help-all', 'Show all available options') { options[:show_help_all] = true }
+  end
+
+  def self.condensed_help(prog_name = 'l')
+    [
+      'Usage: l [options] [document.tex]',
+      '',
+      'Common Options:',
+      '    -u, --single-pass                Single pass only (no bib/extra passes)',
+      '    -1, --force                      Force initial LaTeX compilation run',
+      '    -c, --clean                      Clean build files before building',
+      '    -C, --clean-only                 Clean auxiliary files and exit',
+      '    -m, --main                       Print detected main LaTeX file and exit',
+      '    -d, --diff                       Only replace target PDF if text changed',
+      '    -a, --all                        Show all diagnostics across all tiers',
+      '    -e, --explain                    Explain diagnostics on first occurrence',
+      '    -z, --zip                        Create portable zip archive of paper',
+      '    -t, --verify                     Verify zip portability in sandbox',
+      '    -W, --werror                     Treat compilation warnings as errors',
+      '        --engine ENGINE              Compiler: xelatex, lualatex, pdflatex',
+      '        --arxiv                      Prepare sanitized arXiv zip package',
+      '    -E, --examples                   Show detailed usage examples',
+      '        --help-all                   Show all available options',
+      '    -h, --help                       Show condensed help (this message)'
+    ].join("\n")
   end
 
   def self.handle_help_and_examples(parser, options, prog_name, argv = [])
@@ -331,14 +352,19 @@ module LatexCLI
   end
 
   def self.print_help_or_examples(parser, options, prog_name)
-    if options[:show_help] && options[:show_examples]
+    if options[:show_help_all] && options[:show_examples]
       puts parser
+      puts "\n#{LaTeXUtils.detailed_examples}"
+    elsif options[:show_help_all]
+      puts parser
+      puts "\nFor detailed usage examples and common workflows, run: #{prog_name} -E"
+    elsif options[:show_help] && options[:show_examples]
+      puts condensed_help(prog_name)
       puts "\n#{LaTeXUtils.detailed_examples}"
     elsif options[:show_examples]
       puts LaTeXUtils.detailed_examples(parser.banner)
     elsif options[:show_help]
-      puts parser
-      puts "\nFor detailed usage examples and common workflows, run: #{prog_name} -E"
+      puts condensed_help(prog_name)
     else
       return
     end

@@ -423,17 +423,17 @@ module LaTeXDiagnostics
     [all_sorted, sorted_other.size + sorted_overfull.size, sorted_errors.size]
   end
 
-  def print_diagnostics_body(warnings, errors, fallback_lines: [], tier_label: nil)
+  def print_diagnostics_body(warnings, errors, fallback_lines: [], tier_label: nil, io: $stdout)
     all_sorted, num_warnings, num_errors = sort_diagnostic_items(warnings, errors)
     max_width = all_sorted.map { |item| item[:line_str].to_s.length }.max || 0
 
     header_counts = count_items_by_header(all_sorted, tier_label)
     current_header = nil
     all_sorted.each do |item|
-      current_header = render_diagnostic_entry(item, max_width, current_header, tier_label, header_counts)
+      current_header = render_diagnostic_entry(item, max_width, current_header, tier_label, header_counts, io: io)
     end
 
-    render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label)
+    render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label, io: io)
     [num_warnings, num_errors]
   end
 
@@ -447,27 +447,27 @@ module LaTeXDiagnostics
     counts
   end
 
-  def render_diagnostic_entry(item, max_width, current_header, tier_label = nil, header_counts = nil)
+  def render_diagnostic_entry(item, max_width, current_header, tier_label = nil, header_counts = nil, io: $stdout)
     item_file = format_display_path(item[:file])
     lbl = tier_label_for(item, tier_label)
     header_key = @options[:emacs] ? item_file : [item_file, lbl]
 
     if header_key != current_header
       if @options[:emacs]
-        puts ')' if current_header
-        puts "(#{item_file}"
+        io.puts ')' if current_header
+        io.puts "(#{item_file}"
       else
         count = header_counts ? header_counts[header_key] : 1
-        puts ''
-        puts format_file_separator(item_file, lbl, count)
+        io.puts ''
+        io.puts format_file_separator(item_file, lbl, count)
       end
       current_header = header_key
     end
 
     rendered = render_diagnostic_item(item, width: max_width).rstrip
-    puts rendered unless rendered.empty?
+    io.puts rendered unless rendered.empty?
 
-    explain_diagnostic_item(item) if @options[:explain]
+    explain_diagnostic_item(item, io: io) if @options[:explain]
     current_header
   end
 
@@ -515,38 +515,38 @@ module LaTeXDiagnostics
     end
   end
 
-  def explain_diagnostic_item(item)
+  def explain_diagnostic_item(item, io: $stdout)
     cat = diagnostic_category(item)
     return if !cat || cat == :generic || @explained_categories[cat]
 
     @explained_categories[cat] = true
     box = format_boxed_explanation(cat)
-    puts box if box
+    io.puts box if box
   end
 
-  def render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label = nil)
+  def render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label = nil, io: $stdout)
     if all_sorted.empty? && !fallback_lines.empty?
-      render_fallback_lines(fallback_lines, tier_label)
+      render_fallback_lines(fallback_lines, tier_label, io: io)
     elsif current_header && @options[:emacs]
-      puts ')'
+      io.puts ')'
     end
   end
 
-  def render_fallback_lines(fallback_lines, tier_label = nil)
+  def render_fallback_lines(fallback_lines, tier_label = nil, io: $stdout)
     disp = format_display_path(@filename)
     if @options[:emacs]
-      puts "(#{disp}"
+      io.puts "(#{disp}"
     else
       lbl = tier_label || 'errors'
-      puts ''
-      puts format_file_separator(disp, lbl, 1)
+      io.puts ''
+      io.puts format_file_separator(disp, lbl, 1)
     end
     fallback_lines.each do |l|
       next if l.strip.empty?
 
-      puts @options[:emacs] ? l.strip : highlight_line_numbers(l.strip, :red, bright: true)
+      io.puts @options[:emacs] ? l.strip : highlight_line_numbers(l.strip, :red, bright: true)
     end
-    puts ')' if @options[:emacs]
+    io.puts ')' if @options[:emacs]
   end
 
   def format_display_path(file)
@@ -804,37 +804,37 @@ module LaTeXDiagnostics
   end
 
   def print_summary_line(errors, alerts, warnings, whatevers,
-                         suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false)
+                         suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false, io: nil)
     err_str = format_tier_count('Errors', errors, :red, false)
     alert_str = format_tier_count('Alerts', alerts, :red, suppressed_alerts)
     warn_str = format_tier_count('Warnings', warnings, :yellow, suppressed_warnings)
     what_str = format_tier_count('Whatevers', whatevers, :cyan, suppressed_whatevers)
 
-    target_io = (@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout
+    target_io = io || ((@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout)
     target_io.puts ''
     target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}"
   end
 
-  def report_errors(loga)
+  def report_errors(loga, io: $stderr)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
 
-    puts Rainbow("\n===============================================================").red.bright
-    puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
-    puts Rainbow('===============================================================').red.bright
+    io.puts Rainbow("\n===============================================================").red.bright
+    io.puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
+    io.puts Rainbow('===============================================================').red.bright
 
     brace_errors = check_source_braces
     errors = brace_errors + extract_errors(content)
     fallback = errors.empty? ? content.lines.last(15) : []
-    _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback, tier_label: 'errors')
+    _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback, tier_label: 'errors', io: io)
 
-    puts Rainbow('===============================================================').red.bright
-    puts "See #{loga} for full error details."
-    report_error_summary(content, raw, brace_errors, num_errors)
+    io.puts Rainbow('===============================================================').red.bright
+    io.puts "See #{loga} for full error details."
+    report_error_summary(content, raw, brace_errors, num_errors, io: io)
     exit 1
   end
 
-  def report_error_summary(content, raw, brace_errors, num_errors)
+  def report_error_summary(content, raw, brace_errors, num_errors, io: $stdout)
     raw_warns = extract_warnings(content, false)
     alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
 
@@ -847,7 +847,8 @@ module LaTeXDiagnostics
       errors_count, alerts_count, warnings_count, whatevers_count,
       suppressed_alerts: alerts_count > 0,
       suppressed_warnings: warnings_count > 0,
-      suppressed_whatevers: whatevers_count > 0
+      suppressed_whatevers: whatevers_count > 0,
+      io: io
     )
   end
 

@@ -23,22 +23,61 @@ class TestLatexItCLI < Minitest::Test
   def test_help_flag
     stdout, status = Open3.capture2(BIN, '-h')
     assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
+    assert stdout.lines.count <= 20, "Expected -h to be strictly <= 20 lines, got #{stdout.lines.count}"
     assert_includes stdout, 'Usage: l [options]'
+    assert_includes stdout, 'Common Options:'
     assert_includes stdout, '--engine'
-    assert_includes stdout, '--fast'
-    assert_includes stdout, '--deps'
     assert_includes stdout, '-u, --single-pass'
     assert_includes stdout, '-1, --force'
     assert_includes stdout, '-m, --main'
-    assert_includes stdout, '--lua'
-    assert_includes stdout, '--xe'
     assert_includes stdout, '-d, --diff'
     assert_includes stdout, '-t, --verify'
-    assert_includes stdout, '--no-env'
     assert_includes stdout, '-W, --werror'
     assert_includes stdout, '-E, --examples'
+    assert_includes stdout, '--help-all'
+    assert_includes stdout, '-h, --help'
+
+    # Verify shortcuts and no-ops are not present in condensed help output
+    refute_includes stdout, '--lua'
+    refute_includes stdout, '--xe'
+    refute_includes stdout, '--pdflatex'
+    refute_includes stdout, '--fast'
+    refute_includes stdout, '--pdf'
 
     # Verify redundant aliases are not present in help output
+    refute_includes stdout, '--one-pass'
+    refute_includes stdout, '--quick'
+    refute_includes stdout, '--find-main'
+    refute_includes stdout, '--file'
+    refute_includes stdout, '--lualatex'
+    refute_includes stdout, '--xelatex'
+    refute_includes stdout, '--update-on-diff'
+    refute_includes stdout, '--test'
+    refute_includes stdout, '--env-free'
+    refute_includes stdout, '--envfree'
+  end
+
+  def test_help_all_flag
+    stdout, status = Open3.capture2(BIN, '--help-all')
+    assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
+    assert_includes stdout, 'Compilation Options:'
+    assert_includes stdout, 'arXiv Preparation Options:'
+    assert_includes stdout, 'General Options:'
+    assert_includes stdout, '--engine ENGINE'
+    assert_includes stdout, '--deps'
+    assert_includes stdout, '--no-env'
+    assert_includes stdout, '--alert-hbox'
+    assert_includes stdout, '--whatever-pt'
+    assert_includes stdout, '--arxiv'
+
+    # Verify shortcuts and no-ops are not present in full help either
+    refute_includes stdout, '--lua'
+    refute_includes stdout, '--xe'
+    refute_includes stdout, '--pdflatex'
+    refute_includes stdout, '--fast'
+    refute_includes stdout, '--pdf'
+
+    # Verify removed aliases are not present
     refute_includes stdout, '--one-pass'
     refute_includes stdout, '--quick'
     refute_includes stdout, '--find-main'
@@ -66,12 +105,17 @@ class TestLatexItCLI < Minitest::Test
 
     stdout_both, status_both = Open3.capture2(BIN, '-h', '-E')
     assert status_both.success?
-    assert_includes stdout_both, 'Compilation Options:'
+    assert_includes stdout_both, 'Common Options:'
     assert_includes stdout_both, 'Detailed Examples & Common Workflows:'
+
+    stdout_all_both, status_all_both = Open3.capture2(BIN, '--help-all', '-E')
+    assert status_all_both.success?
+    assert_includes stdout_all_both, 'Compilation Options:'
+    assert_includes stdout_all_both, 'Detailed Examples & Common Workflows:'
   end
 
   def test_canonical_cli_flags_and_anti_alias
-    canonical_flags = %w[-u --single-pass -1 --force -m --main --lua --xe -d --diff -t --verify --no-env -W --werror]
+    canonical_flags = %w[-u --single-pass -1 --force -m --main -d --diff -t --verify --no-env -W --werror --engine=xelatex --engine=lualatex --engine=pdflatex]
     canonical_flags.each do |flag|
       _, stderr, status = Open3.capture3(BIN, flag, 'nonexistent_doc_test.tex')
       refute_match(/invalid option/i, stderr, "Canonical flag #{flag} should be a valid option")
@@ -79,7 +123,15 @@ class TestLatexItCLI < Minitest::Test
       assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless %w[-m --main].include?(flag)
     end
 
-    removed_aliases = %w[--one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff --test --env-free --envfree]
+    hidden_aliases = %w[--lua --xe --pdflatex --fast]
+    hidden_aliases.each do |alias_flag|
+      _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
+      refute_match(/invalid option/i, stderr, "Hidden alias #{alias_flag} should be accepted")
+      refute_match(/ambiguous option/i, stderr, "Hidden alias #{alias_flag} should not be ambiguous")
+      assert_includes stderr, "File 'nonexistent_doc_test.tex' not found"
+    end
+
+    removed_aliases = %w[--one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff --test --env-free --envfree --pdf]
     removed_aliases.each do |alias_flag|
       _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
       assert_match(/invalid option/i, stderr, "Removed alias #{alias_flag} should be rejected")
@@ -776,20 +828,22 @@ class TestLatexItCLI < Minitest::Test
       File.write(log_file, log_content)
 
       builder = LatexBuilder.new('main.tex', {})
-      out, = capture_io do
+      out, err = capture_io do
         assert_raises(SystemExit) do
           builder.send(:report_errors, log_file)
         end
       end
 
-      # Errors should be displayed
-      assert_includes out, 'LaTeX Error: File `missing.sty` not found'
+      # Errors should be displayed on stderr
+      assert_empty out
+      assert_includes err, 'LaTeX Compilation Failed!'
+      assert_includes err, 'LaTeX Error: File `missing.sty` not found'
       # Warnings should be suppressed from the displayed body
-      refute_includes out, 'Reference `sec:unknown` undefined'
-      refute_includes out, 'Overfull \hbox'
-      # But count is still reported in summary
-      assert_includes out, 'Errors: 1'
-      assert_includes out, 'Warnings: 2'
+      refute_includes err, 'Reference `sec:unknown` undefined'
+      refute_includes err, 'Overfull \hbox'
+      # But count is still reported in summary on stderr
+      assert_includes err, 'Errors: 1'
+      assert_includes err, 'Warnings: 2'
     end
   end
 

@@ -78,6 +78,19 @@
       "timestamp": "2026-09-12T16:41:06Z",
       "files_edited": 7,
       "summary": "reviews/archive/006_summary.md"
+    },
+    {
+      "number": "007",
+      "profile": "resilience",
+      "model": "Flagship Opus / Deep (Tier 2 Deep)",
+      "tier": "deep",
+      "backend": "auto",
+      "findings": 8,
+      "outcome": "remediated",
+      "log": "reviews/logs/review_007_resilience.log",
+      "timestamp": "2026-09-12T16:59:14Z",
+      "files_edited": 4,
+      "summary": "reviews/archive/007_summary.md"
     }
   ]
 }

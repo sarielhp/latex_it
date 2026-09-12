@@ -676,16 +676,18 @@ class LatexBuilder
     status.success?
   end
 
+  BIBLATEX_HOOK = '\makeatletter\AtBeginDocument{\@ifpackageloaded{biblatex}{\AtEveryBibitem{\typeout{BIB_ENTRY: \thefield{entrykey}}}}{}}\makeatother'
+
   def build_latex_pass_cmd
     latexopts = ENV['LATEXOPTS'] || ''
     latexoptions = ENV['LATEXOPTIONS'] || ''
 
     cfilename = if !latexoptions.empty?
-                  "#{latexoptions} \\input{#{@filename}}"
+                  "#{latexoptions} #{BIBLATEX_HOOK}\\input{#{@filename}}"
                 elsif !latexopts.empty?
-                  "#{latexopts}\\input{#{@filename}}"
+                  "#{latexopts}#{BIBLATEX_HOOK}\\input{#{@filename}}"
                 else
-                  "\\input{#{@filename}}"
+                  "#{BIBLATEX_HOOK}\\input{#{@filename}}"
                 end
 
     [@engine_name] + @latex_flags + [cfilename]

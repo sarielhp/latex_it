@@ -8,6 +8,7 @@
 # ==============================================================================
 
 require 'fileutils'
+require 'io/console'
 
 module LaTeXUtils
   # `figs/bak` is deliberately absent: the packager treats it as a user-owned
@@ -387,5 +388,91 @@ module LaTeXUtils
     pages
   rescue StandardError
     []
+  end
+
+  def self.strip_ansi(str)
+    str.to_s.gsub(/\e\[[0-9;]*[a-zA-Z]/, '')
+  end
+
+  def self.visible_width(str)
+    strip_ansi(str).length
+  end
+
+  def self.terminal_width(default: 80, max: nil)
+    w = if ENV['COLUMNS'] =~ /^\d+$/
+          ENV['COLUMNS'].to_i
+        else
+          IO.console&.winsize&.last rescue nil
+        end
+    return default unless w && w > 30
+
+    max ? [w, max].min : w
+  end
+
+  def self.wrap_text(text, width: nil, prefix: nil, indent: nil)
+    return '' if text.nil? || text.empty?
+
+    width ||= terminal_width(default: 80, max: 80)
+    text.to_s.split("\n", -1).map do |line|
+      wrap_single_line(line, width: width, prefix: prefix, indent: indent)
+    end.join("\n")
+  end
+
+  def self.wrap_single_line(line, width: 80, prefix: nil, indent: nil)
+    return line if line.strip.empty?
+
+    first_pfx, sub_pfx, content = resolve_wrap_prefixes(line, prefix, indent)
+    words = content.split(/\s+/)
+    return "#{first_pfx}#{content}" if words.empty?
+
+    assemble_wrapped_lines(words, width, first_pfx, sub_pfx)
+  end
+
+  def self.resolve_wrap_prefixes(line, prefix, indent)
+    if prefix
+      content = line.start_with?(prefix) ? line[prefix.length..] : line
+      [prefix, indent || (' ' * visible_width(prefix)), content]
+    elsif (m = strip_ansi(line).match(/\A(\s*(?:[▸•\-*]|\d+[.)])\s+)(.*)\z/m))
+      pfx_len = m[1].length
+      first_pfx = line[0...pfx_len]
+      [first_pfx, indent || (' ' * visible_width(first_pfx)), line[pfx_len..]]
+    elsif (m = strip_ansi(line).match(/\A(\s+)(.*)\z/m))
+      pfx_len = m[1].length
+      first_pfx = line[0...pfx_len]
+      [first_pfx, indent || first_pfx, line[pfx_len..]]
+    else
+      ['', indent || '', line]
+    end
+  end
+
+  def self.assemble_wrapped_lines(words, width, first_pfx, sub_pfx)
+    first_avail = [width - visible_width(first_pfx), 10].max
+    sub_avail = [width - visible_width(sub_pfx), 10].max
+    wrapped = []
+    curr = []
+    curr_len = 0
+    avail = first_avail
+
+    words.each do |w|
+      w_len = visible_width(w)
+      if curr.empty?
+        curr << w
+        curr_len = w_len
+      elsif curr_len + 1 + w_len <= avail
+        curr << w
+        curr_len += 1 + w_len
+      else
+        pfx = wrapped.empty? ? first_pfx : sub_pfx
+        wrapped << "#{pfx}#{curr.join(' ')}"
+        curr = [w]
+        curr_len = w_len
+        avail = sub_avail
+      end
+    end
+    unless curr.empty?
+      pfx = wrapped.empty? ? first_pfx : sub_pfx
+      wrapped << "#{pfx}#{curr.join(' ')}"
+    end
+    wrapped.join("\n")
   end
 end

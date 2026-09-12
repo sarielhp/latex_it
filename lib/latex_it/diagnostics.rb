@@ -117,10 +117,20 @@ module LaTeXDiagnostics
                   "#{padding}#{colorize_line_num(str, base_color)}#{sep_str}"
                 end
 
-    left_side + highlight_line_numbers(message, base_color)
+    formatted = highlight_line_numbers(message, base_color)
+    left_side + highlight_latex_it_tag(formatted, base_color)
   end
 
-  def format_error_block(err_block, line_no, width: 0, catalog: nil)
+  def highlight_latex_it_tag(str, base_color = :red)
+    return str if @options[:emacs] || @options[:color] == false
+    return str unless str.include?('[latex_it]')
+
+    reassert = Rainbow('').send(base_color).bright.to_s
+    tag = "#{Rainbow('[latex_it]').magenta.bold}#{reassert}"
+    str.gsub('[latex_it]', tag)
+  end
+
+  def format_error_block(err_block, line_no, width: 0, catalog: nil, repeat_count: 1)
     return err_block.join("\n") if @options[:emacs]
 
     str = line_no.to_s
@@ -128,6 +138,7 @@ module LaTeXDiagnostics
 
     lines = err_block.map.with_index do |l, idx|
       colored = highlight_line_numbers(l, :red, bright: true)
+      colored = highlight_latex_it_tag(colored, :red)
       if idx == 0
         format_first_error_line(l, colored, line_no, str, width)
       else
@@ -135,8 +146,16 @@ module LaTeXDiagnostics
       end
     end
 
+    append_repeat_note(lines, repeat_count, line_no, indent) if repeat_count > 1
     append_error_hint(lines, catalog, indent)
     lines.join("\n")
+  end
+
+  def append_repeat_note(lines, repeat_count, line_no, indent)
+    note = "Repeated #{repeat_count} times on line #{line_no}."
+    note_colored = @options[:color] == false ? note : Rainbow(note).yellow
+    arrow = @options[:color] == false ? '▸' : Rainbow('▸').yellow.bright
+    lines << "#{indent}#{arrow} #{note_colored}"
   end
 
   def append_error_hint(lines, catalog, indent)
@@ -160,7 +179,7 @@ module LaTeXDiagnostics
   end
 
   def render_diagnostic_item(item, width: 0)
-    return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog]) if item[:err_block]
+    return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog], repeat_count: item[:repeat_count] || 1) if item[:err_block]
 
     base_color = item[:base_color] || :yellow
     out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width)
@@ -365,16 +384,44 @@ module LaTeXDiagnostics
     [err_block, i]
   end
 
+  def extract_argument_token(err_block)
+    arg_lines = []
+    in_arg = false
+    err_block.each do |line|
+      if line =~ /^<argument>\s*(.*)/
+        in_arg = true
+        arg_lines << Regexp.last_match(1)
+      elsif in_arg
+        break if line =~ /^l\.\d+/ || line =~ /^<\w+>/
+
+        arg_lines << line
+      end
+    end
+    return nil if arg_lines.empty?
+
+    token = arg_lines.join.gsub(/\s+/, '').gsub(/[{}\\]/, '')
+    token.empty? ? nil : token
+  end
+
   def extract_errors(content)
     errors = []
     clean_content = LaTeXUtils.filter_subcommand_noise(content)
     lines = clean_content.lines
     file_stack = [@filename]
+    last_bib_entry_key = nil
+    last_bib_entry_file = nil
     i = 0
 
     while i < lines.size
       line = lines[i]
       track_log_file(line, file_stack)
+
+      if line =~ /^BIB_ENTRY:\s*(\S+)/
+        last_bib_entry_key = Regexp.last_match(1)
+        last_bib_entry_file = current_log_file(file_stack)
+        i += 1
+        next
+      end
 
       if line =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i
         i += 1
@@ -383,7 +430,9 @@ module LaTeXDiagnostics
 
       is_err, err_file = error_line_match(line)
       if is_err
-        err_item, i = build_error_entry(lines, i, err_file, file_stack)
+        cur_file = err_file || current_log_file(file_stack)
+        bib_key = (last_bib_entry_file == cur_file) ? last_bib_entry_key : nil
+        err_item, i = build_error_entry(lines, i, err_file, file_stack, bib_entry: bib_key)
         errors << err_item
       else
         i += 1
@@ -392,7 +441,7 @@ module LaTeXDiagnostics
     errors
   end
 
-  def build_error_entry(lines, idx, err_file, file_stack)
+  def build_error_entry(lines, idx, err_file, file_stack = [], bib_entry: nil)
     err_block, next_idx = collect_error_block(lines, idx)
     err_block = err_block.map(&:rstrip).reject(&:empty?)
     err_text = err_block.join("\n")
@@ -401,13 +450,117 @@ module LaTeXDiagnostics
     classification = LaTeXErrorCatalog.classify(err_text, err_block, file: file_name, line: line_no)
     formatted = format_error_block(err_block, line_no, catalog: classification)
     cat_id = classification ? classification[:id] : :generic
+    token = extract_argument_token(err_block)
     item = {
       file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),
       text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: next_idx,
       catalog: classification, catalog_id: cat_id,
-      source: :compiler, synthetic: false
+      source: :compiler, synthetic: false,
+      bib_entry: bib_entry, token: token
     }
     [item, next_idx]
+  end
+
+  def generate_bib_companions(errors)
+    companions = []
+    seen = {}
+
+    errors.each do |err|
+      next unless err[:bib_entry] && !err[:synthetic]
+
+      is_bib_cmd = err[:text] =~ /\\(?:ChapterEnd|printbibliography|bibliography|putbib|bibitem)\b/ ||
+                   err[:file].to_s.end_with?('.bbl')
+      next unless is_bib_cmd || err[:token]
+
+      loc = LaTeXBibLocator.locate(err[:bib_entry], err[:token], @bfilename, Dir.pwd)
+      next unless loc
+
+      loc_key = [loc[:file], loc[:line]]
+      next if seen[loc_key]
+
+      seen[loc_key] = true
+      companions << build_bib_companion_item(err, loc)
+    end
+    filter_redundant_bib_companions(companions)
+  end
+
+  def filter_redundant_bib_companions(companions)
+    grouped = companions.group_by { |c| [c[:file], c[:citekey]] }
+    result = []
+    grouped.each_value do |entry_comps|
+      has_token = entry_comps.any? { |c| c[:token] }
+      entry_comps.each do |c|
+        result << c unless has_token && c[:token].nil?
+      end
+    end
+    result
+  end
+
+  def build_bib_companion_item(parent_err, loc)
+    file_name = loc[:file]
+    line_no = loc[:line]
+    citekey = loc[:citekey]
+    token = loc[:token]
+    field_text = loc[:field_text]
+
+    display_file = format_display_path(file_name)
+    first_line = "#{display_file}:#{line_no}: [latex_it] Bibliography error in entry '#{citekey}'"
+    lines = [first_line]
+    lines << (field_text ? "l.#{line_no} #{field_text}" : "l.#{line_no}")
+
+    hint = token ? "Offending token '#{token}' found on this line." : "Entry typeset here when compilation failed."
+    formatted = format_error_block(lines, line_no, catalog: { hint: hint })
+
+    {
+      file: file_name,
+      line: line_no,
+      line_str: line_no.to_s,
+      text: lines.join("\n"),
+      err_block: lines,
+      base_color: :red,
+      formatted: formatted,
+      index: (parent_err[:index] || 0) + 1,
+      catalog: { hint: hint },
+      source: :latex_it,
+      synthetic: true,
+      companion_to: format_display_path(parent_err[:file]),
+      citekey: citekey,
+      token: token
+    }
+  end
+
+  def decluster_errors(errors)
+    return errors if errors.size <= 1
+
+    grouped = errors.group_by do |e|
+      sig = e[:text].to_s.gsub(/\s+/, ' ').strip
+      [format_display_path(e[:file]), e[:line] || 0, sig]
+    end
+
+    clustered = []
+    grouped.each_value do |group|
+      first = group.first
+      if group.size > 1
+        item = first.dup
+        item[:repeat_count] = group.size
+        item[:formatted] = format_error_block(
+          first[:err_block], first[:line] || 0,
+          catalog: first[:catalog], repeat_count: group.size
+        )
+        if @options[:emacs]
+          item[:err_block] = first[:err_block] + ["  (Repeated #{group.size} times on line #{first[:line]})"]
+        end
+        clustered << item
+      else
+        clustered << first
+      end
+    end
+    clustered
+  end
+
+  def prepare_error_items(raw_items)
+    bib_companions = generate_bib_companions(raw_items)
+    decluster_errors(raw_items) + bib_companions
   end
 
   def overfull_hbox?(item)
@@ -429,7 +582,9 @@ module LaTeXDiagnostics
     all_items = sorted_other + sorted_overfull + sorted_errors
     all_sorted = all_items.sort_by do |item|
       idx = item[:index] || 0
-      [format_display_path(item[:file]), idx.negative? ? 0 : 1, item[:line] || 0, idx]
+      comp_target = item[:companion_to] ? format_display_path(item[:companion_to]) : format_display_path(item[:file])
+      comp_rank = item[:companion_to] ? 1 : 0
+      [comp_target, comp_rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, item[:line] || 0, idx]
     end
 
     [all_sorted, sorted_other.size + sorted_overfull.size, sorted_errors.size]
@@ -571,35 +726,14 @@ module LaTeXDiagnostics
   end
 
   def terminal_columns
-    return 80 if @options[:emacs]
-
-    w = begin
-      IO.console&.winsize&.last rescue nil
-    end
-    (w && w > 40) ? [w, 80].min : 80
+    LaTeXUtils.terminal_width(default: 80, max: 80)
   end
 
   def wrap_box_field(prefix, text, inner_width)
     full_prefix = "#{prefix} "
-    avail = inner_width - full_prefix.length
-    words = text.split(/\s+/)
-    lines = []
-    curr = ''
-    words.each do |wd|
-      if curr.empty?
-        curr = wd
-      elsif curr.length + 1 + wd.length <= avail
-        curr += " #{wd}"
-      else
-        lines << curr
-        curr = wd
-      end
-    end
-    lines << curr unless curr.empty?
-
-    lines.each_with_index.map do |ln, idx|
-      pfx = idx == 0 ? full_prefix : (' ' * full_prefix.length)
-      "│ #{("#{pfx}#{ln}").ljust(inner_width)} │"
+    wrapped = LaTeXUtils.wrap_text(text, width: inner_width, prefix: full_prefix)
+    wrapped.lines.map do |ln|
+      "│ #{ln.chomp.ljust(inner_width)} │"
     end
   end
 
@@ -806,25 +940,41 @@ module LaTeXDiagnostics
     [alert_items, regular_warnings, whatevers]
   end
 
-  def format_tier_count(label, count, color, suppressed)
+  def format_tier_count(label, count, color, _suppressed = false)
     if count == 0
       Rainbow("#{label}: 0").green.bright
     else
-      base = Rainbow("#{label}: #{count}").color(color).bright
-      suppressed ? "#{base} #{Rainbow('(suppressed)').faint}" : base
+      Rainbow("#{label}: #{count}").color(color).bright
+    end
+  end
+
+  def format_suppression_tag(alerts, warnings, whatevers, suppressed_alerts, suppressed_warnings, suppressed_whatevers)
+    suppressed = []
+    suppressed << 'Alerts' if suppressed_alerts && alerts > 0
+    suppressed << 'Warnings' if suppressed_warnings && warnings > 0
+    suppressed << 'Whatevers' if suppressed_whatevers && whatevers > 0
+
+    return '' if suppressed.empty?
+
+    all_non_errors = [alerts > 0, warnings > 0, whatevers > 0].count(true)
+    if suppressed.size == all_non_errors && all_non_errors > 1
+      "  #{Rainbow('(non-errors suppressed)').faint}"
+    else
+      "  #{Rainbow("(#{suppressed.join(', ')} suppressed)").faint}"
     end
   end
 
   def print_summary_line(errors, alerts, warnings, whatevers,
                          suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false, io: nil)
-    err_str = format_tier_count('Errors', errors, :red, false)
-    alert_str = format_tier_count('Alerts', alerts, :red, suppressed_alerts)
-    warn_str = format_tier_count('Warnings', warnings, :yellow, suppressed_warnings)
-    what_str = format_tier_count('Whatevers', whatevers, :cyan, suppressed_whatevers)
+    err_str = format_tier_count('Errors', errors, :red)
+    alert_str = format_tier_count('Alerts', alerts, :red)
+    warn_str = format_tier_count('Warnings', warnings, :yellow)
+    what_str = format_tier_count('Whatevers', whatevers, :cyan)
+    tag = format_suppression_tag(alerts, warnings, whatevers, suppressed_alerts, suppressed_warnings, suppressed_whatevers)
 
     target_io = io || ((@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout)
     target_io.puts ''
-    target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}"
+    target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}#{tag}"
   end
 
   def primary_error_file(groups)
@@ -838,14 +988,17 @@ module LaTeXDiagnostics
 
     groups = errors.group_by { |e| format_display_path(e[:file]) }
     first_file = primary_error_file(groups)
-    file_errors = groups[first_file]
-    return [errors, nil] if groups.size <= 1 && file_errors.size <= 10
+    file_errors = groups[first_file] || []
+    companion_errors = errors.select { |e| e[:companion_to] == first_file }
+    companion_files = companion_errors.map { |ce| format_display_path(ce[:file]) }.uniq
 
-    displayed = file_errors.first(10)
-    other_files = groups.keys.reject { |k| k == first_file }
+    return [errors, nil] if groups.size <= (1 + companion_files.size) && file_errors.size <= 10
+
+    displayed = file_errors.first(10) + companion_errors
+    other_files = groups.keys.reject { |k| k == first_file || companion_files.include?(k) }
     cascade_info = {
       first_file: first_file,
-      remaining_in_first: file_errors.size - displayed.size,
+      remaining_in_first: [file_errors.size - 10, 0].max,
       other_files: other_files,
       other_errors_count: other_files.sum { |f| groups[f].size }
     }
@@ -855,20 +1008,25 @@ module LaTeXDiagnostics
   def format_other_files_list(other_list)
     return other_list.join(', ') if other_list.size <= 4
 
-    "#{other_list.first(3).join(', ')}, and #{other_list.size - 3} more files"
+    "#{other_list.first(3).join(', ')}, ..."
   end
 
   def print_cascade_notice(cascade_info, io: $stderr)
+    cols = terminal_columns
     io.puts Rainbow("\n═══════════════════════════════════════════════════════════════════════════════").yellow
     if cascade_info[:remaining_in_first] > 0
-      io.puts Rainbow("▸ #{cascade_info[:remaining_in_first]} more errors in #{cascade_info[:first_file]} were truncated (likely cascades).").yellow
+      msg = "▸ #{cascade_info[:remaining_in_first]} more errors in #{cascade_info[:first_file]} were truncated (likely cascades)."
+      io.puts Rainbow(LaTeXUtils.wrap_text(msg, width: cols)).yellow
     end
     if cascade_info[:other_errors_count] > 0
       files_str = format_other_files_list(cascade_info[:other_files])
-      io.puts Rainbow("▸ #{cascade_info[:other_errors_count]} more errors were detected across #{cascade_info[:other_files].size} other files (#{files_str}).").yellow
-      io.puts Rainbow('  These may be cascades caused by the earlier error. Please resolve the issues above first.').yellow
+      msg1 = "▸ #{cascade_info[:other_errors_count]} more errors were detected across #{cascade_info[:other_files].size} other files (#{files_str})."
+      io.puts Rainbow(LaTeXUtils.wrap_text(msg1, width: cols)).yellow
+      msg2 = '  Handle above errors first to ensure these errors are not cascades.'
+      io.puts Rainbow(LaTeXUtils.wrap_text(msg2, width: cols)).yellow
     end
-    io.puts Rainbow("  (Run with 'l -a' / '--all' to display all errors across all files).").yellow
+    msg3 = "  (Run with 'l -a' / '--all' to display all errors across all files)."
+    io.puts Rainbow(LaTeXUtils.wrap_text(msg3, width: cols)).yellow
     io.puts Rainbow('═══════════════════════════════════════════════════════════════════════════════').yellow
   end
 
@@ -892,7 +1050,7 @@ module LaTeXDiagnostics
                    else
                      []
                    end
-    errors = compiler_errors + brace_errors
+    errors = prepare_error_items(compiler_errors) + brace_errors
     fallback = errors.empty? ? content.lines.last(15) : []
     displayed_errors, cascade_info = throttle_errors(errors)
     _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)
@@ -1037,10 +1195,11 @@ module LaTeXDiagnostics
 
   def render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
     if errors > 0 || !err_items.empty?
-      displayed_errors, cascade_info = throttle_errors(err_items)
+      prepared_errors = prepare_error_items(err_items)
+      displayed_errors, cascade_info = throttle_errors(prepared_errors)
       _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
       print_cascade_notice(cascade_info, io: $stdout) if cascade_info
-      [err_items.size, errors].max
+      [prepared_errors.size, errors].max
     else
       render_non_error_tiers(alert_items, reg_warns, what_items)
       errors

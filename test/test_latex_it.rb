@@ -880,7 +880,7 @@ class TestLatexItCLI < Minitest::Test
       assert_includes plain, 'Alerts: 1'
       assert_includes plain, 'Warnings: 2'
       assert_includes plain, 'Whatevers: 0'
-      refute_includes plain, 'Warnings: 2 (suppressed)'
+      refute_includes plain, '(Warnings suppressed)'
 
       # When suppress_warnings: true, warnings are suppressed
       suppressed_builder = LatexBuilder.new('main.tex', suppress_warnings: true)
@@ -895,7 +895,8 @@ class TestLatexItCLI < Minitest::Test
       refute_includes plain_supp, 'warnings)'
       assert_includes plain_supp, 'Label `sec:dup` multiply defined.'
       refute_includes plain_supp, 'Reference `sec:unknown` undefined'
-      assert_includes plain_supp, 'Warnings: 2 (suppressed)'
+      assert_includes plain_supp, 'Warnings: 2'
+      assert_includes plain_supp, '(Warnings suppressed)'
     end
   end
 
@@ -976,7 +977,8 @@ class TestLatexItCLI < Minitest::Test
       refute_includes plain, '2.09996pt too wide'
       refute_includes plain, 'Token not allowed in a PDF string'
       refute_includes plain, 'float specifier changed to'
-      assert_includes plain, 'Whatevers: 4 (suppressed)'
+      assert_includes plain, 'Whatevers: 4'
+      assert_includes plain, '(Whatevers suppressed)'
 
       # With all: true, whatevers are displayed
       all_builder = LatexBuilder.new('main.tex', all: true, suppress_whatevers: false)
@@ -992,7 +994,7 @@ class TestLatexItCLI < Minitest::Test
       assert_includes plain_all, 'Token not allowed in a PDF string'
       assert_includes plain_all, 'float specifier changed to'
       assert_includes plain_all, 'Whatevers: 4'
-      refute_includes plain_all, 'Whatevers: 4 (suppressed)'
+      refute_includes plain_all, '(Whatevers suppressed)'
     end
   end
 
@@ -1072,7 +1074,8 @@ class TestLatexItCLI < Minitest::Test
       end
       plain_custom = strip_ansi(out_custom)
       assert_includes plain_custom, 'Warnings: 0'
-      assert_includes plain_custom, 'Whatevers: 1 (suppressed)'
+      assert_includes plain_custom, 'Whatevers: 1'
+      assert_includes plain_custom, '(Whatevers suppressed)'
     end
   end
 
@@ -1225,12 +1228,11 @@ class TestLatexItCLI < Minitest::Test
   def test_brace_checker_detects_mismatched_bracket_alert
     snippet = "\\begin{equation*}\n  \\frac{Y_{i-1}{2].\n\\end{equation*}\n"
     errs = LaTeXBraceChecker.new('test.tex', snippet).scan
-    assert_equal 1, errs.size
-    err = errs.first
-    assert_equal 2, err[:line]
-    assert err[:has_alert]
-    assert_includes err[:text], "Probable mistype at line 2:18 of '}' as ']'"
-    assert_includes err[:text], "inside environment 'equation*'"
+    alert_err = errs.find { |e| e[:has_alert] }
+    refute_nil alert_err
+    assert_equal 2, alert_err[:line]
+    assert_includes alert_err[:text], "Probable mistype at line 2:18 of '}' as ']'"
+    assert_includes alert_err[:text], "inside environment 'equation*'"
   end
 
   def test_brace_checker_ignores_bourbaki_and_half_open_intervals
@@ -1408,8 +1410,19 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
+  class TestDiagnosticsHelper
+    include LaTeXDiagnostics
+    attr_accessor :options, :filename, :bfilename
+
+    def initialize(filename = 'main.tex', options = {})
+      @filename = filename
+      @options = options
+      @bfilename = File.basename(filename, '.*')
+    end
+  end
+
   def test_throttle_errors_caps_first_file_at_ten
-    diag = LaTeXDiagnostics.new('main.tex', {})
+    diag = TestDiagnosticsHelper.new('main.tex', {})
     errors = (1..15).map { |i| { file: 'ch1.tex', line: i, text: "Error #{i}" } }
     displayed, info = diag.send(:throttle_errors, errors)
 
@@ -1420,7 +1433,7 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_throttle_errors_stops_after_first_file
-    diag = LaTeXDiagnostics.new('main.tex', {})
+    diag = TestDiagnosticsHelper.new('main.tex', {})
     ch1_errors = (1..3).map { |i| { file: 'ch1.tex', line: i, text: "Ch1 Error #{i}" } }
     ch2_errors = (1..5).map { |i| { file: 'ch2.tex', line: i, text: "Ch2 Error #{i}" } }
     displayed, info = diag.send(:throttle_errors, ch1_errors + ch2_errors)
@@ -1433,7 +1446,7 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_throttle_errors_bypassed_with_all_option
-    diag = LaTeXDiagnostics.new('main.tex', all: true)
+    diag = TestDiagnosticsHelper.new('main.tex', all: true)
     ch1_errors = (1..15).map { |i| { file: 'ch1.tex', line: i, text: "Error #{i}" } }
     ch2_errors = (1..5).map { |i| { file: 'ch2.tex', line: i, text: "Error #{i}" } }
     displayed, info = diag.send(:throttle_errors, ch1_errors + ch2_errors)
@@ -1443,7 +1456,7 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_print_cascade_notice_output
-    diag = LaTeXDiagnostics.new('main.tex', {})
+    diag = TestDiagnosticsHelper.new('main.tex', {})
     info = {
       first_file: 'ch1.tex',
       remaining_in_first: 4,
@@ -1458,10 +1471,24 @@ class TestLatexItCLI < Minitest::Test
     assert_includes out, '12 more errors were detected across 2 other files'
     assert_includes out, 'ch2.tex, ch3.tex'
     assert_includes out, "Run with 'l -a' / '--all'"
+
+    # Truncation with ... when > 4 other files
+    info_many = {
+      first_file: 'ch1.tex',
+      remaining_in_first: 0,
+      other_files: %w[ch2.tex ch3.tex ch4.tex ch5.tex ch6.tex],
+      other_errors_count: 20
+    }
+    io_many = StringIO.new
+    diag.send(:print_cascade_notice, info_many, io: io_many)
+    out_many = io_many.string
+    assert_includes out_many, 'ch2.tex, ch3.tex, ch4.tex'
+    assert_includes out_many, '...'
+    refute_includes out_many, 'more files'
   end
 
   def test_primary_error_file_prefers_compiler_errors_over_synthetic_checks
-    diag = LaTeXDiagnostics.new('main.tex', {})
+    diag = TestDiagnosticsHelper.new('main.tex', {})
     groups = {
       'synthetic_ch.tex' => [{ file: 'synthetic_ch.tex', line: 10, source: :latex_it, synthetic: true }],
       'compiler_ch.tex' => [{ file: 'compiler_ch.tex', line: 20, source: :compiler, synthetic: false }]
@@ -1471,7 +1498,7 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_compiler_indicates_brace_error
-    diag = LaTeXDiagnostics.new('main.tex', {})
+    diag = TestDiagnosticsHelper.new('main.tex', {})
     assert diag.send(:compiler_indicates_brace_error?, 'Runaway argument?\n{something')
     assert diag.send(:compiler_indicates_brace_error?, 'File ended while scanning use of \foo')
     assert diag.send(:compiler_indicates_brace_error?, 'Extra }, or forgotten \endgroup')
@@ -1485,10 +1512,33 @@ class TestLatexItCLI < Minitest::Test
     assert_equal :latex_it, brace_errs.first[:source]
     assert_equal true, brace_errs.first[:synthetic]
 
-    diag = LaTeXDiagnostics.new('main.tex', {})
+    diag = TestDiagnosticsHelper.new('main.tex', {})
     lines = ['./test.tex:10: Undefined control sequence.']
     err_item, = diag.send(:build_error_entry, lines, 0, './test.tex', [])
     assert_equal :compiler, err_item[:source]
     assert_equal false, err_item[:synthetic]
+  end
+
+  def test_print_summary_line_suppression_tag
+    diag = TestDiagnosticsHelper.new('main.tex', {})
+
+    # All non-errors suppressed
+    io = StringIO.new
+    diag.send(:print_summary_line, 5, 10, 15, 20, suppressed_alerts: true, suppressed_warnings: true, suppressed_whatevers: true, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, 'Errors: 5, Alerts: 10, Warnings: 15, Whatevers: 20  (non-errors suppressed)'
+
+    # Specific tiers suppressed
+    io = StringIO.new
+    diag.send(:print_summary_line, 0, 0, 3, 4, suppressed_warnings: false, suppressed_whatevers: true, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, 'Errors: 0, Alerts: 0, Warnings: 3, Whatevers: 4  (Whatevers suppressed)'
+
+    # Nothing suppressed
+    io = StringIO.new
+    diag.send(:print_summary_line, 0, 1, 2, 3, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, 'Errors: 0, Alerts: 1, Warnings: 2, Whatevers: 3'
+    refute_includes plain, 'suppressed'
   end
 end

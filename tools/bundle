@@ -30,6 +30,7 @@ module LatexBundler
     brace_checker.rb
     flattener.rb
     meta_extractor.rb
+    bib_locator.rb
     error_catalog.rb
     diagnostics.rb
     builder.rb
@@ -40,6 +41,7 @@ module LatexBundler
   STD_REQUIRES = %w[
     digest
     fileutils
+    io/console
     json
     open3
     optparse

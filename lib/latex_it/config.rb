@@ -169,38 +169,86 @@ module LaTeXConfig
     end
   end
 
+  # Removes comments and trailing commas in a single pass that tracks string
+  # boundaries. Two defects lived here before:
+  #
+  #   * `escaped` was recomputed for the current character before the
+  #     close-quote test, so when c == '"' the expression `!escaped && c ==
+  #     '\\'` was always false and the `!escaped` guard was always true. An
+  #     escaped \" therefore ended the string, and a following // or /* ate the
+  #     rest of the file. Since a parse failure returns {}, a single \" in one
+  #     value discarded the user's entire configuration. An even number of \"
+  #     re-synchronised by accident, which made the failure look random.
+  #
+  #   * Trailing commas were removed afterwards with a gsub over the whole
+  #     document, so a comma inside a string value that preceded } or ] was
+  #     deleted too. arxiv.comments is free text that reaches the metadata file
+  #     the user pastes into the arXiv form.
   def self.strip_comments(content)
-    in_string = false
-    escaped = false
+    state = { in_string: false, escaped: false, pending_comma: nil }
     out = []
     i = 0
     len = content.length
 
     while i < len
-      c = content[i]
-      if in_string
-        out << c
-        escaped = !escaped && c == '\\'
-        in_string = false if !escaped && c == '"'
-      elsif (skip_to = skip_comment(content, i, len))
-        i = skip_to
-        next
-      elsif c == '"'
-        in_string = true
-        out << c
-      else
-        out << c
-      end
-      i += 1
+      i = scan_jsonc_char(content, i, len, out, state)
     end
+    out << ',' if state[:pending_comma]
     out.join
+  end
+
+  # Returns the index to continue scanning from.
+  def self.scan_jsonc_char(content, i, len, out, state)
+    c = content[i]
+    if state[:in_string]
+      scan_inside_string(c, out, state)
+      return i + 1
+    end
+
+    skip_to = skip_comment(content, i, len)
+    return skip_to if skip_to
+
+    flush_pending_comma(c, out, state)
+    scan_outside_string(c, out, state)
+    i + 1
+  end
+
+  def self.scan_inside_string(c, out, state)
+    out << c
+    if state[:escaped]
+      state[:escaped] = false
+    elsif c == '\\'
+      state[:escaped] = true
+    elsif c == '"'
+      state[:in_string] = false
+    end
+  end
+
+  # A comma is held back until the next significant character is known: if that
+  # turns out to be } or ] the comma was trailing and is dropped.
+  def self.flush_pending_comma(c, out, state)
+    return unless state[:pending_comma]
+    return if c.match?(/\s/)
+
+    out << ',' unless c == '}' || c == ']'
+    state[:pending_comma] = nil
+  end
+
+  def self.scan_outside_string(c, out, state)
+    if c == ','
+      state[:pending_comma] = true
+    elsif c == '"'
+      state[:in_string] = true
+      out << c
+    else
+      out << c
+    end
   end
 
   def self.parse_jsonc(content)
     return {} if content.nil? || content.strip.empty?
 
-    clean = strip_comments(content).gsub(/,(\s*[}\]])/, '\1')
-    JSON.parse(clean)
+    JSON.parse(strip_comments(content))
   rescue JSON::ParserError => e
     warn " -- Warning: Could not parse JSONC config (#{e.message}); using defaults."
     {}

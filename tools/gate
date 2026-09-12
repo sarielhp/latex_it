@@ -12,7 +12,8 @@ module QualityGate
     test_arxiv_cycle.rb test_arxiv_runner_review.rb test_arxiv_worker.rb
     test_author_verification.rb test_code_metrics.rb test_compatibility.rb
     test_brace_checker.rb test_config.rb test_deep_diagnostics.rb test_destructive_paths.rb
-    test_error_catalog.rb test_flattener.rb test_log_recognisers.rb test_repair_failures.rb
+    test_error_catalog.rb test_flattener.rb test_jsonc_parser.rb
+    test_log_recognisers.rb test_repair_failures.rb
     test_sample_arxiv.rb test_sample_arxiv_review.rb
   ].freeze
   MEDIUM_TESTS = %w[

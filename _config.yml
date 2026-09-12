@@ -6,6 +6,12 @@ plugins:
   - jekyll-redirect-from
   - jekyll-relative-links
 
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
 exclude:
   - vendor/
   - junk/

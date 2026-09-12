@@ -30,7 +30,6 @@ module LaTeXCompatibility
     input << old unless old.empty?
     env = base.dup
     env['TEXINPUTS'] = input.join(File::PATH_SEPARATOR) + File::PATH_SEPARATOR
-    env['BIBINPUTS'] = input.join(File::PATH_SEPARATOR) + File::PATH_SEPARATOR if base.key?('BIBINPUTS')
     env
   end
 

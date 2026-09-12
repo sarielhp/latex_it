@@ -17,6 +17,12 @@ class TestCompatibility < Minitest::Test
     assert_empty environment
   end
 
+  def test_compiler_environment_preserves_bibinputs
+    base = { 'BIBINPUTS' => '/path/to/my/bibs:' }
+    environment = LaTeXCompatibility.compiler_environment({ revtex4: { 'enabled' => true } }, base)
+    assert_equal '/path/to/my/bibs:', environment['BIBINPUTS']
+  end
+
   def test_fls_identifies_used_compatibility_files
     Dir.mktmpdir('latex-it-compat-') do |dir|
       path = File.join(LaTeXCompatibility::REPO_TEXMF, 'tex/latex/revtex4/revtex4.cls')

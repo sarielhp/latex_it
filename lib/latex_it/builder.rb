@@ -789,7 +789,20 @@ class LatexBuilder
   def discover_bib_files(aux_contents = nil)
     bibs = bib_files_on_disk
     bibs.concat(extract_aux_bib_files(aux_contents))
+    bibs.concat(extract_bcf_bib_files)
     bibs.uniq
+  end
+
+  def extract_bcf_bib_files
+    bcf_path = "junk/#{@bfilename}.bcf"
+    return [] unless File.exist?(bcf_path)
+
+    files = []
+    bcf_content = LaTeXUtils.safe_read(bcf_path)
+    bcf_content.scan(/<bcf:datasource[^>]*>(.*?)<\/bcf:datasource>/) do |m|
+      collect_bib_candidates(m.first.strip, files)
+    end
+    files
   end
 
   def extract_aux_bib_files(aux_contents = nil)
@@ -811,6 +824,7 @@ class LatexBuilder
   def collect_bib_candidates(bibdata_str, files)
     configured_dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
     prefixes = [''] + configured_dirs.map { |d| "#{d.chomp('/')}/" }
+    prefixes += ENV['BIBINPUTS'].to_s.split(':').reject(&:empty?).map { |d| "#{d.chomp('/')}/" }
     bibdata_str.split(',').map(&:strip).each do |name|
       stem = name.delete_suffix('.bib')
       match = prefixes.map { |pfx| "#{pfx}#{stem}.bib" }.find { |cand| File.file?(cand) }

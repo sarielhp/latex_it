@@ -1299,6 +1299,22 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
+  def test_discover_bib_files_includes_bcf_datasources
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        FileUtils.mkdir_p('custom_bibs')
+        File.write('custom_bibs/chapter.bib', '@article{...}')
+        bcf = '<bcf:datasource type="file" datatype="bibtex">custom_bibs/chapter.bib</bcf:datasource>'
+        File.write('junk/main.bcf', bcf)
+
+        builder = LatexBuilder.new('main.tex', {})
+        bibs = builder.send(:discover_bib_files)
+        assert_includes bibs, 'custom_bibs/chapter.bib'
+      end
+    end
+  end
+
   def test_capture_pass_output_executes_and_terminates_on_timeout
     builder = LatexBuilder.new('main.tex', timeout: 1)
     out, status = builder.send(:capture_pass_output, ['sleep', '5'])

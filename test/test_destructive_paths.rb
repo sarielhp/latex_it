@@ -3,6 +3,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require 'fileutils'
+require 'open3'
 
 require_relative '../lib/latex_it/utils'
 require_relative '../lib/latex_it/builder'
@@ -11,6 +12,9 @@ require_relative '../lib/latex_it/builder'
 # The tool writes all of its own scratch output under junk/; anything these
 # sweeps match in the project root can therefore only be a file the user wrote.
 class TestDestructivePaths < Minitest::Test
+  BIN = File.expand_path('../latex_it', __dir__)
+  load BIN
+
   def build_options
     { engine: 'xelatex', lock: false, junk_subdirs: [], auto_mirror_subdirs: false }
   end
@@ -64,6 +68,49 @@ class TestDestructivePaths < Minitest::Test
           refute_path_exists f, "clean_directory left the build artifact #{f}"
         end
       end
+    end
+  end
+
+  def test_directory_argument_rejects_a_path_that_does_not_exist
+    Dir.mktmpdir('latex_it_target_test') do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('sub')
+        File.write('paper.tex', "\\documentclass{article}\n")
+
+        assert_nil LatexCLI.directory_argument('typo_dir'),
+                   'a non-existent argument must not silently resolve to the current directory'
+        assert_nil LatexCLI.directory_argument('nested/typo_dir')
+        assert_equal '.', LatexCLI.directory_argument(nil)
+        assert_equal 'sub', LatexCLI.directory_argument('sub')
+        assert_equal '.', LatexCLI.directory_argument('paper.tex')
+      end
+    end
+  end
+
+  def test_clean_only_with_a_bad_directory_exits_without_cleaning
+    Dir.mktmpdir('latex_it_badtarget_test') do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n")
+      File.write(File.join(dir, 'paper.aux'), 'artifact')
+
+      _out, status = Open3.capture2e(BIN, '-C', 'typo_dir', chdir: dir)
+
+      refute status.success?, 'a non-existent clean target must be an error'
+      assert_path_exists File.join(dir, 'paper.aux'),
+                         'l -C <typo> cleaned the current directory instead of erroring'
+    end
+  end
+
+  def test_help_wins_over_clean_only
+    Dir.mktmpdir('latex_it_help_test') do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n")
+      File.write(File.join(dir, 'paper.aux'), 'artifact')
+
+      stdout, status = Open3.capture2e(BIN, '-C', '-h', chdir: dir)
+
+      assert status.success?
+      assert_match(/Usage:/, stdout, 'l -C -h did not print help')
+      assert_path_exists File.join(dir, 'paper.aux'),
+                         'l -C -h performed the destructive sweep instead of printing help'
     end
   end
 end

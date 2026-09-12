@@ -72,11 +72,28 @@ module LatexCLI
       puts 'Clean all LaTeX auxiliary and junk files in the specified directory (default: current directory).'
       return
     end
-    dirs = argv.empty? ? ['.'] : argv
-    dirs.each do |d|
-      target = File.directory?(d) ? d : File.dirname(d)
-      LaTeXUtils.clean_directory(target)
-    end
+    dirs = argv.empty? ? [nil] : argv
+    dirs.each { |d| LaTeXUtils.clean_directory(directory_argument_or_abort(d, prog_name)) }
+  end
+
+  # Resolves a CLI directory argument: a directory is itself, a file is its
+  # containing directory, and nil means the current directory. Returns nil when
+  # the argument names nothing that exists. Without that last case an unchecked
+  # File.dirname('typo') yielded '.', so a mistyped argument made -C and
+  # latex_clean sweep the current directory instead of reporting the mistake.
+  def self.directory_argument(path)
+    return '.' if path.nil? || path.to_s.empty?
+    return path if File.directory?(path)
+
+    File.file?(path) ? File.dirname(path) : nil
+  end
+
+  def self.directory_argument_or_abort(path, prog_name)
+    resolved = directory_argument(path)
+    return resolved if resolved
+
+    warn "#{prog_name}: no such file or directory: #{path}"
+    exit 1
   end
 
   def self.extract_extra_cli_files(argv)
@@ -257,29 +274,33 @@ module LatexCLI
   end
 
   def self.handle_help_and_examples(parser, options, prog_name, argv = [])
+    # Help is checked first so that it wins over every action, destructive ones
+    # included: `l -C -h` used to clean the directory and exit 0 without ever
+    # printing the usage the user asked for.
+    print_help_or_examples(parser, options, prog_name)
+
     if options[:show_main]
-      dir = argv[0] || '.'
-      puts LaTeXUtils.find_main_latex_file(dir, options[:exclude_main_tex])
+      puts LaTeXUtils.find_main_latex_file(directory_argument_or_abort(argv[0], prog_name), options[:exclude_main_tex])
       exit 0
     elsif options[:clean_only]
-      dir = argv[0] || '.'
-      target = File.directory?(dir) ? dir : File.dirname(dir)
-      LaTeXUtils.clean_directory(target)
+      LaTeXUtils.clean_directory(directory_argument_or_abort(argv[0], prog_name))
       exit 0
     end
+  end
 
+  def self.print_help_or_examples(parser, options, prog_name)
     if options[:show_help] && options[:show_examples]
       puts parser
       puts "\n#{LaTeXUtils.detailed_examples}"
-      exit 0
     elsif options[:show_examples]
       puts LaTeXUtils.detailed_examples(parser.banner)
-      exit 0
     elsif options[:show_help]
       puts parser
       puts "\nFor detailed usage examples and common workflows, run: #{prog_name} -E"
-      exit 0
+    else
+      return
     end
+    exit 0
   end
 
   def self.configure_environment(options)

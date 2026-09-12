@@ -12,6 +12,19 @@ class LaTeXBraceChecker
   FLOAT_ENVS = %w[figure figure* table table* algorithm listing subfigure subtable].freeze
   UNNUMBERED_MATH_ENVS = %w[equation* align* gather* multline* flalign*].freeze
 
+  # A line that defines a macro contains \begin/\end tokens that are part of the
+  # definition body, not environment delimiters. Tracking them as real opens and
+  # closes made the ubiquitous
+  #   \newenvironment{note}{\begin{quote}\itshape}{\end{quote}}
+  # report an unclosed brace "inside environment 'quote'" plus a stray closing
+  # brace. Those findings carry index: -1000, so they sorted ahead of the real
+  # TeX error, and check_source_braces returns on the first file with any error,
+  # so they also stopped every other .tex file from being checked at all.
+  # The braces on such a line are balanced, so plain counting gives the right
+  # answer once the environment tracking is skipped.
+  MACRO_DEFINITION_PATTERN = /\\(?:(?:re)?new(?:command|environment)|providecommand|
+                               DeclareRobustCommand|(?:e|g|x)?def)\b/x.freeze
+
   LABEL_TOKEN_PATTERN = /\\(?:begin\{(figure\*?|table\*?|algorithm|listing|subfigure|subtable|equation\*|align\*|gather\*|multline\*|flalign\*)\}|end\{(figure\*?|table\*?|algorithm|listing|subfigure|subtable|equation\*|align\*|gather\*|multline\*|flalign\*)\}|caption\b|subcaption\b|label\{([^}]+)\})/.freeze
 
   def self.check_file(path)
@@ -102,6 +115,7 @@ class LaTeXBraceChecker
     @errors = []
     @in_verbatim = false
     @verbatim_end = nil
+    @in_macro_definition = false
   end
 
   def scan
@@ -116,6 +130,7 @@ class LaTeXBraceChecker
   private
 
   def scan_line(raw_line, line_no)
+    @in_macro_definition = raw_line.match?(MACRO_DEFINITION_PATTERN)
     if @in_verbatim
       if raw_line =~ /\\end\{#{Regexp.escape(@verbatim_end)}\}/
         @in_verbatim = false
@@ -164,9 +179,9 @@ class LaTeXBraceChecker
   end
 
   def match_env_or_macro(rest, line_no, bs_start)
-    if rest =~ /\A\\begin\{([a-zA-Z0-9_\*]+)\}/
+    if !@in_macro_definition && rest =~ /\A\\begin\{([a-zA-Z0-9_\*]+)\}/
       handle_begin_env(Regexp.last_match(1), line_no, bs_start, Regexp.last_match(0).length)
-    elsif rest =~ /\A\\end\{([a-zA-Z0-9_\*]+)\}/
+    elsif !@in_macro_definition && rest =~ /\A\\end\{([a-zA-Z0-9_\*]+)\}/
       process_env_end(Regexp.last_match(1), line_no)
       bs_start + Regexp.last_match(0).length
     elsif rest =~ /\A\\\[/

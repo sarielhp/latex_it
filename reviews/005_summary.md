@@ -62,6 +62,8 @@ Each genuine defect was remediated with minimal, idiomatic code, accompanied by 
 - **Issue**: On every single character index `i` in `line`, `line[i..].start_with?('\\url{', '\\href{')` allocated a new heap String slice representing the remainder of the line, even when `line[i]` was not a backslash. In a large document with 15,000 lines, this created millions of short-lived string allocations during flattening and comment stripping.
 - **Status / Mitigation**: Fixed. Guarded the URL detection with `if c == '\\' && (line[i, 5] == '\\url{' || line[i, 6] == '\\href{')`. Characters that are not backslashes (the vast majority of document text) bypass substring allocation completely, drastically reducing heap churn and GC pressure.
 - **Verification**: Added regression unit test `test_inline_comment_index_handles_urls_and_comments` in `test/test_flattener.rb` validating comment index detection across standard comments, escaped `\%`, `\url{...%...}`, `\href{...}`, double backslashes, and commentless lines.
+- **Footprint**: 10 files changed, 372 insertions(+), 36 deletions(-)
+- **Differential Audit**: Clean (0 defects in diff)
 
 ---
 

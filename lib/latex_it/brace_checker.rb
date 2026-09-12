@@ -182,7 +182,7 @@ class LaTeXBraceChecker
       when '%'
         break
       when '{'
-        @brace_stack << { line: line_no, col: col + 1, env_depth: @env_stack.size, mismatch: nil }
+        @brace_stack << { line: line_no, col: col + 1, env: @env_stack.last, mismatch: nil }
         col += 1
       when '}'
         process_closing_brace(raw_line, line_no, col)
@@ -282,22 +282,7 @@ class LaTeXBraceChecker
     return unless matching_idx
 
     target_env = @env_stack[matching_idx]
-    unclosed = @brace_stack.select { |b| b[:env_depth] >= matching_idx }
-    if unclosed.any?
-      culprit = unclosed.last
-      alert_msg = nil
-      if culprit[:mismatch]
-        m = culprit[:mismatch]
-        alert_msg = "Probable mistype at line #{m[:line]}:#{m[:col]} of '}' as ']'"
-      end
-
-      msg = "Unclosed open brace '{' (opened on line #{culprit[:line]}, col #{culprit[:col]}) inside environment '#{target_env[:name]}' (ended at line #{end_line})"
-      line_text = @lines[culprit[:line] - 1].to_s.chomp
-
-      @errors << build_error(culprit[:line], culprit[:col], msg, line_text, alert_msg: alert_msg)
-      @brace_stack.reject! { |b| b[:env_depth] >= matching_idx }
-    end
-
+    target_env[:end_line] = end_line
     @env_stack.slice!(matching_idx..-1)
   end
 
@@ -309,7 +294,13 @@ class LaTeXBraceChecker
         alert_msg = "Probable mistype at line #{m[:line]}:#{m[:col]} of '}' as ']'"
       end
 
-      msg = "Unclosed open brace '{' (opened on line #{unclosed[:line]}, col #{unclosed[:col]}) reached end of file"
+      target_env = unclosed[:env]
+      msg = if target_env
+              end_str = target_env[:end_line] ? " (ended at line #{target_env[:end_line]})" : ''
+              "Unclosed open brace '{' (opened on line #{unclosed[:line]}, col #{unclosed[:col]}) inside environment '#{target_env[:name]}'#{end_str}"
+            else
+              "Unclosed open brace '{' (opened on line #{unclosed[:line]}, col #{unclosed[:col]}) reached end of file"
+            end
       line_text = @lines[unclosed[:line] - 1].to_s.chomp
       @errors << build_error(unclosed[:line], unclosed[:col], msg, line_text, alert_msg: alert_msg)
     end

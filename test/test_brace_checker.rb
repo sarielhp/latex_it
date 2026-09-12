@@ -111,4 +111,35 @@ class TestBraceChecker < Minitest::Test
       assert_silent(src, "verbatim environment #{env} with unbalanced brace")
     end
   end
+
+  def test_environment_nested_in_braces_does_not_flag_outer_braces
+    source = <<~TEX
+      \\documentclass{article}
+      \\begin{document}
+      \\centerline{%
+        \\begin{minipage}{0.9\\linewidth}
+          Some text inside minipage.
+        \\end{minipage}
+      }
+      \\end{document}
+    TEX
+    assert_silent(source, 'an environment enclosed inside braces')
+  end
+
+  def test_macro_wrapped_begin_and_end_environments_are_not_flagged
+    source = <<~TEX
+      \\documentclass{article}
+      \\newcommand{\\NotCCCMode}[1]{#1}%
+      \\begin{document}
+      \\NotCCCMode{%
+        \\begin{table}[p]%
+      }%
+      Table content
+      \\NotCCCMode{%
+        \\end{table}
+      }
+      \\end{document}
+    TEX
+    assert_silent(source, 'macros wrapping begin and end environment tokens')
+  end
 end

@@ -12,22 +12,80 @@ require 'time'
 module ArxivTestWorker
   class CheckError < StandardError; end
 
+  COMMAND_TIMEOUT = 900 # seconds; per external command
+  ALL_CHECKS = %w[environment fresh_build unchanged_rerun fast_rerun single_pass
+                  settle_after_single_pass pdf_diff settle_before_dependency
+                  dependency_change dependency_rerun invalid_tex recovery
+                  metadata portable_archive arxiv_archive].freeze
+
   class Runner
     def initialize(root)
       ENV['LANG'] = ENV['LC_ALL'] = 'C.UTF-8'
       Encoding.default_external = Encoding::UTF_8
       @root = root
-      @config = JSON.parse(File.read(File.join(root, 'test-config.json')))
+      cfg_path = File.join(root, 'test-config.json')
+      raise CheckError, "#{cfg_path}: config file not found" unless File.file?(cfg_path)
+
+      @config = JSON.parse(File.read(cfg_path))
+      main_entry = @config['main'] or
+        raise CheckError, %(#{cfg_path}: missing required key "main" (path to the entry .tex, relative to paper/))
+
       @engine = @config['engine']
-      @main = File.join(root, 'paper', @config.fetch('main'))
+      @main = File.join(root, 'paper', main_entry)
       @project = File.dirname(@main)
       @pdf = @main.sub(/\.tex\z/i, '.pdf')
       @latex = File.join(root, 'latex_it')
+      raise CheckError, "#{@latex}: latex_it was not staged into the workspace" unless File.file?(@latex)
+
       @logs = File.join(root, 'test-logs')
       @counter = File.join(@logs, 'engine-invocations.jsonl')
       FileUtils.mkdir_p(@logs)
-      @report = { status: 'RUNNING', completed: false, main: @config['main'], engine: @engine || 'automatic',
+      @restores = {}
+      install_signal_traps
+      @report = { status: 'RUNNING', completed: false, main: main_entry, engine: @engine || 'automatic',
                   latex_it_sha256: Digest::SHA256.file(@latex).hexdigest, locale: 'C.UTF-8', checks: [] }
+      save
+    end
+
+    def install_signal_traps
+      return unless Thread.current == Thread.main
+
+      %w[INT TERM HUP].each do |sig|
+        Signal.trap(sig) do
+          restore_all
+          exit!(130)
+        end
+      rescue ArgumentError
+        nil
+      end
+    end
+
+    def with_original(path)
+      @restores[path] = [File.binread(path), File.stat(path)]
+      yield
+    ensure
+      restore_one(path)
+    end
+
+    def restore_one(path)
+      entry = @restores.delete(path)
+      return unless entry
+
+      body, stat = entry
+      File.binwrite(path, body)
+      File.utime(stat.atime, stat.mtime, path)
+    end
+
+    def restore_all
+      @restores.keys.each do |p|
+        restore_one(p)
+      rescue SystemCallError
+        nil
+      end
+    end
+
+    def read_text(path)
+      File.binread(path).force_encoding(Encoding::UTF_8).scrub('?')
     end
 
     def run
@@ -48,8 +106,8 @@ module ArxivTestWorker
         check('portable_archive') { package('--zip', '--verify') }
         check('arxiv_archive') { package('--arxiv', '--arxiv-verify', '--arxiv-visual-verify') }
       else
-        %w[unchanged_rerun fast_rerun single_pass settle_after_single_pass pdf_diff
-           dependency_change dependency_rerun invalid_tex recovery metadata portable_archive arxiv_archive].each do |name|
+        executed = @report[:checks].map { |c| c[:name] }
+        (ALL_CHECKS - executed).each do |name|
           record(name, 'SKIP', detail: 'Requires a successful fresh build.')
         end
       end
@@ -57,30 +115,57 @@ module ArxivTestWorker
       @report[:status] = @report[:checks].all? { |c| c[:status] == 'PASS' } ? 'PASS' : 'FAIL'
       save
       @report[:status] == 'PASS' ? 0 : 1
+    rescue Exception => e
+      @report[:status] = 'ERROR'
+      @report[:completed] = true
+      @report[:error] = "#{e.class}: #{e.message}"
+      @report[:backtrace] = e.backtrace&.first(15)
+      save
+      warn "#{e.class}: #{e.message}"
+      raise if e.is_a?(SignalException)
+
+      2
     end
 
     def prepare
-      required = [*@engine, 'pdftotext', 'pdftoppm', 'zip', 'unzip']
+      candidates = @engine ? [@engine] : %w[xelatex lualatex pdflatex]
+      real_engine = candidates.lazy.map { |e| executable(e) }.find(&:itself)
+      assert(real_engine,
+             "No LaTeX engine found on PATH (looked for #{candidates.join(', ')}); " \
+             'install TeX Live or set "engine" in test-config.json.')
+      required = %w[pdftotext pdftoppm zip unzip]
       missing = required.reject { |name| executable(name) }
-      assert(missing.empty?, "Missing tools: #{missing.join(', ')}")
-      real_engine = executable(@engine || 'xelatex')
-      @report[:engine_version] = Open3.capture2e(real_engine, '--version').first.lines.first.to_s.strip
-      @report[:latex_it_version] = Open3.capture2e(RbConfig.ruby, @latex, '--version').first.strip
+      assert(missing.empty?, "Missing tools: #{missing.join(', ')} (poppler-utils / zip provide these)")
+
+      engine_out, engine_st = Open3.capture2e(real_engine, '--version')
+      assert(engine_st.success?,
+             "#{real_engine} --version failed (exit #{engine_st.exitstatus}): #{engine_out.lines.first}")
+      @report[:engine_version] = engine_out.lines.first.to_s.strip
+
+      latex_out, latex_st = Open3.capture2e(RbConfig.ruby, @latex, '--version')
+      assert(latex_st.success?,
+             "#{@latex} --version failed (exit #{latex_st.exitstatus}): #{latex_out.lines.first(3).join}")
+      @report[:latex_it_version] = latex_out.strip
+
+      install_engine_wrappers(candidates)
+      { detail: 'Required tools available; compiler invocations recorded independently.' }
+    end
+
+    def install_engine_wrappers(candidates)
       wrappers = File.join(@root, 'test-engine-bin')
       FileUtils.mkdir_p(wrappers)
-      wrapper_engines = @engine ? [@engine] : %w[xelatex lualatex pdflatex]
-      wrapper_engines.each do |engine|
+      candidates.each do |engine|
         real_engine = executable(engine)
         next unless real_engine
 
         wrapper = "#!/usr/bin/env ruby\nrequire 'json'\n" \
                   "File.open(#{@counter.dump}, 'a') { |f| f.puts(JSON.generate(ARGV)) }\n" \
                   "exec(#{real_engine.dump}, *ARGV)\n"
-        File.write(File.join(wrappers, engine), wrapper)
-        File.chmod(0o755, File.join(wrappers, engine))
+        path = File.join(wrappers, engine)
+        File.write(path, wrapper)
+        File.chmod(0o755, path)
       end
       ENV['PATH'] = "#{wrappers}:#{ENV.fetch('PATH')}"
-      { detail: 'Required tools available; compiler invocations recorded independently.' }
     end
 
     def executable(name)
@@ -124,7 +209,7 @@ module ArxivTestWorker
     def dependency
       recorder = File.join(@project, 'junk', File.basename(@main, File.extname(@main)) + '.fls')
       paths = if File.file?(recorder)
-                File.readlines(recorder).grep(/^INPUT /).map do |line|
+                read_text(recorder).each_line.grep(/^INPUT /).map do |line|
                   line.delete_prefix('INPUT ').strip
                 end
               else
@@ -137,51 +222,50 @@ module ArxivTestWorker
     end
 
     def change_dependency
-      # Restore ordinary cache settings before the same-mtime dependency probe.
       settled = check('settle_before_dependency') { require_success(compile) }
       return record('dependency_change', 'SKIP', detail: 'Could not establish baseline.') unless settled
 
       path = dependency
-      original = File.binread(path)
-      stat = File.stat(path)
-      check('dependency_change') do
-        File.binwrite(path, original + "\n% latex_it dependency probe\n")
-        File.utime(stat.atime, stat.mtime, path)
-        result = compile
-        require_success(result)
-        assert(result[:passes].positive?, 'Changed source with preserved mtime was incorrectly cached')
-        result.merge(detail: "Rebuilt after changing #{path.delete_prefix(@root + '/')} with its mtime preserved.")
-      end
-      check('dependency_rerun') { unchanged }
-    ensure
-      if original
-        File.binwrite(path, original)
-        File.utime(stat.atime, stat.mtime, path)
+      with_original(path) do
+        stat = @restores[path][1]
+        check('dependency_change') do
+          original = @restores[path][0]
+          probe = "\n% latex_it dependency probe\n% %%latex_it-probe\n"
+          File.binwrite(path, original + probe)
+          File.utime(stat.atime, stat.mtime, path)
+          result = compile
+          require_success(result)
+          assert(result[:passes].positive?, 'Changed source with preserved mtime was incorrectly cached')
+          result.merge(detail: "Rebuilt after changing #{path.delete_prefix(@root + '/')} with its mtime preserved.")
+        end
+        check('dependency_rerun') { unchanged }
       end
     end
 
     def failure_recovery
-      original = File.binread(@main)
-      stat = File.stat(@main)
-      check('invalid_tex') do
-        File.binwrite(@main, "\\latexItDeliberatelyUndefinedProbe\n" + original)
-        result = compile
-        assert(result[:passes].positive?, 'Invalid-input check never invoked the compiler')
-        assert(result[:exit_status] != 0, 'Invalid TeX unexpectedly returned success')
-        result.merge(detail: 'Deliberately invalid TeX correctly returned a nonzero exit status.')
-      end
-      File.binwrite(@main, original)
-      File.utime(stat.atime, stat.mtime, @main)
-      check('recovery') do
-        result = compile
-        require_success(result)
-        assert(result[:passes].positive?, 'Recovery incorrectly reused the failed build cache')
-        result
-      end
-    ensure
-      if original
-        File.binwrite(@main, original)
-        File.utime(stat.atime, stat.mtime, @main)
+      with_original(@main) do
+        check('invalid_tex') do
+          original = @restores[@main][0]
+          probe = "\\latexItDeliberatelyUndefinedProbe\n% %%latex_it-probe\n"
+          File.binwrite(@main, probe + original)
+          result = compile
+          assert(result[:passes].positive?, 'Invalid-input check never invoked the compiler')
+          assert(result[:exit_status].positive? && result[:exit_status] < 128,
+                 "Expected a clean nonzero exit; got #{result[:exit_status]} " \
+                 "(signal death or crash) — see #{result[:log]}")
+          if result[:log] && File.file?(result[:log])
+            assert(read_text(result[:log]).include?('latexItDeliberatelyUndefinedProbe'),
+                   "Compiler failed for a reason unrelated to the probe; see #{result[:log]}")
+          end
+          result.merge(detail: 'Deliberately invalid TeX correctly returned a nonzero exit status.')
+        end
+        restore_one(@main)
+        check('recovery') do
+          result = compile
+          require_success(result)
+          assert(result[:passes].positive?, 'Recovery incorrectly reused the failed build cache')
+          result
+        end
       end
     end
 
@@ -206,7 +290,7 @@ module ArxivTestWorker
     def package(*flags)
       result = compile(*flags)
       require_success(result)
-      output = File.read(result[:log])
+      output = read_text(result[:log])
       assert(output.include?('[VERIFIED]'), 'Command succeeded without confirming archive verification')
       if flags.include?('--arxiv')
         assert(output.match?(/visual|pixel|rendered/i) && !output.match?(/visual.*skip/i),
@@ -229,19 +313,50 @@ module ArxivTestWorker
       command([*args, *flags, File.basename(@main)])
     end
 
-    def command(argv)
+    def command(argv, timeout: COMMAND_TIMEOUT)
       before = File.file?(@counter) ? File.foreach(@counter).count : 0
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @command_index = (@command_index || 0) + 1
       log = File.join(@logs, format('%02d-%s.log', @command_index, @active_check))
       @last_command = { command: argv, log: log }
-      pid = Process.spawn(*argv, chdir: @project, out: log, err: %i[child out])
-      _, status = Process.wait2(pid)
+      pid = Process.spawn(*argv, chdir: @project, in: File::NULL,
+                          out: log, err: %i[child out], pgroup: true)
+      status = wait_bounded(pid, timeout, log)
       after = File.file?(@counter) ? File.foreach(@counter).count : 0
       @last_command.merge!(exit_status: status.exitstatus || 128 + status.termsig,
                            elapsed: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(3),
                            passes: after - before)
       @last_command.dup
+    end
+
+    def wait_bounded(pid, timeout, log)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      loop do
+        _, status = Process.waitpid2(pid, Process::WNOHANG)
+        return status if status
+
+        if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          reap(pid)
+          raise CheckError, "timed out after #{timeout}s; see #{log}"
+        end
+        sleep 0.05
+      end
+    rescue Exception
+      reap(pid)
+      raise
+    end
+
+    def reap(pid)
+      Process.kill('TERM', -pid)
+      20.times do
+        return if Process.waitpid(pid, Process::WNOHANG)
+
+        sleep 0.1
+      end
+      Process.kill('KILL', -pid)
+      Process.waitpid(pid)
+    rescue Errno::ESRCH, Errno::ECHILD, Errno::EPERM
+      nil
     end
 
     def require_success(result)
@@ -261,7 +376,7 @@ module ArxivTestWorker
       result = yield
       record(name, 'PASS', **(result || {}))
       true
-    rescue StandardError => e
+    rescue StandardError, ScriptError => e
       record(name, 'FAIL', **@last_command, detail: "#{e.class}: #{e.message}")
       false
     end
@@ -277,10 +392,27 @@ module ArxivTestWorker
     def save
       @report[:updated_at] = Time.now.utc.iso8601
       path = File.join(@root, 'test-worker-report.json')
-      File.write(path + '.tmp', JSON.pretty_generate(@report) + "\n")
-      File.rename(path + '.tmp', path)
+      tmp = "#{path}.tmp"
+      File.write(tmp, JSON.pretty_generate(@report) + "\n")
+      File.rename(tmp, path)
+    rescue SystemCallError => e
+      FileUtils.rm_f(tmp) rescue nil
+      warn "arxiv_test_worker: could not persist report: #{e.message}"
     end
   end
 end
 
-exit ArxivTestWorker::Runner.new(Dir.pwd).run if __FILE__ == $PROGRAM_NAME
+if __FILE__ == $PROGRAM_NAME
+  begin
+    exit ArxivTestWorker::Runner.new(Dir.pwd).run
+  rescue StandardError, ScriptError => e
+    report_path = File.join(Dir.pwd, 'test-worker-report.json')
+    File.write(report_path,
+               JSON.pretty_generate(status: 'ERROR', completed: true,
+                                    error: "#{e.class}: #{e.message}",
+                                    backtrace: e.backtrace&.first(10),
+                                    updated_at: Time.now.utc.iso8601) + "\n")
+    warn "arxiv_test_worker: #{e.class}: #{e.message}"
+    exit 2
+  end
+end

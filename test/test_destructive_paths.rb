@@ -196,4 +196,20 @@ class TestDestructivePaths < Minitest::Test
       end
     end
   end
+
+  def test_meta_target_writes_next_to_the_document
+    Dir.mktmpdir('latex_it_meta_test') do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'sub'))
+      File.write(File.join(dir, 'sub', 'paper.tex'),
+                 "\\documentclass{article}\n\\title{A Title}\n\\author{Ada Lovelace}\n" \
+                 "\\begin{document}\n\\begin{abstract}Short.\\end{abstract}\n\\end{document}\n")
+
+      _out, status = Open3.capture2e(BIN, '--meta', 'sub/paper.tex', chdir: dir)
+
+      assert status.success?
+      assert_path_exists File.join(dir, 'sub', 'arxiv_paper_meta.txt'),
+                         '--meta wrote the metadata file next to the caller, not the document'
+      refute_path_exists File.join(dir, 'arxiv_paper_meta.txt')
+    end
+  end
 end

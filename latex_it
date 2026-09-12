@@ -365,7 +365,19 @@ module LatexCLI
     end
   end
 
+  # Every other target handler reaches a Dir.chdir into the document's
+  # directory (builder.rb, packager.rb, arxiv.rb all do it); this one did not,
+  # so `l --meta sub/paper.tex` probed junk/paper.fls and junk/paper.log in the
+  # *caller's* directory -- silently returning default page and figure counts,
+  # or worse, counts from an unrelated document that happened to be there --
+  # and wrote arxiv_paper_meta.txt next to the caller instead of the paper.
   def self.process_meta_target(target, options)
+    Dir.chdir(File.expand_path(File.dirname(target))) do
+      write_meta_for(File.basename(target), options)
+    end
+  end
+
+  def self.write_meta_for(target, options)
     bname = File.basename(target, '.tex')
     pdf_path = File.file?("#{bname}.pdf") ? "#{bname}.pdf" : "junk/#{bname}.pdf"
     fls_path = "junk/#{bname}.fls"

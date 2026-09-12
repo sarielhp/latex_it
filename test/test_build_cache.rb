@@ -252,4 +252,51 @@ class TestBuildCache < Minitest::Test
       end
     end
   end
+
+  def test_sync_bbl_before_compile_overwrites_stale_junk_bbl
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        File.write('paper.bbl', "\\begin{thebibliography}{1}\n\\bibitem{a} Newer\n\\end{thebibliography}\n")
+        File.write('junk/paper.bbl', "\\begin{thebibliography}{1}\n\\bibitem{a} Stale\n\\end{thebibliography}\n")
+
+        # Make junk/paper.bbl older than paper.bbl
+        past = Time.now - 100
+        File.utime(past, past, 'junk/paper.bbl')
+
+        builder = LatexBuilder.new('paper.tex', options)
+        builder.send(:sync_bbl_before_compile)
+
+        assert_includes File.read('junk/paper.bbl'), 'Newer'
+      end
+    end
+  end
+
+  def test_bib_files_newer_than_bbl_discovers_bcf_datasources
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p(['junk', 'ext_bib'])
+        bib_file = File.expand_path('ext_bib/my_refs.bib')
+        File.write(bib_file, "@book{k, title={T}}\n")
+
+        bcf_xml = <<~XML
+          <?xml version="1.0" standalone="yes"?>
+          <bcf:controlfile xmlns:bcf="https://sourceforge.net/projects/biblatex">
+            <bcf:datasource type="file" datatype="bibtex">#{bib_file}</bcf:datasource>
+            <bcf:citekey>k</bcf:citekey>
+          </bcf:controlfile>
+        XML
+        File.write('junk/paper.bcf', bcf_xml)
+        File.write('junk/paper.bbl', "\\begin{thebibliography}{1}\n\\bibitem{k} T\n\\end{thebibliography}\n")
+
+        # Make junk/paper.bbl older than the bib file
+        past = Time.now - 100
+        File.utime(past, past, 'junk/paper.bbl')
+
+        builder = LatexBuilder.new('paper.tex', options)
+        assert builder.send(:bib_files_newer_than_bbl?),
+               'bib_files_newer_than_bbl? must check files found via discover_bib_files'
+      end
+    end
+  end
 end

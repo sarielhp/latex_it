@@ -166,7 +166,7 @@ class LatexBuilder
     return false unless sources.is_a?(Hash) && !sources.empty?
 
     build_time = state['saved_at'] || (File.exist?(state_file) ? File.mtime(state_file).to_i : 0)
-    root_files = Dir['*.tex'].select { |f| File.file?(f) } + bib_files_on_disk
+    root_files = Dir['*.tex'].select { |f| File.file?(f) } + discover_bib_files
     return false if root_files.any? do |f|
       File.mtime(f).to_i > build_time && (!sources[f] || Digest::SHA256.file(f).hexdigest != sources[f]['sha'])
     end
@@ -238,7 +238,7 @@ class LatexBuilder
     return false unless File.exist?("junk/#{@bfilename}.aux") || File.exist?("junk/#{@bfilename}.bcf")
 
     bbl_mtime = File.mtime(fnbbl)
-    bib_files_on_disk.any? { |b| File.mtime(b) > bbl_mtime }
+    discover_bib_files.any? { |b| File.mtime(b) > bbl_mtime }
   end
 
   def extract_fls_dependencies(fls_path)
@@ -270,7 +270,7 @@ class LatexBuilder
     @input_snapshots = {}
     files_to_snapshot = [@filename]
     files_to_snapshot.concat(Dir['*.tex'].select { |f| File.file?(f) })
-    files_to_snapshot.concat(bib_files_on_disk)
+    files_to_snapshot.concat(discover_bib_files)
     if File.exist?("junk/#{@bfilename}.fls")
       files_to_snapshot.concat(extract_fls_dependencies("junk/#{@bfilename}.fls"))
     end
@@ -314,7 +314,7 @@ class LatexBuilder
     fls_path = "junk/#{@bfilename}.fls"
     deps = extract_fls_dependencies(fls_path)
     deps << @filename if File.exist?(@filename)
-    bib_files_on_disk.each { |b| deps << b }
+    discover_bib_files.each { |b| deps << b }
     deps.uniq
   end
 
@@ -540,9 +540,11 @@ class LatexBuilder
   def sync_bbl_before_compile
     root_bbl = "#{@bfilename}.bbl"
     junk_bbl = "junk/#{root_bbl}"
-    if File.exist?(root_bbl) && !File.exist?(junk_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
+    if File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
       FileUtils.mkdir_p('junk')
-      FileUtils.cp(root_bbl, junk_bbl)
+      if !File.exist?(junk_bbl) || File.mtime(root_bbl) > File.mtime(junk_bbl)
+        FileUtils.cp(root_bbl, junk_bbl)
+      end
     elsif @options[:trace] && File.exist?(junk_bbl) && !File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
       FileUtils.cp(junk_bbl, root_bbl)
     end
@@ -736,7 +738,7 @@ class LatexBuilder
   def detect_biber_control_file
     if File.exist?("junk/#{@bfilename}.bcf")
       bcf_content = LaTeXUtils.safe_read("junk/#{@bfilename}.bcf")
-      return true if bcf_content.include?('<bcf:citekey>') || @options[:bib] == true
+      return true if bcf_content.include?('<bcf:citekey') || @options[:bib] == true
     end
 
     run_xml_path = "junk/#{@bfilename}.run.xml"
@@ -761,7 +763,7 @@ class LatexBuilder
     bcf_path = "junk/#{@bfilename}.bcf"
     if File.exist?(bcf_path)
       bcf_content = LaTeXUtils.safe_read(bcf_path)
-      bcf_content.include?('<bcf:citekey>') || @options[:bib] == true
+      bcf_content.include?('<bcf:citekey') || @options[:bib] == true
     else
       @options[:bib] == true
     end

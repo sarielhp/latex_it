@@ -137,6 +137,9 @@ Journals and indexing services (ACM TAPS, IEEE PDF eXpress, arXiv) often reject 
 ### Pre-Flight Brace Auditing
 The built-in brace checker (`LaTeXBraceChecker`) runs before LaTeX starts, catching unmatched `{`, `}`, and mismatched brackets like `{]` across environments without waiting for a full compiler run.
 
+### Bibliography Source Pinpointing
+When LaTeX crashes during `\printbibliography` or `\bibliography` due to a syntax error in a `.bib` file (such as an unescaped `_` or `&`), standard TeX engines only report `\printbibliography` in `main.tex`. `latex_it` hooks BibLaTeX's entry processing, intercepts the active citation key, locates the entry and line in your `.bib` databases, and emits a companion error with line number and token hints. See [Troubleshooting Bibliography Errors](troubleshooting_bibliography_errors.md) for details.
+
 ---
 
 ## 5. AUCTeX & Editor Integration

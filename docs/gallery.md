@@ -161,3 +161,37 @@ See Figure~\ref{fig:myfig}.
 
 ---
 
+## 7. Bibliography Syntax Crash at \printbibliography (Pinpointing the Exact .bib Entry)
+
+**Problem Scenario:**
+An unescaped underscore (`_`) in a `.bib` database field (such as `journal = {NORDIC_J_COMP}`).
+
+```latex
+\documentclass{article}
+\usepackage[backend=biber]{biblatex}
+\addbibresource{refs.bib}
+\begin{document}
+Citing a seminal paper \cite{grss95}.
+\printbibliography
+\end{document}
+```
+
+**Companion `refs.bib`:**
+```bibtex
+@article{grss95,
+  author  = {Sariel Har-Peled},
+  title   = {A Fast Approximation Algorithm},
+  journal = {NORDIC_J_COMP},
+  year    = {1995}
+}
+```
+
+![7. Bibliography Syntax Crash at \printbibliography (Pinpointing the Exact .bib Entry)](images/gallery_07_bib_syntax_error.svg)
+
+### Commentary & Diagnosis
+
+- **Standard Tool (`latexmk` / `xelatex`)**: TeX crashes during `\printbibliography` with `! Missing $ inserted.` or `! Double subscript.` on line 7 of `paper.tex`. It offers zero indication of which citation key failed, which `.bib` file it came from, or what field caused the syntax crash, forcing authors into tedious binary-search debugging.
+- **`latex_it` Resolution**: Injects an AST hook into BibLaTeX's entry pipeline to capture the active citation key at the instant of failure, locates the entry and line in `refs.bib`, and prints an actionable companion error: `refs.bib:4: [latex_it] Bibliography error in entry 'grss95'` with `▸ Hint: Offending token 'NORDIC_J_COMP' found on this line.`.
+
+---
+

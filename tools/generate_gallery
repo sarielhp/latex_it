@@ -143,6 +143,35 @@ module GalleryGenerator
       problem: "Placing `\\label{...}` before `\\caption{...}` inside a floating `figure` or `table`.",
       standard_fails: "Standard compilers are **completely silent** and exit with code 0. However, `\\caption` is what increments the float counter; placing `\\label` before it causes `\\ref{fig:myfig}` to quietly bind to Section 1 instead of Figure 1, producing corrupt citations in published papers.",
       latex_it_wins: "Inspects float structure and elevates this silent bug to the **Alert** diagnostic tier: `6: Inverted \\label{fig:myfig} before \\caption in figure environment. Move \\label after or inside \\caption.`"
+    },
+    {
+      id: :bib_syntax_error,
+      filename: 'gallery_07_bib_syntax_error',
+      title: '7. Bibliography Syntax Crash at \\printbibliography (Pinpointing the Exact .bib Entry)',
+      left_pill: '❌ Blames \\printbibliography in paper.tex — .bib file & entry completely hidden!',
+      right_pill: "✔ Hooks BibLaTeX AST: pinpoints entry 'grss95' in refs.bib:4!",
+      tex: <<~TEX,
+        \\documentclass{article}
+        \\usepackage[backend=biber]{biblatex}
+        \\addbibresource{refs.bib}
+        \\begin{document}
+        Citing a seminal paper \\cite{grss95}.
+        \\printbibliography
+        \\end{document}
+      TEX
+      files: {
+        'refs.bib' => <<~BIB
+          @article{grss95,
+            author  = {Sariel Har-Peled},
+            title   = {A Fast Approximation Algorithm},
+            journal = {NORDIC_J_COMP},
+            year    = {1995}
+          }
+        BIB
+      },
+      problem: "An unescaped underscore (`_`) in a `.bib` database field (such as `journal = {NORDIC_J_COMP}`).",
+      standard_fails: "TeX crashes during `\\printbibliography` with `! Missing $ inserted.` or `! Double subscript.` on line 7 of `paper.tex`. It offers zero indication of which citation key failed, which `.bib` file it came from, or what field caused the syntax crash, forcing authors into tedious binary-search debugging.",
+      latex_it_wins: "Injects an AST hook into BibLaTeX's entry pipeline to capture the active citation key at the instant of failure, locates the entry and line in `refs.bib`, and prints an actionable companion error: `refs.bib:4: [latex_it] Bibliography error in entry 'grss95'` with `▸ Hint: Offending token 'NORDIC_J_COMP' found on this line.`."
     }
   ].freeze
 
@@ -186,6 +215,8 @@ module GalleryGenerator
     if l.start_with?('$')
       color = '#7dcfff'
       bold = true
+    elsif l =~ /\A<deleted \d+ lines>/
+      return [{ text: l, color: '#e0af68', bold: true, italic: true, font_size: '14.5px' }]
     elsif l =~ /\A(?:!|Collected error summary)/i
       color = '#f7768e'
       bold = true
@@ -239,7 +270,13 @@ module GalleryGenerator
     pill_fg = is_left ? '#f7768e' : '#9ece6a'
 
     rendered_lines = lines.map.with_index do |line_toks, i|
-      spans = line_toks.map { |t| %(<tspan fill="#{t[:color]}" #{t[:bold] ? 'font-weight="bold"' : ''}>#{escape_xml(t[:text])}</tspan>) }.join
+      spans = line_toks.map do |t|
+        extra = ''
+        extra += ' font-weight="bold"' if t[:bold]
+        extra += ' font-style="italic"' if t[:italic]
+        extra += %( font-size="#{t[:font_size]}") if t[:font_size]
+        %(<tspan fill="#{t[:color]}"#{extra}>#{escape_xml(t[:text])}</tspan>)
+      end.join
       %(<text x="0" y="#{i * line_h}">#{spans}</text>)
     end.join("\n        ")
 
@@ -295,17 +332,66 @@ module GalleryGenerator
     SVG
   end
 
+  def self.truncate_latexmk(lines)
+    cleaned = lines.reject { |l| l =~ /\Acp: cannot stat/ || l =~ /\ARunning 'cp / }
+    return cleaned if cleaned.size <= 18
+
+    cmd_line = cleaned.first
+    rest = cleaned[1..]
+    err_idx = rest.index { |l| l =~ /\A!\s+/ || l =~ /\ARunaway argument\?/ || l =~ /\ALaTeX Error:/i }
+
+    if err_idx
+      truncate_latexmk_error(cmd_line, rest, err_idx)
+    else
+      truncate_latexmk_success(cmd_line, rest)
+    end
+  end
+
+  def self.truncate_latexmk_error(cmd_line, rest, err_idx)
+    pre_start = [err_idx - 1, 0].max
+    post_end = [err_idx + 6, rest.size - 1].min
+
+    res = [cmd_line]
+    res << "<deleted #{pre_start} lines>" if pre_start > 3
+    res.concat(rest[pre_start..post_end])
+
+    summary_idx = rest.rindex { |l| l =~ /Collected error summary/ }
+    if summary_idx && summary_idx > post_end
+      skipped = summary_idx - post_end - 1
+      res << "<deleted #{skipped} lines>" if skipped > 2
+      res.concat(rest[summary_idx..[summary_idx + 3, rest.size - 1].min])
+    elsif rest.size - (post_end + 1) > 3
+      res << "<deleted #{rest.size - (post_end + 1)} lines>"
+    end
+    res
+  end
+
+  def self.truncate_latexmk_success(cmd_line, rest)
+    tail = rest.select { |l| l =~ /LaTeX Warning:|Output written|All targets/i }
+    tail = rest.last(4) if tail.empty?
+    skipped = rest.size - tail.size
+
+    res = [cmd_line]
+    res << "<deleted #{skipped} lines>" if skipped > 3
+    res.concat(tail)
+    res
+  end
+
   def self.compile_scenario(scenario)
     Dir.mktmpdir('gallery_case') do |dir|
       tex_file = File.join(dir, 'paper.tex')
       File.write(tex_file, scenario[:tex])
+      scenario[:files]&.each do |fname, content|
+        File.write(File.join(dir, fname), content)
+      end
 
       out_mk, _ = Open3.capture2e('latexmk', '-xelatex', '-halt-on-error', 'paper.tex', chdir: dir)
       out_l, _ = Open3.capture2e({ 'CLICOLOR_FORCE' => '1' }, LATEX_IT, '--no-lock', '-1', 'paper.tex', chdir: dir)
 
       left_raw = ['$ latexmk -xelatex paper.tex'] + out_mk.lines.map(&:chomp)
+      left_truncated = truncate_latexmk(left_raw)
       right_raw = ['$ l paper.tex'] + out_l.lines.map(&:chomp)
-      [left_raw, right_raw]
+      [left_truncated, right_raw]
     end
   end
 
@@ -332,6 +418,15 @@ module GalleryGenerator
 
   def self.build_markdown_content(image_prefix: 'images/')
     sections = SCENARIOS.map do |s|
+      files_block = if s[:files]
+                      "\n" + s[:files].map do |fname, fcontent|
+                        lang = fname.end_with?('.bib') ? 'bibtex' : 'latex'
+                        "**Companion `#{fname}`:**\n```#{lang}\n#{fcontent.strip}\n```\n"
+                      end.join("\n")
+                    else
+                      ''
+                    end
+
       <<~SECTION
         ## #{s[:title]}
 
@@ -341,7 +436,7 @@ module GalleryGenerator
         ```latex
         #{s[:tex].strip}
         ```
-
+        #{files_block}
         ![#{s[:title]}](#{image_prefix}#{s[:filename]}.svg)
 
         ### Commentary & Diagnosis

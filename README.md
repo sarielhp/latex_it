@@ -136,6 +136,7 @@ The installer creates several convenient shortcuts based on the executable name:
 For technical details, configuration options, and advanced features, see:
 
 - **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
+- **[docs/troubleshooting_bibliography_errors.md](docs/troubleshooting_bibliography_errors.md)**: Diagnosing and solving cryptic `\printbibliography` crashes and pinpointing errors in `.bib` databases.
 - **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.
 - **[docs/diagnostics.md](docs/diagnostics.html)**: The 4-tier diagnostic hierarchy (**Alerts** & **Whatevers** explained), error explanations (`-e`), and threshold tuning.
 - **[docs/errors/README.md](docs/errors/README.md)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.

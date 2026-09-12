@@ -111,7 +111,10 @@ class LatexBuilder
     snapshot_build_inputs!
     total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
 
-    return false unless run_convergence_loop
+    unless run_convergence_loop
+      sync_bbl_to_root
+      return false
+    end
 
     puts ''
     finalize_build_outputs(total_t0)
@@ -518,11 +521,7 @@ class LatexBuilder
       FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux")
     end
 
-    root_bbl = "#{@bfilename}.bbl"
-    if File.exist?(root_bbl) && !File.exist?("junk/#{root_bbl}") && LaTeXUtils.bbl_has_entries?(root_bbl)
-      FileUtils.mkdir_p('junk')
-      FileUtils.cp(root_bbl, "junk/#{root_bbl}")
-    end
+    sync_bbl_before_compile
 
     # Every entry must be anchored to the document stem or be a name TeX itself
     # reserves. A bare 'log.txt' was removed: this tool writes its transcript to
@@ -538,6 +537,25 @@ class LatexBuilder
     FileUtils.rm_f(root_bbl) if File.exist?(root_bbl) && !LaTeXUtils.bbl_has_entries?(root_bbl)
   end
 
+  def sync_bbl_before_compile
+    root_bbl = "#{@bfilename}.bbl"
+    junk_bbl = "junk/#{root_bbl}"
+    if File.exist?(root_bbl) && !File.exist?(junk_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
+      FileUtils.mkdir_p('junk')
+      FileUtils.cp(root_bbl, junk_bbl)
+    elsif File.exist?(junk_bbl) && !File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
+      FileUtils.cp(junk_bbl, root_bbl)
+    end
+  end
+
+  def sync_bbl_to_root
+    junk_bbl = "junk/#{@bfilename}.bbl"
+    root_bbl = "#{@bfilename}.bbl"
+    return unless File.exist?(junk_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
+
+    update_target_file(junk_bbl, root_bbl)
+  end
+
   def pass_environment
     env = LaTeXCompatibility.compiler_environment(@options, ENV.to_h, @filename).dup
     env['max_print_line'] ||= '2048'
@@ -550,11 +568,65 @@ class LatexBuilder
     Process.kill('KILL', pid) rescue nil
   end
 
+  def shell_quote(str)
+    s = str.to_s
+    return s if s.match?(%r{\A[a-zA-Z0-9_.\-\/=:]+\z})
+
+    "'#{s.gsub("'", "'\\\\''")}'"
+  end
+
+  def format_trace_command(env, cmd_args, cwd = Dir.pwd)
+    overrides = []
+    tracked = %w[TEXINPUTS BIBINPUTS max_print_line]
+    tracked.each do |k|
+      overrides << "#{k}=#{shell_quote(env[k])}" if env[k] && env[k] != ENV[k]
+    end
+    (env.keys - ENV.keys).each do |k|
+      next if tracked.include?(k)
+
+      overrides << "#{k}=#{shell_quote(env[k])}"
+    end
+    (env.keys & ENV.keys).each do |k|
+      next if tracked.include?(k) || env[k] == ENV[k]
+
+      overrides << "#{k}=#{shell_quote(env[k])}"
+    end
+
+    cmd_str = cmd_args.map { |arg| shell_quote(arg.to_s) }.join(' ')
+    prefix = overrides.empty? ? '' : "#{overrides.join(' ')} "
+    "(cd #{shell_quote(cwd)} && #{prefix}#{cmd_str})"
+  end
+
+  def trace_command(env, cmd_args, cwd = Dir.pwd)
+    puts Rainbow("[trace] #{format_trace_command(env, cmd_args, cwd)}").cyan
+  end
+
+  def trace_status(status)
+    code = status&.exitstatus || (status&.respond_to?(:termsig) && status&.termsig ? 128 + status.termsig : 1)
+    status_str = "[trace] => exit status #{code}"
+    puts(code.zero? ? Rainbow(status_str).green : Rainbow(status_str).yellow)
+  end
+
   def capture_pass_output(cmd_args)
     timeout = (@options[:timeout] || ENV['LATEX_IT_TIMEOUT'] || DEFAULT_PASS_TIMEOUT).to_i
     env = pass_environment
-    return Open3.capture2e(env, *cmd_args) if timeout <= 0
+    trace_command(env, cmd_args) if @options[:trace]
+    out, status = if timeout <= 0
+                    Open3.capture2e(env, *cmd_args)
+                  else
+                    capture_with_timeout(env, cmd_args, timeout)
+                  end
+    trace_status(status) if @options[:trace]
+    [out, status]
+  rescue Errno::ENOENT
+    raise
+  rescue StandardError => e
+    err_status = ProcessResultStatus.new(1, false, nil, false)
+    trace_status(err_status) if @options[:trace]
+    ["\n! Process Error: #{e.message}\n", err_status]
+  end
 
+  def capture_with_timeout(env, cmd_args, timeout)
     Open3.popen2e(env, *cmd_args, pgroup: true) do |stdin, stdout_err, wait_thr|
       stdin.close rescue nil
       output = +''
@@ -573,13 +645,10 @@ class LatexBuilder
         reader.kill rescue nil
       end
     end
-  rescue Errno::ENOENT
-    raise
-  rescue StandardError => e
-    ["\n! Process Error: #{e.message}\n", ProcessResultStatus.new(1, false, nil, false)]
   end
 
   def run_latex_pass(suffix)
+    puts '' if @options[:trace]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     lgx = "#{@pdferr}#{suffix}"
     FileUtils.rm_f(lgx)
@@ -625,7 +694,7 @@ class LatexBuilder
   def write_pass_header(lgx, cmd_args)
     File.open(lgx, 'a') do |f|
       f.puts '========================================'
-      f.puts cmd_args.map(&:to_s).join(' ')
+      f.puts format_trace_command(pass_environment, cmd_args)
       f.puts '========================================'
       f.puts Time.now.strftime('%a %b %d %H:%M:%S %Z %Y')
       f.puts '========================================'
@@ -722,6 +791,7 @@ class LatexBuilder
   end
 
   def run_bib_pass(tool)
+    puts '' if @options[:trace]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     fnbbl = "junk/#{@bfilename}.bbl"
     root_bbl = "#{@bfilename}.bbl"
@@ -756,7 +826,7 @@ class LatexBuilder
       return false
     end
 
-    FileUtils.cp(fnbbl, root_bbl)
+    update_target_file(fnbbl, root_bbl)
     true
   end
 
@@ -959,8 +1029,8 @@ class LatexBuilder
   # previous PDF in place forever. update_on_diff can be enabled globally in
   # config, so this was not limited to an explicit -d.
   def pdf_text_unchanged?(src, dst)
-    txt_src, status_src = Open3.capture2e('pdftotext', '-layout', src, '-')
-    txt_dst, status_dst = Open3.capture2e('pdftotext', '-layout', dst, '-')
+    txt_src, status_src = trace_or_capture_pdftotext(src)
+    txt_dst, status_dst = trace_or_capture_pdftotext(dst)
     return false unless status_src.success? && status_dst.success?
 
     if txt_src.strip.empty?
@@ -971,6 +1041,14 @@ class LatexBuilder
 
     puts "\n  \e[37;45m PDF text content unchanged (skipped target overwrite) \e[0m"
     true
+  end
+
+  def trace_or_capture_pdftotext(path)
+    cmd = ['pdftotext', '-layout', path, '-']
+    trace_command(ENV.to_h, cmd) if @options[:trace]
+    out, status = Open3.capture2e(*cmd)
+    trace_status(status) if @options[:trace]
+    [out, status]
   end
 
   def atomic_copy(src, dst)

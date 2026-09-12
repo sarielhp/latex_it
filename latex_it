@@ -180,6 +180,7 @@ module LatexCLI
       color: cfg['color'],
       no_env: is_env_free,
       verbose: false,
+      trace: cfg['trace'] == true,
       emacs: cfg['emacs'] == true,
       werror: cfg['werror'] == true,
       revtex4: cfg['revtex4'].is_a?(Hash) ? cfg['revtex4'] : {},
@@ -287,6 +288,7 @@ module LatexCLI
     opts.on('--no-env', 'Reset environment variables used by LaTeX/BibTeX/Biber') { options[:no_env] = true }
     opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') { options[:emacs] = true }
     opts.on('-v', '--verbose', 'Verbose output (e.g. show box text snippets)') { options[:verbose] = true }
+    opts.on('--trace', 'Print exact external subprocess commands, working directory, and environment overrides') { options[:trace] = true }
     opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero code') { options[:werror] = true }
     opts.on('-M', '--deps', 'Print Makefile dependency rule for the document and exit') { options[:deps] = true }
     opts.on('--alert-hbox PT', Float, 'Overfull hbox threshold in pt to classify as Alert (default: 24.0)') { |v| options[:alert_overfull_pt] = v.to_f }
@@ -331,6 +333,7 @@ module LatexCLI
       '    -t, --verify                     Verify zip portability in sandbox',
       '    -W, --werror                     Treat compilation warnings as errors',
       '        --engine ENGINE              Compiler: xelatex, lualatex, pdflatex',
+      '        --trace                      Print external subprocess commands and environment',
       '        --arxiv                      Prepare sanitized arXiv zip package',
       '    -E, --examples                   Show detailed usage examples',
       '        --help-all                   Show all available options',

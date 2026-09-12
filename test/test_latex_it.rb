@@ -1340,4 +1340,66 @@ class TestLatexItCLI < Minitest::Test
     refute_includes stripped, 'and a comment'
     refute_includes stripped, 'inline comment'
   end
+
+  def test_format_trace_command_includes_cwd_and_overrides
+    builder = LatexBuilder.new('main.tex', trace: true)
+    env = ENV.to_h.merge('TEXINPUTS' => '.:custom_styles:', 'max_print_line' => '2048')
+    cmd = ['xelatex', '-output-directory=junk', 'main.tex']
+    formatted = builder.send(:format_trace_command, env, cmd, '/tmp/doc')
+
+    assert_includes formatted, 'cd /tmp/doc'
+    assert_includes formatted, 'TEXINPUTS=.:custom_styles:'
+    assert_includes formatted, 'max_print_line=2048'
+    assert_includes formatted, 'xelatex -output-directory=junk main.tex'
+  end
+
+  def test_trace_output_during_pass_execution
+    builder = LatexBuilder.new('main.tex', trace: true, timeout: 5)
+    out_capture = StringIO.new
+    orig_stdout = $stdout
+    begin
+      $stdout = out_capture
+      _out, status = builder.send(:capture_pass_output, ['echo', 'trace_test'])
+      assert status.success?
+    ensure
+      $stdout = orig_stdout
+    end
+
+    trace_log = out_capture.string
+    assert_includes trace_log, '[trace]'
+    assert_includes trace_log, 'echo trace_test'
+    assert_includes trace_log, 'exit status 0'
+  end
+
+  def test_sync_bbl_before_compile_bidirectional
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        bbl_content = "\\begin{thebibliography}{1}\n\\bibitem{a} Test\n\\end{thebibliography}\n"
+        File.write('junk/paper.bbl', bbl_content)
+
+        builder = LatexBuilder.new('paper.tex', {})
+        builder.send(:sync_bbl_before_compile)
+
+        assert File.exist?('paper.bbl')
+        assert_equal bbl_content, File.read('paper.bbl')
+      end
+    end
+  end
+
+  def test_sync_bbl_to_root_promotes_bbl
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('junk')
+        bbl_content = "\\begin{thebibliography}{1}\n\\bibitem{b} Another\n\\end{thebibliography}\n"
+        File.write('junk/paper.bbl', bbl_content)
+
+        builder = LatexBuilder.new('paper.tex', {})
+        builder.send(:sync_bbl_to_root)
+
+        assert File.exist?('paper.bbl')
+        assert_equal bbl_content, File.read('paper.bbl')
+      end
+    end
+  end
 end

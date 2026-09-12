@@ -45,6 +45,9 @@ module LaTeXConfig
       // Display execution timing diagnostics per pass (-T / --time)
       "time": false,
 
+      // Print exact external subprocess commands and environment overrides (--trace)
+      "trace": false,
+
       // Terminal color output: true (force), false (disable), or null (auto-detect)
       "color": null,
 

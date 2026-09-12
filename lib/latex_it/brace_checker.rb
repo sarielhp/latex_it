@@ -22,6 +22,19 @@ class LaTeXBraceChecker
   # so they also stopped every other .tex file from being checked at all.
   # The braces on such a line are balanced, so plain counting gives the right
   # answer once the environment tracking is skipped.
+  # \verb takes the character straight after it as the delimiter -- any
+  # non-letter will do. The old pattern hardcoded a short list, so common
+  # choices such as = : - . ; ( < were not recognised and braces inside the
+  # verbatim text were counted. Listing '*' as a delimiter also broke the
+  # starred form \verb*|...|, which hunted for a second '*'.
+  INLINE_VERBATIM_PATTERN = /\A\\(?:verb|lstinline|mintinline)\*?(?:\[[^\]]*\])?(?:\{[a-zA-Z]+\})?([^a-zA-Z0-9\s])(.*?)\1/.freeze
+
+  # A '%' inside a URL argument is a percent-escape, not a comment. Consuming
+  # the whole argument here keeps scan_line's comment handling from truncating
+  # the line and reporting the macro's own brace as unclosed. \href takes only
+  # its first argument; the second is ordinary text and is scanned normally.
+  URL_ARGUMENT_PATTERN = /\A\\(?:url|nolinkurl|path|href)\{[^{}]*\}/.freeze
+
   MACRO_DEFINITION_PATTERN = /\\(?:(?:re)?new(?:command|environment)|providecommand|
                                DeclareRobustCommand|(?:e|g|x)?def)\b/x.freeze
 
@@ -190,8 +203,10 @@ class LaTeXBraceChecker
     elsif rest =~ /\A\\\]/
       process_env_end('\\[', line_no)
       bs_start + 2
-    elsif rest =~ /\A\\verb([*|#+~\/!@^"'$])(.*?)\1/
-      bs_start + Regexp.last_match(0).length
+    elsif (m = rest.match(INLINE_VERBATIM_PATTERN))
+      bs_start + m[0].length
+    elsif (m = rest.match(URL_ARGUMENT_PATTERN))
+      bs_start + m[0].length
     end
   end
 

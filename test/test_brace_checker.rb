@@ -68,4 +68,32 @@ class TestBraceChecker < Minitest::Test
     refute_empty errors, 'the checker stopped reporting a real extra closing brace'
     assert_match(/Extra closing brace/, errors.first[:text])
   end
+
+  def test_inline_verbatim_with_any_delimiter_is_not_flagged
+    {
+      'equals delimiter' => "\\verb=x{y=\n",
+      'colon delimiter' => "\\verb:a{b:\n",
+      'dash delimiter' => "\\verb-a{b-\n",
+      'starred verb' => "\\verb*|a{b|\n",
+      'starred verb, equals' => "\\verb*=a{b=\n",
+      'lstinline' => "\\lstinline!x{y!\n",
+      'lstinline with options' => "\\lstinline[language=C]!x{y!\n",
+      'mintinline' => "\\mintinline{c}|x| and \\verb+z{+\n",
+      'pipe delimiter (previously ok)' => "\\verb|x{y|\n",
+      'plus delimiter (previously ok)' => "\\verb+x{y+\n"
+    }.each { |label, src| assert_silent(src, label) }
+  end
+
+  def test_percent_inside_url_like_macros_is_not_a_comment
+    {
+      'url with percent escape' => "\\url{http://x.org/a%7Eb}\n",
+      'path with percent' => "\\path{/tmp/a%20b}\n",
+      'nolinkurl' => "\\nolinkurl{http://x.org/%7Ejoe}\n",
+      'href first argument' => "\\href{http://x.org/a%7Eb}{the link}\n"
+    }.each { |label, src| assert_silent(src, label) }
+  end
+
+  def test_real_comment_still_ends_the_line
+    assert_silent("x % an unbalanced { in a comment\n", 'a brace inside a real comment')
+  end
 end

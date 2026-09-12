@@ -39,6 +39,19 @@
       "timestamp": "2026-09-12T14:16:09Z",
       "files_edited": 8,
       "summary": "reviews/archive/003_summary.md"
+    },
+    {
+      "number": "004",
+      "profile": "resilience",
+      "model": "Gemini 3.8 Flash (Tier 0 Workhorse)",
+      "tier": "tier0",
+      "backend": "gemini",
+      "findings": 7,
+      "outcome": "remediated",
+      "log": "reviews/logs/review_004_resilience.log",
+      "timestamp": "2026-09-12T15:43:17Z",
+      "files_edited": 6,
+      "summary": "reviews/archive/004_summary.md"
     }
   ]
 }

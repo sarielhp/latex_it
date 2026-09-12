@@ -69,6 +69,7 @@ Regression tests were updated and added in `test/test_latex_it.rb` and `test/tes
 - **Issue**: `--pdf` was registered with "Generate PDF output (default behavior)" but its action block was an empty `# No-op` (since only PDF generation is supported). `--fast` similarly advertised an obsolete compatibility no-op ("incremental rebuilds are automatic"). Both cluttered help text.
 - **Status / Mitigation**: Fixed. Removed `opts.on('--pdf'...)` and `opts.on('--fast'...)` from `add_compilation_options_primary`. In `LatexCLI.normalize_argv!`, added `argv.delete('--fast')` so existing scripts passing `--fast` continue to run cleanly as hidden no-ops. Invocations of `--pdf` are rejected as invalid options.
 - **Verification**:
+- **Differential Audit**: Clean (0 defects in diff)
   - `test/test_latex_it.rb` (`test_help_flag` and `test_help_all_flag`): verified `--fast` and `--pdf` are not present in any help text.
   - `test/test_latex_it.rb` (`test_canonical_cli_flags_and_anti_alias`): verified `--fast` is accepted without error and `--pdf` is rejected as an invalid option.
 

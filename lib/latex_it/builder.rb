@@ -112,7 +112,7 @@ class LatexBuilder
     total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
 
     unless run_convergence_loop
-      sync_bbl_to_root
+      sync_bbl_to_root if @options[:trace]
       return false
     end
 
@@ -543,7 +543,7 @@ class LatexBuilder
     if File.exist?(root_bbl) && !File.exist?(junk_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
       FileUtils.mkdir_p('junk')
       FileUtils.cp(root_bbl, junk_bbl)
-    elsif File.exist?(junk_bbl) && !File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
+    elsif @options[:trace] && File.exist?(junk_bbl) && !File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
       FileUtils.cp(junk_bbl, root_bbl)
     end
   end
@@ -826,7 +826,7 @@ class LatexBuilder
       return false
     end
 
-    update_target_file(fnbbl, root_bbl)
+    update_target_file(fnbbl, root_bbl) if @options[:trace] || File.exist?(root_bbl)
     true
   end
 

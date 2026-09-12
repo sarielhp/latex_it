@@ -1371,30 +1371,35 @@ class TestLatexItCLI < Minitest::Test
     assert_includes trace_log, 'exit status 0'
   end
 
-  def test_sync_bbl_before_compile_bidirectional
+  def test_sync_bbl_before_compile_trace_only
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         FileUtils.mkdir_p('junk')
         bbl_content = "\\begin{thebibliography}{1}\n\\bibitem{a} Test\n\\end{thebibliography}\n"
         File.write('junk/paper.bbl', bbl_content)
 
+        # Without trace: do not contaminate root
         builder = LatexBuilder.new('paper.tex', {})
         builder.send(:sync_bbl_before_compile)
+        refute File.exist?('paper.bbl')
 
+        # With trace: promote to root
+        builder_trace = LatexBuilder.new('paper.tex', trace: true)
+        builder_trace.send(:sync_bbl_before_compile)
         assert File.exist?('paper.bbl')
         assert_equal bbl_content, File.read('paper.bbl')
       end
     end
   end
 
-  def test_sync_bbl_to_root_promotes_bbl
+  def test_sync_bbl_to_root_promotes_bbl_when_trace_active
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         FileUtils.mkdir_p('junk')
         bbl_content = "\\begin{thebibliography}{1}\n\\bibitem{b} Another\n\\end{thebibliography}\n"
         File.write('junk/paper.bbl', bbl_content)
 
-        builder = LatexBuilder.new('paper.tex', {})
+        builder = LatexBuilder.new('paper.tex', trace: true)
         builder.send(:sync_bbl_to_root)
 
         assert File.exist?('paper.bbl')

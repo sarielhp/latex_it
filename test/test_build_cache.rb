@@ -105,4 +105,57 @@ class TestBuildCache < Minitest::Test
     assert_equal true, merged[:force],
                  '--arxiv must not assemble a submission package from a cached build'
   end
+
+  def test_magic_comment_selects_the_engine
+    Dir.mktmpdir('latex_it_engine_test') do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', "% !TEX TS-program = lualatex\n\\documentclass{article}\n\\begin{document}\nx\n\\end{document}\n")
+        FileUtils.mkdir_p('junk')
+
+        builder = LatexBuilder.new('paper.tex', options(engine: nil))
+        assert_equal 'lualatex', builder.send(:resolve_engine),
+                     'a "% !TEX program =" magic comment did not select the engine'
+      end
+    end
+  end
+
+  def test_explicit_engine_outranks_the_magic_comment
+    Dir.mktmpdir('latex_it_engine_test') do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', "% !TEX TS-program = lualatex\n\\documentclass{article}\n")
+        builder = LatexBuilder.new('paper.tex', options(engine: 'pdflatex', engine_explicit: true))
+        assert_equal 'pdflatex', builder.send(:resolve_engine)
+      end
+    end
+  end
+
+  def test_magic_comment_outranks_the_configured_default
+    Dir.mktmpdir('latex_it_engine_test') do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', "% !TEX TS-program = lualatex\n\\documentclass{article}\n")
+        builder = LatexBuilder.new('paper.tex', options(engine: nil, config_engine: 'xelatex'))
+        assert_equal 'lualatex', builder.send(:resolve_engine)
+      end
+    end
+  end
+
+  def test_configured_default_is_used_without_a_magic_comment
+    Dir.mktmpdir('latex_it_engine_test') do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', "\\documentclass{article}\n")
+        builder = LatexBuilder.new('paper.tex', options(engine: nil, config_engine: 'lualatex'))
+        assert_equal 'lualatex', builder.send(:resolve_engine)
+      end
+    end
+  end
+
+  def test_default_is_xelatex_when_nothing_is_specified
+    Dir.mktmpdir('latex_it_engine_test') do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', "\\documentclass{article}\n")
+        builder = LatexBuilder.new('paper.tex', options(engine: nil, config_engine: nil))
+        assert_equal 'xelatex', builder.send(:resolve_engine)
+      end
+    end
+  end
 end

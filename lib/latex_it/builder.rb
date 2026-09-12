@@ -40,7 +40,7 @@ class LatexBuilder
     @bfilename = File.basename(@target_base, '.*')
     @filename = "#{@bfilename}.tex"
     @orig_stdout = $stdout
-    @engine_name = LaTeXUtils.normalize_engine(@options[:engine] || 'xelatex')
+    @engine_name = LaTeXUtils.normalize_engine(@options[:engine] || @options[:config_engine] || 'xelatex')
     @pdferr = "junk/err_#{@engine_name}"
     @biberrbase = 'err_bib'
     @biberr = "junk/#{@biberrbase}"
@@ -426,7 +426,8 @@ class LatexBuilder
 
   def resolve_engine
     file_engine = LaTeXUtils.detect_engine_from_file(@filename)
-    candidate_engine = @options[:engine] || ENV['PDFBINONLY'] || file_engine || ENV['PDFBIN'] || ENV['LATEX_ENGINE'] || 'xelatex'
+    candidate_engine = @options[:engine] || ENV['PDFBINONLY'] || file_engine ||
+                       @options[:config_engine] || ENV['PDFBIN'] || ENV['LATEX_ENGINE'] || 'xelatex'
     requested_engine = LaTeXUtils.normalize_engine(candidate_engine)
     pdflatex_reasons = LaTeXUtils.source_pdflatex_reasons(@filename)
     incompatible = %w[xelatex lualatex].include?(requested_engine) && !pdflatex_reasons.empty?

@@ -118,7 +118,13 @@ module LatexCLI
     is_env_free = %w[pdflatex_env_free latex_env_free bibtex_env_free].include?(prog_name)
 
     {
-      engine: symlink_engine || cfg['engine'],
+      # :engine holds only an explicit choice -- a symlink personality or
+      # --engine. The configured default is kept separately so that a
+      # "% !TEX program =" magic comment can outrank it; folding the two
+      # together made cfg['engine'] non-nil on every run and short-circuited
+      # the whole detection chain in resolve_engine.
+      engine: symlink_engine,
+      config_engine: cfg['engine'],
       engine_explicit: !symlink_engine.nil?,
       clean: false,
       force: false,

@@ -25,8 +25,12 @@ module LaTeXConfig
       // CLI flags always override settings defined here.
       // =========================================================================
 
-      // LaTeX engine: "xelatex" (default), "lualatex", or "pdflatex"
-      "engine": "xelatex",
+      // LaTeX engine: "xelatex" (default), "lualatex", or "pdflatex".
+      // Left unset here on purpose. Engine precedence is:
+      //   --engine / symlink personality  >  "% !TEX program =" magic comment
+      //   >  this key  >  xelatex
+      // Hardcoding it here made the magic comment unreachable.
+      // "engine": "xelatex",
 
       // Fast incremental mode: reuse .aux and skip redundant passes
       "fast": false,

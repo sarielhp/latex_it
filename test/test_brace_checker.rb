@@ -142,4 +142,22 @@ class TestBraceChecker < Minitest::Test
     TEX
     assert_silent(source, 'macros wrapping begin and end environment tokens')
   end
+
+  def test_brace_checker_error_format_is_auctex_compatible
+    source = <<~TEX
+      \\documentclass{article}
+      \\begin{document}
+      \\begin{theorem}
+      \\frac{Y_{i-1}{2}.
+      \\end{theorem}
+      \\end{document}
+    TEX
+    errors = check(source)
+    refute_empty errors
+    text = errors.first[:text]
+
+    # AUCTeX matches: ^! (.*) followed by ^l.<line> <snippet>
+    assert_match(/\A! \[latex_it\] /, text, 'must start with ! [latex_it] for AUCTeX error matching and attribution')
+    assert_match(/^l\.\d+ /, text, 'must include standard TeX l.<line> line for AUCTeX navigation')
+  end
 end

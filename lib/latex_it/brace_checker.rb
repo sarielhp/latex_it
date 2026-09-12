@@ -307,7 +307,7 @@ class LaTeXBraceChecker
   end
 
   def build_error(line_no, col_no, message, snippet, alert_msg: nil)
-    err_block = ["! #{message}"]
+    err_block = ["! [latex_it] #{message}"]
     err_block << "  Alert: #{alert_msg}" if alert_msg
     err_block << "l.#{line_no} #{snippet}"
 

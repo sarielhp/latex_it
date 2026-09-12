@@ -1216,7 +1216,7 @@ class TestLatexItCLI < Minitest::Test
         assert_equal 4, err[:line]
         assert_equal 14, err[:col]
         assert_includes err[:text], "inside environment 'theorem'"
-        assert_includes err[:text], '! Unclosed open brace'
+        assert_includes err[:text], '! [latex_it] Unclosed open brace'
         assert_includes err[:text], 'l.4   Let $X$ be { unclosed.'
       end
     end

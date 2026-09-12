@@ -158,4 +158,17 @@ class TestBuildCache < Minitest::Test
       end
     end
   end
+
+  def test_cached_build_preserves_diagnostic_logs
+    in_cached_project('refs', all_warnings: true) do |builder, _bib|
+      File.write('junk/err_xelatex_1', "LaTeX Warning: Citation 'missing' undefined on input line 5.\n")
+      File.write('junk/log.txt', 'previous compilation log')
+      out, = capture_io do
+        assert builder.send(:execute_compile_pipeline)
+      end
+      assert_includes out, 'All targets (paper.pdf) are up-to-date.'
+      assert File.exist?('junk/err_xelatex_1'), 'diagnostic log was deleted on cached build'
+      assert File.exist?('junk/log.txt'), 'build log was deleted on cached build'
+    end
+  end
 end

@@ -33,6 +33,16 @@ class LatexBuilder
 
   DEFAULT_PASS_TIMEOUT = 180
 
+  ProcessResultStatus = Struct.new(:exitstatus, :success, :termsig, :signaled) do
+    def success?
+      self[:success] == true
+    end
+
+    def signaled?
+      self[:signaled] == true
+    end
+  end
+
   def initialize(target, options)
     @options = options
     @bdir = File.dirname(target)
@@ -96,6 +106,7 @@ class LatexBuilder
     end
 
     FileUtils.rm_f('junk/.build_state.json')
+    clean_pass_logs
     junk_dir_create
     snapshot_build_inputs!
     total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
@@ -105,6 +116,10 @@ class LatexBuilder
     puts ''
     finalize_build_outputs(total_t0)
     true
+  end
+
+  def clean_pass_logs
+    FileUtils.rm_f([@log, @loga, @biberr, @pdferr, "#{@pdferr}_1", "#{@pdferr}_2", "#{@pdferr}_3"])
   end
 
   def finalize_build_outputs(total_t0)
@@ -451,8 +466,6 @@ class LatexBuilder
     @biberr = "junk/#{@biberrbase}"
     @log = 'junk/log.txt'
     @loga = 'junk/log.txt.1'
-
-    FileUtils.rm_f([@log, @loga, @biberr, @pdferr, "#{@pdferr}_1", "#{@pdferr}_2", "#{@pdferr}_3"])
   end
 
   def resolve_engine
@@ -532,24 +545,28 @@ class LatexBuilder
     env = pass_environment
     return Open3.capture2e(env, *cmd_args) if timeout <= 0
 
-    Open3.popen2e(env, *cmd_args) do |_stdin, stdout_err, wait_thr|
+    Open3.popen2e(env, *cmd_args, pgroup: true) do |stdin, stdout_err, wait_thr|
+      stdin.close rescue nil
       output = ''
       reader = Thread.new { output = stdout_err.read }
       unless wait_thr.join(timeout)
         begin
-          Process.kill('KILL', wait_thr.pid)
+          pgid = Process.getpgid(wait_thr.pid)
+          Process.kill('-KILL', pgid)
         rescue StandardError
-          nil
+          Process.kill('KILL', wait_thr.pid) rescue nil
         end
         reader.kill rescue nil
         msg = "\n! LaTeX Error: Compilation timed out after #{timeout}s (suspected runaway loop).\n"
-        return [msg, Struct.new(:exitstatus, :success?).new(124, false)]
+        return [msg, ProcessResultStatus.new(124, false, nil, false)]
       end
       reader.join
       [output, wait_thr.value]
     end
+  rescue Errno::ENOENT
+    raise
   rescue StandardError => e
-    ["\n! Process Error: #{e.message}\n", Struct.new(:exitstatus, :success?).new(1, false)]
+    ["\n! Process Error: #{e.message}\n", ProcessResultStatus.new(1, false, nil, false)]
   end
 
   def run_latex_pass(suffix)
@@ -561,10 +578,14 @@ class LatexBuilder
     write_pass_header(lgx, cmd_args)
 
     stdout_stderr, status = capture_pass_output(cmd_args)
-    st = status.exitstatus || 0
+    st = status.exitstatus || (status.respond_to?(:termsig) && status.termsig ? 128 + status.termsig : 1)
 
     File.open(lgx, 'a') { |f| f.write(stdout_stderr) }
-    puts "\nLaTeX process exited with status: #{st}\n" if st > 0
+    if status.respond_to?(:signaled?) && status.signaled?
+      warn "\nLaTeX engine terminated by signal #{status.termsig} (fatal crash).\n"
+    elsif st > 0
+      puts "\nLaTeX process exited with status: #{st}\n"
+    end
 
     handle_pass_errors(st, lgx)
     File.open(@log, 'a') { |f| f.write(stdout_stderr) }
@@ -778,19 +799,22 @@ class LatexBuilder
 
   def execute_bibliography(tool)
     discover_bib_files.each { |b| FileUtils.cp(b, 'junk/') }
-    if tool == :biber
-      Dir.chdir('junk') do
-        Open3.capture2e('biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename)
-      end
-    else
-      Dir.chdir('junk') do
-        if File.directory?('../styles')
-          FileUtils.mkdir_p('styles')
-          Dir['../styles/*'].each { |s| FileUtils.cp_r(s, 'styles/') }
-        end
-        Open3.capture2e('bibtex', @bfilename)
-      end
+    cmd = if tool == :biber
+            ['biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename]
+          else
+            copy_style_files_for_bibtex
+            ['bibtex', @bfilename]
+          end
+    Dir.chdir('junk') do
+      capture_pass_output(cmd)
     end
+  end
+
+  def copy_style_files_for_bibtex
+    return unless File.directory?('../styles')
+
+    FileUtils.mkdir_p('styles')
+    Dir['../styles/*'].each { |s| FileUtils.cp_r(s, 'styles/') unless File.basename(s) == 'junk' }
   end
 
   def compute_aux_hash

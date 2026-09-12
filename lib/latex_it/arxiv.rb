@@ -36,7 +36,7 @@ class LatexArxivPackager
     meta_filename = "arxiv_#{@bfilename}_meta.txt"
 
     Dir.mktmpdir('latex_it_arxiv_stage_') do |stage_dir|
-      stage_arxiv_files(stage_dir)
+      return false unless stage_arxiv_files(stage_dir)
       return false unless build_arxiv_zip(stage_dir, zip_filename)
 
       write_arxiv_metadata(meta_filename)
@@ -90,8 +90,13 @@ class LatexArxivPackager
   end
 
   def stage_arxiv_files(stage_dir)
-    flattened_tex = LaTeXFlattener.flatten(@filename, '.', @options[:strip_host_patterns],
-                                           strip_comments: @options[:strip_comments] != false)
+    flattened_tex = begin
+      LaTeXFlattener.flatten(@filename, '.', @options[:strip_host_patterns],
+                             strip_comments: @options[:strip_comments] != false)
+    rescue StandardError => e
+      warn Rainbow("[FAIL] Could not flatten LaTeX source: #{e.message}").red.bright
+      return false
+    end
     File.write(File.join(stage_dir, @filename), flattened_tex)
 
     stage_bbl(stage_dir)
@@ -99,6 +104,7 @@ class LatexArxivPackager
     stage_local_styles(stage_dir)
     stage_revtex4_files(stage_dir)
     stage_biblatex_shield(stage_dir) unless @options[:biblatex_shield] == false
+    true
   end
 
   def stage_revtex4_files(stage_dir)
@@ -166,7 +172,7 @@ class LatexArxivPackager
   def stage_biblatex_shield(stage_dir)
     return unless detect_biblatex?
 
-    puts Rainbow(" -- BibLaTeX detected: bundling local distribution files for arXiv shielding...").cyan
+    puts Rainbow(' -- BibLaTeX detected: bundling local distribution files for arXiv shielding...').cyan
     harvested = []
     fls_path = "junk/#{@bfilename}.fls"
     if File.file?(fls_path)
@@ -176,16 +182,26 @@ class LatexArxivPackager
       end
     end
 
-    %w[biblatex.sty biblatex.cfg standard.bbx english.lbx].each do |core|
-      if harvested.none? { |h| File.basename(h) == core }
-        path, stat = Open3.capture2('kpsewhich', core)
-        harvested << path.strip if stat.success? && File.file?(path.strip)
-      end
-    end
+    harvest_kpsewhich_core_files(harvested)
 
     harvested.uniq.each do |f|
       dest = File.join(stage_dir, File.basename(f))
       FileUtils.cp(f, dest) unless File.exist?(dest)
+    end
+  end
+
+  def harvest_kpsewhich_core_files(harvested)
+    return unless LaTeXUtils.command_available?('kpsewhich')
+
+    %w[biblatex.sty biblatex.cfg standard.bbx english.lbx].each do |core|
+      next if harvested.any? { |h| File.basename(h) == core }
+
+      begin
+        path, stat = Open3.capture2('kpsewhich', core)
+        harvested << path.strip if stat&.success? && File.file?(path.strip)
+      rescue SystemCallError => e
+        warn Rainbow(" -- Warning: kpsewhich execution failed: #{e.message}").yellow
+      end
     end
   end
 

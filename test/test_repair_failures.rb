@@ -37,11 +37,12 @@ class TestRepairFailures < Minitest::Test
         File.write('unrelated.bbl', 'Unrelated original')
         File.write('junk/unrelated.bbl', '\\bibitem{unrelated} Do not publish')
         command = lambda do |*args|
-          assert_equal tool.to_s, args.first
+          actual_tool = args.first.is_a?(Array) ? args.first.first : args.first
+          assert_equal tool.to_s, actual_tool
           File.write('paper.bbl', generated)
           ['', Status.new(0)]
         end
-        Open3.stub(:capture2e, command) { assert builder.send(:run_bib_pass, tool) }
+        builder.stub(:capture_pass_output, command) { assert builder.send(:run_bib_pass, tool) }
         assert_equal generated, File.read('paper.bbl')
         assert_equal previous, File.read('paper.bbl.bak')
         assert_equal previous, File.read('junk/paper.bbl.bak')
@@ -116,7 +117,7 @@ class TestRepairFailures < Minitest::Test
           ['tool diagnostic', Status.new(scenario[0])]
         end
         capture_io do
-          Open3.stub(:capture2e, command) { refute builder.send(:run_bib_pass, tool) }
+          builder.stub(:capture_pass_output, command) { refute builder.send(:run_bib_pass, tool) }
         end
         assert_equal previous, File.read('paper.bbl')
         assert_equal previous, File.read('junk/paper.bbl')
@@ -131,7 +132,7 @@ class TestRepairFailures < Minitest::Test
       File.write('paper.bbl', '\\bibitem{old} Previous')
       missing = ->(*_args) { raise Errno::ENOENT, 'bibtex' }
       _, err = capture_io do
-        Open3.stub(:capture2e, missing) { refute builder.send(:run_bib_pass, :bibtex) }
+        builder.stub(:capture_pass_output, missing) { refute builder.send(:run_bib_pass, :bibtex) }
       end
       assert_includes err, 'unavailable'
       assert_equal '\\bibitem{old} Previous', File.read('paper.bbl')
@@ -244,6 +245,88 @@ class TestRepairFailures < Minitest::Test
       assert_includes flattened, '\\verb|50%|'
       refute_includes flattened, 'remove this'
       refute_includes flattened, 'Must not inline this'
+    end
+  end
+
+  def test_latex_pass_signal_termination_detected_and_handled
+    with_project do |builder|
+      builder.send(:setup_environment)
+      signaled_stat = Struct.new(:exitstatus, :termsig, :signaled?, :success?).new(nil, 11, true, false)
+      builder.stub(:capture_pass_output, ['', signaled_stat]) do
+        builder.stub(:report_errors, ->(_lgx) { @reported = true }) do
+          _out, err = capture_io do
+            refute builder.send(:run_latex_pass, '_1')
+          end
+          assert @reported, 'report_errors was not called on fatal signal'
+          assert_includes err, 'LaTeX engine terminated by signal 11 (fatal crash).'
+        end
+      end
+    end
+  end
+
+  def test_bibliography_timeout_aborts_cleanly_and_preserves_previous
+    with_project do |builder|
+      previous = "\\bibitem{old} Previous bibliography\n"
+      File.write('paper.bbl', previous)
+      File.write('junk/paper.bbl', previous)
+      timeout_stat = LatexBuilder::ProcessResultStatus.new(124, false, nil, false)
+      timeout_out = "\n! LaTeX Error: Compilation timed out after 180s (suspected runaway loop).\n"
+      builder.stub(:capture_pass_output, [timeout_out, timeout_stat]) do
+        _out, err = capture_io do
+          refute builder.send(:run_bib_pass, :bibtex)
+        end
+        assert_includes err, 'Bibliography process failed or produced no valid entries'
+      end
+      assert_equal previous, File.read('paper.bbl')
+      assert_equal timeout_out, File.read('junk/err_bib')
+    end
+  end
+
+  def test_capture_pass_output_closes_stdin_prompt_immediately
+    with_project do |builder|
+      builder.options[:timeout] = 5
+      cmd = ['ruby', '-e', 'line = $stdin.gets; puts(line.nil? ? "got_eof" : "got_input")']
+      output, status = builder.send(:capture_pass_output, cmd)
+      assert status.success?
+      assert_includes output, 'got_eof'
+    end
+  end
+
+  def test_arxiv_packaging_handles_cyclic_flattener_exception
+    with_project do |builder|
+      packager = LatexArxivPackager.new(builder)
+      cyclic_err = ->(*_args) { raise 'Cyclic LaTeX input detected: main.tex -> sub.tex -> main.tex' }
+      LaTeXFlattener.stub(:flatten, cyclic_err) do
+        _out, err = capture_io do
+          Dir.mktmpdir('stage_') do |stage_dir|
+            refute packager.send(:stage_arxiv_files, stage_dir)
+          end
+        end
+        assert_includes err, 'Could not flatten LaTeX source: Cyclic LaTeX input detected'
+      end
+    end
+  end
+
+  def test_arxiv_biblatex_shield_resilient_to_kpsewhich_failure
+    with_project do |builder|
+      packager = LatexArxivPackager.new(builder)
+      LaTeXUtils.stub(:command_available?, ->(cmd) { cmd != 'kpsewhich' }) do
+        harvested = []
+        packager.send(:harvest_kpsewhich_core_files, harvested)
+        assert_empty harvested
+      end
+
+      LaTeXUtils.stub(:command_available?, true) do
+        failing_kpsewhich = ->(*_args) { raise Errno::EACCES, 'permission denied' }
+        Open3.stub(:capture2, failing_kpsewhich) do
+          harvested = []
+          _out, err = capture_io do
+            packager.send(:harvest_kpsewhich_core_files, harvested)
+          end
+          assert_empty harvested
+          assert_includes err, 'kpsewhich execution failed'
+        end
+      end
     end
   end
 end

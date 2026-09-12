@@ -132,4 +132,35 @@ class TestDestructivePaths < Minitest::Test
     assert_equal 'tectonic', LaTeXUtils.normalize_engine('tectonic')
     assert_equal 'xelatex', LaTeXUtils.normalize_engine('xelatex -shell-escape')
   end
+
+  def test_double_dash_does_not_swallow_the_target
+    argv = ['--', 'weird--name.tex']
+    extras = LatexCLI.extract_extra_cli_files(argv)
+
+    assert_empty extras
+    assert_equal ['weird--name.tex'], argv,
+                 '`--` claimed the target as bundle payload with no packaging flag present'
+  end
+
+  def test_double_dash_still_harvests_for_packaging_modes
+    [%w[-z -- notes.txt], %w[--arxiv -- notes.txt], %w[-t -- notes.txt]].each do |base|
+      argv = base.dup
+      extras = LatexCLI.extract_extra_cli_files(argv)
+      assert_equal ['notes.txt'], extras, "#{base.inspect} did not harvest the payload"
+      refute_includes argv, '--'
+    end
+  end
+
+  def test_unknown_flag_reports_usage_instead_of_a_backtrace
+    Dir.mktmpdir('latex_it_badflag_test') do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n")
+
+      out, status = Open3.capture2e(BIN, '--typpo', chdir: dir)
+
+      refute status.success?
+      refute_match(/\(OptionParser|backtrace|\.rb:\d+:in /, out, 'a mistyped flag printed a Ruby backtrace')
+      assert_match(/invalid option/i, out)
+      assert_match(/Usage:/, out)
+    end
+  end
 end

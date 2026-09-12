@@ -47,11 +47,22 @@ module LatexCLI
 
     normalize_argv!(argv)
     parser = build_option_parser(options)
-    parser.parse!(argv)
+    parse_options!(parser, argv, prog_name)
     handle_help_and_examples(parser, options, prog_name, argv)
 
     configure_environment(options)
     execute_targets(argv, options)
+  end
+
+  # Every script under tools/ handles this; the binary end users actually run
+  # was the only one that answered a mistyped flag with a Ruby backtrace.
+  def self.parse_options!(parser, argv, prog_name)
+    parser.parse!(argv)
+  rescue OptionParser::ParseError => e
+    warn "#{prog_name}: #{e.message}"
+    warn parser.banner
+    warn "Try '#{prog_name} -h' for the full list of options."
+    exit 2
   end
 
   def self.early_personality_dispatch(argv, prog_name)
@@ -96,8 +107,32 @@ module LatexCLI
     exit 1
   end
 
+  # Flags that make `-- <files>` mean "extra files to bundle". Everywhere else
+  # `--` keeps its POSIX meaning of "end of options".
+  PACKAGING_LONG_FLAGS = %w[--zip --verify --arxiv].freeze
+
+  def self.packaging_requested?(argv)
+    argv.any? do |arg|
+      next true if PACKAGING_LONG_FLAGS.include?(arg)
+      next true if arg.start_with?('--zip-name', '--arxiv-name')
+      next false unless arg.start_with?('-') && !arg.start_with?('--')
+
+      arg[1..].chars.any? { |c| c == 'z' || c == 't' }
+    end
+  end
+
+  # Claims the files after `--` as bundle payload, but only when a packaging
+  # mode is actually active. Unconditionally slicing there meant `l -- odd.tex`
+  # left argv empty, so execute_targets auto-detected some other document and
+  # compiled the wrong file -- and with no packaging flag the harvested files
+  # were then discarded unread, since options[:extra_files] has one consumer.
   def self.extract_extra_cli_files(argv)
     return [] unless (sep_idx = argv.index('--'))
+
+    unless packaging_requested?(argv)
+      argv.delete_at(sep_idx)
+      return []
+    end
 
     extra = argv[(sep_idx + 1)..].flat_map { |f| Dir.glob(f).empty? ? [f] : Dir.glob(f) }
     argv.slice!(sep_idx..)

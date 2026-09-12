@@ -86,4 +86,37 @@ class TestFlattener < Minitest::Test
                       'arxiv.strip_comments: false was advertised but had no effect'
     end
   end
+
+  def test_macros_beginning_with_verb_are_not_inline_verbatim
+    Dir.mktmpdir('latex_it_verb_test') do |dir|
+      File.write(File.join(dir, 'a.tex'), "INCLUDED\n")
+      main = File.join(dir, 'main.tex')
+      File.write(main, "\\verbatiminput{v.txt}\nsome text\n\\input{a}\nmore a text\n")
+
+      out = LaTeXFlattener.flatten(main, dir)
+      assert_includes out, 'INCLUDED',
+                      '\\verbatiminput was read as \\verb and swallowed the following \\input'
+      refute_includes out, '\\input{a}'
+    end
+  end
+
+  def test_real_inline_verbatim_is_still_protected
+    Dir.mktmpdir('latex_it_verb_test') do |dir|
+      File.write(File.join(dir, 'a.tex'), "INCLUDED\n")
+      main = File.join(dir, 'main.tex')
+      File.write(main, "\\verb|\\input{a}| stays literal\n")
+
+      out = LaTeXFlattener.flatten(main, dir)
+      assert_includes out, '\\verb|\\input{a}|',
+                       'a real \\verb span must not be rewritten'
+      refute_includes out, 'INCLUDED'
+    end
+  end
+
+  def test_inline_verbatim_does_not_span_lines
+    src = "\\verb+x+\nTEXT % a comment\n\\verb+y+\n"
+    out = LaTeXFlattener.strip_comments(src)
+    refute_includes out, 'a comment',
+                     'a \\verb span crossed a newline and protected a real comment'
+  end
 end

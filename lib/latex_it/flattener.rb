@@ -8,7 +8,14 @@
 # ==============================================================================
 
 module LaTeXFlattener
-  LITERAL_TEX = /\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|lstlisting|minted)\}.*?\\end\{\1\}|\\verb\*?([^\s]).*?\2/m.freeze
+  # Two guards on the \verb alternative. `(?![a-zA-Z])` stops macros that merely
+  # begin with "verb" -- \verbatiminput, \verbdef, \verbatimfont -- from being
+  # read as \verb with the next letter as the delimiter. `[^\n]*?` keeps the
+  # span on one line, which is what TeX requires anyway; with the /m flag and an
+  # unbounded `.*?` a bogus match ran to the next occurrence of that letter,
+  # often many lines later, and everything inside was passed through untouched:
+  # \input directives there were never inlined and their files never staged.
+  LITERAL_TEX = /\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|lstlisting|minted)\}.*?\\end\{\1\}|\\verb\*?(?![a-zA-Z])([^\s])[^\n]*?\2/m.freeze
 
   def self.transform_tex(content)
     output = +''

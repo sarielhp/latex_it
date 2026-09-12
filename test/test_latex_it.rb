@@ -1459,4 +1459,36 @@ class TestLatexItCLI < Minitest::Test
     assert_includes out, 'ch2.tex, ch3.tex'
     assert_includes out, "Run with 'l -a' / '--all'"
   end
+
+  def test_primary_error_file_prefers_compiler_errors_over_synthetic_checks
+    diag = LaTeXDiagnostics.new('main.tex', {})
+    groups = {
+      'synthetic_ch.tex' => [{ file: 'synthetic_ch.tex', line: 10, source: :latex_it, synthetic: true }],
+      'compiler_ch.tex' => [{ file: 'compiler_ch.tex', line: 20, source: :compiler, synthetic: false }]
+    }
+
+    assert_equal 'compiler_ch.tex', diag.send(:primary_error_file, groups)
+  end
+
+  def test_compiler_indicates_brace_error
+    diag = LaTeXDiagnostics.new('main.tex', {})
+    assert diag.send(:compiler_indicates_brace_error?, 'Runaway argument?\n{something')
+    assert diag.send(:compiler_indicates_brace_error?, 'File ended while scanning use of \foo')
+    assert diag.send(:compiler_indicates_brace_error?, 'Extra }, or forgotten \endgroup')
+    refute diag.send(:compiler_indicates_brace_error?, 'Missing $ inserted.')
+    refute diag.send(:compiler_indicates_brace_error?, 'Undefined control sequence.')
+  end
+
+  def test_error_items_have_source_and_synthetic_flags
+    brace_errs = LaTeXBraceChecker.new('test.tex', "x}y\n").scan
+    assert_equal 1, brace_errs.size
+    assert_equal :latex_it, brace_errs.first[:source]
+    assert_equal true, brace_errs.first[:synthetic]
+
+    diag = LaTeXDiagnostics.new('main.tex', {})
+    lines = ['./test.tex:10: Undefined control sequence.']
+    err_item, = diag.send(:build_error_entry, lines, 0, './test.tex', [])
+    assert_equal :compiler, err_item[:source]
+    assert_equal false, err_item[:synthetic]
+  end
 end

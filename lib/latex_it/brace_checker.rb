@@ -320,7 +320,9 @@ class LaTeXBraceChecker
       err_block: err_block,
       base_color: :red,
       has_alert: !alert_msg.nil?,
-      index: -1000
+      index: -1000,
+      source: :latex_it,
+      synthetic: true
     }
   end
 end

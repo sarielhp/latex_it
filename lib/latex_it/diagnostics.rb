@@ -404,7 +404,8 @@ module LaTeXDiagnostics
     item = {
       file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),
       text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: next_idx,
-      catalog: classification, catalog_id: cat_id
+      catalog: classification, catalog_id: cat_id,
+      source: :compiler, synthetic: false
     }
     [item, next_idx]
   end
@@ -428,7 +429,7 @@ module LaTeXDiagnostics
     all_items = sorted_other + sorted_overfull + sorted_errors
     all_sorted = all_items.sort_by do |item|
       idx = item[:index] || 0
-      [idx.negative? ? 0 : 1, format_display_path(item[:file]), item[:line] || 0, idx]
+      [format_display_path(item[:file]), idx.negative? ? 0 : 1, item[:line] || 0, idx]
     end
 
     [all_sorted, sorted_other.size + sorted_overfull.size, sorted_errors.size]
@@ -826,15 +827,22 @@ module LaTeXDiagnostics
     target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}"
   end
 
+  def primary_error_file(groups)
+    groups.keys.find do |f|
+      groups[f].any? { |e| e[:source] != :latex_it && !e[:synthetic] }
+    end || groups.keys.first
+  end
+
   def throttle_errors(errors)
     return [errors, nil] if (@options && @options[:all]) || errors.size <= 1
 
     groups = errors.group_by { |e| format_display_path(e[:file]) }
-    first_file, file_errors = groups.first
+    first_file = primary_error_file(groups)
+    file_errors = groups[first_file]
     return [errors, nil] if groups.size <= 1 && file_errors.size <= 10
 
     displayed = file_errors.first(10)
-    other_files = groups.keys[1..] || []
+    other_files = groups.keys.reject { |k| k == first_file }
     cascade_info = {
       first_file: first_file,
       remaining_in_first: file_errors.size - displayed.size,
@@ -864,6 +872,12 @@ module LaTeXDiagnostics
     io.puts Rainbow('═══════════════════════════════════════════════════════════════════════════════').yellow
   end
 
+  COMPILER_BRACE_ERROR_PATTERN = /(?:Runaway argument\?|File ended while scanning use of|Extra \}, or forgotten \\endgroup|Extra \\endgroup|Too many \}'s|Missing \} inserted|Paragraph ended before .* was complete|\\begin\{.*\} ended by \\end\{.*\})/i.freeze
+
+  def compiler_indicates_brace_error?(content)
+    content.match?(COMPILER_BRACE_ERROR_PATTERN)
+  end
+
   def report_errors(loga, io: $stderr)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
@@ -872,8 +886,13 @@ module LaTeXDiagnostics
     io.puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
     io.puts Rainbow('===============================================================').red.bright
 
-    brace_errors = check_source_braces
-    errors = brace_errors + extract_errors(content)
+    compiler_errors = extract_errors(content)
+    brace_errors = if compiler_errors.empty? || compiler_indicates_brace_error?(content)
+                     check_source_braces
+                   else
+                     []
+                   end
+    errors = compiler_errors + brace_errors
     fallback = errors.empty? ? content.lines.last(15) : []
     displayed_errors, cascade_info = throttle_errors(errors)
     _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)

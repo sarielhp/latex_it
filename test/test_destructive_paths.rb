@@ -163,4 +163,37 @@ class TestDestructivePaths < Minitest::Test
       assert_match(/Usage:/, out)
     end
   end
+
+  def test_lock_directory_must_be_private_and_owned
+    Dir.mktmpdir('latex_it_tmpdir_test') do |dir|
+      hostile = File.join(dir, "latex_it_#{Process.uid}")
+      Dir.mkdir(hostile, 0o777)
+      File.chmod(0o777, hostile)
+
+      builder = LatexBuilder.new('paper.tex', build_options)
+      original = ENV['TMPDIR']
+      begin
+        ENV['TMPDIR'] = dir
+        assert_raises(SystemExit, 'a world-writable temp directory was accepted') do
+          capture_io { builder.send(:project_tmp_dir) }
+        end
+      ensure
+        ENV['TMPDIR'] = original
+      end
+    end
+  end
+
+  def test_private_lock_directory_is_accepted
+    Dir.mktmpdir('latex_it_tmpdir_ok_test') do |dir|
+      builder = LatexBuilder.new('paper.tex', build_options)
+      original = ENV['TMPDIR']
+      begin
+        ENV['TMPDIR'] = dir
+        path = builder.send(:project_tmp_dir)
+        assert_equal 0o700, File.stat(path).mode & 0o777
+      ensure
+        ENV['TMPDIR'] = original
+      end
+    end
+  end
 end

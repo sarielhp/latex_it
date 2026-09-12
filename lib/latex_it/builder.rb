@@ -91,6 +91,7 @@ class LatexBuilder
 
     if targets_up_to_date?
       puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -1' to force rebuild)"
+      analyze_output if diagnostics_requested?
       return true
     end
 
@@ -118,6 +119,15 @@ class LatexBuilder
 
     analyze_output
     save_build_state!
+  end
+
+  # -a, -e, -v and --emacs exist to show more output, so returning early from
+  # the up-to-date branch made exactly the flags a user reaches for print
+  # nothing at all -- an AUCTeX run would report an empty error list for a
+  # document that has warnings. Re-reporting from the cached log keeps the
+  # cache fast and the flags honest.
+  def diagnostics_requested?
+    @options[:all] || @options[:explain] || @options[:verbose] || @options[:emacs]
   end
 
   def targets_up_to_date?
@@ -373,12 +383,33 @@ class LatexBuilder
     @path_hash ||= Digest::SHA256.hexdigest(canonical_build_dir)[0..15]
   end
 
+  NOFOLLOW = defined?(File::NOFOLLOW) ? File::NOFOLLOW : 0
+
   def project_tmp_dir
     @project_tmp_dir ||= begin
       dir = File.join(Dir.tmpdir, "latex_it_#{Process.uid}")
-      FileUtils.mkdir_p(dir, mode: 0o700)
+      begin
+        Dir.mkdir(dir, 0o700)
+      rescue Errno::EEXIST
+        nil
+      end
+      verify_private_dir!(dir)
       dir
     end
+  end
+
+  # FileUtils.mkdir_p does not repair the mode or ownership of a path that
+  # already exists, and the name here is predictable. On a shared /tmp another
+  # user could pre-create this directory world-writable and replace the lock
+  # file with a symlink; with_lock opens that path and truncates it, which
+  # would destroy whatever it pointed at. Linux's protected_symlinks does not
+  # help, because it only covers directories that are both world-writable and
+  # sticky. Refuse anything that is not a private directory we own.
+  def verify_private_dir!(dir)
+    stat = File.lstat(dir)
+    return if stat.directory? && !stat.symlink? && stat.uid == Process.uid && (stat.mode & 0o077).zero?
+
+    abort "latex_it: refusing to use #{dir}: not a private directory owned by uid #{Process.uid}"
   end
 
   def project_tmp_file(suffix)
@@ -389,7 +420,7 @@ class LatexBuilder
     return yield unless @options[:lock]
 
     lock_file = project_tmp_file('build.lock')
-    File.open(lock_file, File::RDWR | File::CREAT, 0o600) do |f|
+    File.open(lock_file, File::RDWR | File::CREAT | NOFOLLOW, 0o600) do |f|
       unless f.flock(File::LOCK_EX | File::LOCK_NB)
         puts "      #{Rainbow("Another latex_it process is running for #{@bfilename}. Waiting for it to finish...").yellow}" unless @options[:score]
         f.flock(File::LOCK_EX)

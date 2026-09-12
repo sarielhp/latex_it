@@ -886,16 +886,32 @@ class LatexBuilder
     return unless File.exist?(src)
 
     if update_on_diff && File.exist?(dst) && dst.end_with?('.pdf') && LaTeXUtils.command_available?('pdftotext')
-      txt_src, = Open3.capture2e('pdftotext', '-layout', src, '-')
-      txt_dst, = Open3.capture2e('pdftotext', '-layout', dst, '-')
-      if txt_src == txt_dst
-        puts "\n  \e[37;45m PDF text content unchanged (skipped target overwrite) \e[0m"
-        return
-      end
+      return if pdf_text_unchanged?(src, dst)
     end
 
     atomic_copy(src, dst)
     puts "  Updated target: #{dst}" if update_on_diff
+  end
+
+  # The exit status used to be discarded and only the captured output compared,
+  # so two failure modes both looked like "no change": a figure-only document
+  # has no text layer, making both extractions the empty string, and a
+  # pdftotext failure returns the same error text for both. Either one kept the
+  # previous PDF in place forever. update_on_diff can be enabled globally in
+  # config, so this was not limited to an explicit -d.
+  def pdf_text_unchanged?(src, dst)
+    txt_src, status_src = Open3.capture2e('pdftotext', '-layout', src, '-')
+    txt_dst, status_dst = Open3.capture2e('pdftotext', '-layout', dst, '-')
+    return false unless status_src.success? && status_dst.success?
+
+    if txt_src.strip.empty?
+      puts "\n  #{Rainbow('No extractable text layer; comparing bytes instead.').yellow}"
+      return FileUtils.identical?(src, dst)
+    end
+    return false unless txt_src == txt_dst
+
+    puts "\n  \e[37;45m PDF text content unchanged (skipped target overwrite) \e[0m"
+    true
   end
 
   def atomic_copy(src, dst)

@@ -539,7 +539,7 @@ class LatexBuilder
   end
 
   def pass_environment
-    env = LaTeXCompatibility.compiler_environment(@options).dup
+    env = LaTeXCompatibility.compiler_environment(@options, ENV.to_h, @filename).dup
     env['max_print_line'] ||= '2048'
     env
   end

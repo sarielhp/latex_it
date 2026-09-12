@@ -23,6 +23,32 @@ class TestCompatibility < Minitest::Test
     assert_equal '/path/to/my/bibs:', environment['BIBINPUTS']
   end
 
+  def test_source_needs_revtex4_detection
+    assert LaTeXCompatibility.source_needs_revtex4?('\\documentclass{revtex4}')
+    assert LaTeXCompatibility.source_needs_revtex4?("\\documentclass[prl,twocolumn]{revtex4}\n")
+    assert LaTeXCompatibility.source_needs_revtex4?("\\documentclass [10pt] {revtex4}")
+    refute LaTeXCompatibility.source_needs_revtex4?('\\documentclass{revtex4-1}')
+    refute LaTeXCompatibility.source_needs_revtex4?('\\documentclass{revtex4-2}')
+    refute LaTeXCompatibility.source_needs_revtex4?('\\documentclass{article}')
+    refute LaTeXCompatibility.source_needs_revtex4?("% \\documentclass{revtex4}\n\\documentclass{article}")
+  end
+
+  def test_auto_detection_injects_only_when_source_needs_it
+    base = { 'TEXINPUTS' => '.:' }
+    # Normal article: not injected
+    normal_env = LaTeXCompatibility.compiler_environment({}, base, "\\documentclass{article}\n")
+    assert_equal base, normal_env
+
+    # Without target file: not injected
+    nil_env = LaTeXCompatibility.compiler_environment({}, base, nil)
+    assert_equal base, nil_env
+
+    # Revtex4 document: auto-injected
+    revtex_env = LaTeXCompatibility.compiler_environment({}, base, "\\documentclass{revtex4}\n")
+    expected = File.join(LaTeXCompatibility::REPO_TEXMF, 'tex', 'latex', 'revtex4')
+    assert_includes revtex_env['TEXINPUTS'].split(File::PATH_SEPARATOR), expected
+  end
+
   def test_fls_identifies_used_compatibility_files
     Dir.mktmpdir('latex-it-compat-') do |dir|
       path = File.join(LaTeXCompatibility::REPO_TEXMF, 'tex/latex/revtex4/revtex4.cls')

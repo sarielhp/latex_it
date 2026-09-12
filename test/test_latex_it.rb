@@ -1321,4 +1321,23 @@ class TestLatexItCLI < Minitest::Test
     refute status.success?
     assert_includes out, 'Compilation timed out'
   end
+
+  def test_strip_latex_comments_parity_and_line_preservation
+    raw = <<~TEX
+      \\documentclass{article}
+      % This is a full comment line
+      Some text with \\% literal percent
+      Line ending with double backslash\\\\% and a comment
+      Another line % inline comment
+    TEX
+
+    stripped = LaTeXUtils.strip_latex_comments(raw)
+    assert_equal raw.lines.count, stripped.lines.count
+    assert_includes stripped, '\\documentclass{article}'
+    assert_includes stripped, 'Some text with \\% literal percent'
+    assert_includes stripped, "Line ending with double backslash\\\\\n"
+    refute_includes stripped, 'This is a full comment line'
+    refute_includes stripped, 'and a comment'
+    refute_includes stripped, 'inline comment'
+  end
 end

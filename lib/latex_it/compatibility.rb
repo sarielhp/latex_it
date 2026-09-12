@@ -10,7 +10,19 @@ module LaTeXCompatibility
   REPO_TEXMF = File.expand_path('../../vendor/revtex4', __dir__).freeze
   INSTALLED_TEXMF = File.expand_path('~/.local/share/latex_it/texmf').freeze
 
-  def self.texmf_dirs(options = {})
+  def self.source_needs_revtex4?(path_or_content)
+    return false if path_or_content.nil?
+
+    raw = if !path_or_content.include?("\n") && File.file?(path_or_content.to_s)
+            LaTeXUtils.safe_read(path_or_content)
+          else
+            path_or_content
+          end
+    content = LaTeXUtils.strip_latex_comments(raw)
+    content.match?(/\\documentclass\s*(?:\[[^\]]*\])?\s*\{\s*revtex4\s*\}/)
+  end
+
+  def self.candidate_texmf_dirs(options = {})
     return [] if ENV['LATEX_IT_DISABLE_BUNDLED_REVTeX'] == '1'
 
     cfg = options[:revtex4].is_a?(Hash) ? options[:revtex4] : {}
@@ -21,8 +33,19 @@ module LaTeXCompatibility
     candidates.select { |path| File.directory?(path) }.uniq
   end
 
-  def self.compiler_environment(options, base = ENV.to_h)
-    dirs = texmf_dirs(options)
+  def self.texmf_dirs(options = {}, target_file = nil)
+    candidates = candidate_texmf_dirs(options)
+    return [] if candidates.empty?
+
+    cfg = options[:revtex4].is_a?(Hash) ? options[:revtex4] : {}
+    return candidates if cfg['enabled'] == true
+    return [] if target_file.nil? || !source_needs_revtex4?(target_file)
+
+    candidates
+  end
+
+  def self.compiler_environment(options, base = ENV.to_h, target_file = nil)
+    dirs = texmf_dirs(options, target_file)
     return base if dirs.empty?
 
     input = dirs.map { |dir| File.join(dir, 'tex', 'latex', 'revtex4') }
@@ -34,7 +57,7 @@ module LaTeXCompatibility
   end
 
   def self.files_used_by_fls(fls_path, options)
-    dirs = texmf_dirs(options)
+    dirs = candidate_texmf_dirs(options)
     return [] unless File.file?(fls_path) && !dirs.empty?
 
     roots = dirs.map { |dir| File.expand_path(dir) }

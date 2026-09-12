@@ -85,38 +85,46 @@ module LaTeXUtils
   def self.detect_engine_from_file(path)
     return nil unless path && File.file?(path)
 
-    content = safe_read(path)
-    return nil if content.empty?
+    raw_content = safe_read(path)
+    return nil if raw_content.empty?
 
-    # 1. Magic comments in header
-    header_lines = content.lines.first(50) || []
-    header_lines.each do |line|
+    engine = detect_engine_from_magic_comments(raw_content) || detect_engine_from_auctex(raw_content)
+    return engine if engine
+
+    active = strip_latex_comments(raw_content)
+    return 'lualatex' if active_source_needs_lualatex?(active)
+    return 'pdflatex' if active_source_needs_pdflatex?(active)
+
+    nil
+  end
+
+  def self.detect_engine_from_magic_comments(content)
+    (content.lines.first(50) || []).each do |line|
       if line =~ /^\s*%\s*!T[eE]X\s+(?:TS-)?(?:program|engine)\s*=\s*(\S+)/i
         return normalize_engine(Regexp.last_match(1).strip)
       end
     end
+    nil
+  end
 
-    # 2. AUCTeX local variables at footer
-    tail_lines = content.lines.last(40) || []
-    tail_lines.each do |line|
+  def self.detect_engine_from_auctex(content)
+    (content.lines.last(40) || []).each do |line|
       if line =~ /TeX-engine:\s*([a-zA-Z0-9_-]+)/i
         return normalize_engine(Regexp.last_match(1).strip)
       end
     end
-
-    # 3. Lua-specific packages
-    if content =~ /\\usepackage(?:\[.*?\])?\{luacode\}/ ||
-       content =~ /\\usepackage(?:\[.*?\])?\{luamplib\}/ ||
-       content =~ /\\usepackage(?:\[.*?\])?\{luatex85\}/ ||
-       content.include?('\\directlua')
-      return 'lualatex'
-    end
-
-    if content =~ /\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{\s*inputenc\s*\}/i
-      return 'pdflatex'
-    end
-
     nil
+  end
+
+  def self.active_source_needs_lualatex?(content)
+    content =~ /\\usepackage(?:\[.*?\])?\{luacode\}/ ||
+      content =~ /\\usepackage(?:\[.*?\])?\{luamplib\}/ ||
+      content =~ /\\usepackage(?:\[.*?\])?\{luatex85\}/ ||
+      content.include?('\\directlua')
+  end
+
+  def self.active_source_needs_pdflatex?(content)
+    content.match?(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{\s*inputenc\s*\}/i)
   end
 
   def self.source_requires_pdflatex?(path)
@@ -128,9 +136,7 @@ module LaTeXUtils
 
     content = strip_latex_comments(safe_read(path))
     reasons = []
-    if content.match?(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{\s*inputenc\s*\}/i)
-      reasons << 'inputenc'
-    end
+    reasons << 'inputenc' if active_source_needs_pdflatex?(content)
     if content.match?(/\\includegraphics\s*(?:\[[^\]]*\])?\s*\{[^}\n]*\.eps(?:\s*\})/i) ||
        content.match?(/\\epsfig\s*\{[^}\n]*\bfile\s*=\s*[^,}\n]*\.eps(?:\s*[,}])/i)
       reasons << 'EPS graphics'
@@ -139,7 +145,27 @@ module LaTeXUtils
   end
 
   def self.strip_latex_comments(content)
-    content.lines.map { |line| line.sub(/(?<!\\)%.*$/, '') }.join
+    return '' if content.nil? || content.empty?
+
+    content.gsub(/\r\n?/, "\n").lines.map do |line|
+      comment_at = latex_comment_start(line)
+      comment_at ? line[0...comment_at] + (line.end_with?("\n") ? "\n" : '') : line
+    end.join
+  end
+
+  def self.latex_comment_start(line)
+    line.each_char.with_index do |char, index|
+      next unless char == '%'
+
+      slashes = 0
+      cursor = index - 1
+      while cursor >= 0 && line[cursor] == '\\'
+        slashes += 1
+        cursor -= 1
+      end
+      return index if slashes.even?
+    end
+    nil
   end
 
   def self.compatible_engine(engine, path)

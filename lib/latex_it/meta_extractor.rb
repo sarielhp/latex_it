@@ -327,28 +327,7 @@ module LaTeXMetaExtractor
   end
 
   def self.strip_latex_comments(text)
-    text.gsub(/\r\n?/, "\n").lines.map do |line|
-      comment_at = latex_comment_start(line)
-      next line unless comment_at
-
-      prefix = line[0...comment_at]
-      prefix.strip.empty? ? '' : prefix + (line.end_with?("\n") ? "\n" : '')
-    end.join
-  end
-
-  def self.latex_comment_start(line)
-    line.each_char.with_index do |char, index|
-      next unless char == '%'
-
-      slashes = 0
-      cursor = index - 1
-      while cursor >= 0 && line[cursor] == '\\'
-        slashes += 1
-        cursor -= 1
-      end
-      return index if slashes.even?
-    end
-    nil
+    LaTeXUtils.strip_latex_comments(text)
   end
 
   def self.extract_page_count(pdf_path, log_path)

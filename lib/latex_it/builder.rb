@@ -459,7 +459,11 @@ class LatexBuilder
       FileUtils.cp(root_bbl, "junk/#{root_bbl}")
     end
 
-    files = ["#{@bfilename}.ps", 'log.txt', "#{@bfilename}.blg", "#{@bfilename}.dvi",
+    # Every entry must be anchored to the document stem or be a name TeX itself
+    # reserves. A bare 'log.txt' was removed: this tool writes its transcript to
+    # junk/log.txt, so a root log.txt can only be a file the user wrote, and
+    # paper_cleanup runs on every build with no flag guarding it.
+    files = ["#{@bfilename}.ps", "#{@bfilename}.blg", "#{@bfilename}.dvi",
              "#{@bfilename}.thm", "#{@bfilename}.aux", "#{@bfilename}.idx", "#{@bfilename}.log",
              "#{@bfilename}.out", "#{@bfilename}.vtc", 'texput.log', 'missfont.log', 'mfput.log',
              "#{@bfilename}.bcf", "#{@bfilename}.run.xml"]

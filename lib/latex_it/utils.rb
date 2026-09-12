@@ -10,17 +10,23 @@
 require 'fileutils'
 
 module LaTeXUtils
-  JUNK_BUILD_DIRS = %w[junk styles/junk figs/junk figs/bak refs/junk].freeze
+  # `figs/bak` is deliberately absent: the packager treats it as a user-owned
+  # backup directory to exclude from bundles, so cleaning must not delete it.
+  JUNK_BUILD_DIRS = %w[junk styles/junk figs/junk refs/junk].freeze
 
+  # Every scratch file this tool writes lives under `junk/`, which is removed
+  # wholesale via JUNK_BUILD_DIRS. These patterns therefore only ever run over
+  # the project root, where a match can only be a TeX-generated artifact or a
+  # file the user wrote by hand. Patterns that cannot distinguish the two --
+  # `log.txt`, `err_*`, `*.err*` -- were removed for that reason; the tool's own
+  # copies of those are `junk/log.txt`, `junk/log.txt.1` and `junk/err_<engine>`.
   JUNK_PATTERNS = [
     '*.{aux,bbl,bbl.bak,blg,bcf,run.xml}',
     '*.{log,out,toc,lof,lot,thm,idx,ind,ilg}',
     '*.{nav,snm,vrb,synctex.gz,synctex,dvi,ps}',
     '*.{fls,fdb_latexmk,rel,vtc,axp,dpth,md5,soc,build_state.json}',
     '.build_state.json',
-    'log.txt', 'log.txt.1', 'texput.log',
-    'missfont.log', 'mfput.log',
-    '*.err*', 'err_*',
+    'texput.log', 'missfont.log', 'mfput.log',
     'flycheck_*.tex',
     'arxiv_*_meta.txt'
   ].freeze

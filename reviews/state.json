@@ -26,6 +26,19 @@
       "timestamp": "2026-09-12T13:39:10Z",
       "files_edited": 10,
       "summary": "reviews/archive/002_summary.md"
+    },
+    {
+      "number": "003",
+      "profile": "correctness",
+      "model": "Claude / Codex (Tier 1 Standard)",
+      "tier": "standard",
+      "backend": "auto",
+      "findings": 3,
+      "outcome": "remediated",
+      "log": "reviews/logs/review_003_correctness.log",
+      "timestamp": "2026-09-12T14:16:09Z",
+      "files_edited": 8,
+      "summary": "reviews/archive/003_summary.md"
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "target": ".",
+  "target": "lib latex_it",
   "gate_cmd": "tools/gate",
   "build_cmd": "tools/install",
   "audit_cmd": "tools/audit",

@@ -447,6 +447,8 @@ class MultiProfileReviewCycle
     lang = detect_project_language
     if lang == :rust && Dir.exist?(File.join(REPO_ROOT, 'src'))
       'src/'
+    elsif lang == :ruby && Dir.exist?(File.join(REPO_ROOT, 'lib'))
+      File.file?(File.join(REPO_ROOT, 'latex_it')) ? 'lib latex_it' : 'lib/'
     else
       '.'
     end
@@ -768,9 +770,8 @@ class MultiProfileReviewCycle
     audit_bin.split + [
       '-p', profile,
       '-b', model_step[:backend],
-      '-t', model_step[:tier],
-      target_directory
-    ]
+      '-t', model_step[:tier]
+    ] + target_directory.split
   end
 
   def transient_error?(output, exit_status)

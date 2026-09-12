@@ -462,7 +462,7 @@ def resolve_target_files(args, profile_key, all_files, backend, lang, include_te
   files = raw_files.select { |f| File.file?(f) && !ignored_audit_path?(f) }
   files = files.reject { |f| test_file?(f, lang) } unless include_tests
 
-  if !all_files && backend != :gemini && files.size > 20
+  if !all_files && backend != :gemini && files.size > 50
     files = filter_files_for_profile(files, profile_key)
   end
 
@@ -472,6 +472,9 @@ end
 def default_search_path(lang)
   if lang == :rust && Dir.exist?(File.join(REPO_ROOT, 'src'))
     [File.join(REPO_ROOT, 'src')]
+  elsif lang == :ruby && Dir.exist?(File.join(REPO_ROOT, 'lib'))
+    bin_file = File.join(REPO_ROOT, 'latex_it')
+    [File.join(REPO_ROOT, 'lib'), (File.file?(bin_file) ? bin_file : nil)].compact
   else
     [REPO_ROOT]
   end

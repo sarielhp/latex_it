@@ -33,6 +33,8 @@ All 3 findings from `reviews/003_correctness.md` were evaluated and identified a
 - **Issue**: `count_reference_messages` performed unanchored regex checks (`line =~ /citation/i && line =~ /undefined/i`, `line =~ /reference/i && line =~ /undefined/i && line =~ /page/i`, and `line =~ /multiply defined/i && line =~ /label/i`) on un-sanitized raw log lines. When TeX echoed paragraph prose following an Overfull `\hbox`, body text mentioning citations, references, or labels triggered phantom counts in the diagnostic summary banner during otherwise clean builds.
 - **Status / Mitigation**: Fixed. Pre-filtered subcommand noise using `LaTeXUtils.filter_subcommand_noise(new_content)` and anchored warning patterns to actual TeX warning prefixes (`UNDEF_CITE_PATTERN`, `UNDEF_REF_PATTERN`, `MULT_DEF_PATTERN` matching `^(?:LaTeX|Package\s+[-\w.@*]+)\s+Warning:\s+...`).
 - **Verification**: Added regression unit test `test_document_text_containing_citation_words_not_counted_as_reference_warnings` in `test/test_log_recognisers.rb` ensuring echoed prose does not trigger diagnostic counts, while authentic LaTeX core and package warnings (such as `natbib`) are counted accurately.
+- **Footprint**: 8 files changed, 276 insertions(+), 18 deletions(-)
+- **Differential Audit**: 3 warning(s)
 
 ---
 

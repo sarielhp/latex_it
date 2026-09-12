@@ -18,24 +18,26 @@ module LaTeXDiagnostics
 
   LOG_FILE_PATTERN = %r{\A\((?:"([^"]+)"?|((?:\.{1,2}[\\/][^\s()]+|[a-zA-Z0-9_\-./]+?\.(?:#{LOG_FILE_EXTENSIONS}))\b))}.freeze
 
+  # Every pattern here must be anchored. TeX echoes the offending paragraph
+  # after each Overfull \hbox, so the document's own prose reaches this log
+  # verbatim: an unanchored `include?('Error:')` made a paper that discusses
+  # error messages fail its own successful build, and the abort happens before
+  # the PDF is copied out of junk/, so the user got no output and no
+  # explanation. 'WARN - ' was dropped entirely -- that is biber's output
+  # format, which never appears in a LaTeX terminal log.
   def count_errors_in_log(st, loga)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
-    lines = content.lines
 
-    errcntx = lines.count { |l| l.include?('Error:') || l.match?(/^!\s/) || l.match?(/:\d+:\s+error/i) }
-    errcnty = lines.count { |l| l.include?('Undefined control sequence') }
-    errcntz = lines.count { |l| l.include?('Runaway argument?') }
-    errcnta = lines.count { |l| l.include?('WARN - ') }
-    errcntmd = lines.count { |l| l.include?('multiply defined') && l.include?('LaTeX Warning') }
+    errcnt = content.each_line.count { |l| latex_error_line?(l) }
+    errcnt + st
+  end
 
-    begin
-      File.write(project_tmp_file('multiply_defined'), "#{errcntmd}\n")
-    rescue StandardError
-      nil
-    end
-
-    errcntx + errcnty + errcntz + errcnta + st
+  def latex_error_line?(line)
+    line.match?(/^!\s+\S/) ||
+      line.match?(/^Runaway argument\?/) ||
+      line.match?(/^Error:\s/i) ||
+      line.match?(/^.+?:\d+:\s+(?!warning\b)(?!\(see\b)\S/i)
   end
 
   def extract_error_line(err_text)

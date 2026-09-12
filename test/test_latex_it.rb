@@ -1107,23 +1107,21 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
-  def test_count_errors_in_log_uses_project_tmp_file
+  def test_count_errors_in_log_ignores_multiply_defined_warnings
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         FileUtils.mkdir_p('junk')
         log_file = 'junk/test.log'
         File.write(log_file, "LaTeX Warning: Label `foo' multiply defined.\n")
 
-        user = ENV['USER'] || 'user'
-        legacy_path = "/tmp/#{user}/latex_multiply_defined"
-        FileUtils.rm_f(legacy_path)
         builder = LatexBuilder.new('paper.tex', {})
-        builder.send(:count_errors_in_log, 0, log_file)
 
-        tmp_file = builder.send(:project_tmp_file, 'multiply_defined')
-        assert File.exist?(tmp_file)
-        assert_equal "1\n", File.read(tmp_file)
-        refute File.exist?(legacy_path)
+        # A multiply-defined label is an Alert, not a compile error, so it must
+        # not push the pass-failure gate above zero. This replaces a test that
+        # asserted count_errors_in_log wrote a counter file to the temp
+        # directory -- a write-only side effect of a method named "count" that
+        # nothing in the codebase ever read.
+        assert_equal 0, builder.send(:count_errors_in_log, 0, log_file)
       end
     end
   end

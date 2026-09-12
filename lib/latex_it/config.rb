@@ -32,7 +32,8 @@ module LaTeXConfig
       // Hardcoding it here made the magic comment unreachable.
       // "engine": "xelatex",
 
-      // Fast incremental mode: reuse .aux and skip redundant passes
+      // Accepted for compatibility and currently has no effect; incremental
+      // rebuilds are automatic via junk/.build_state.json.
       "fast": false,
 
       // Maximum compilation passes (1-3, default: 3)

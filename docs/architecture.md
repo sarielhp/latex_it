@@ -40,7 +40,7 @@ The build pipeline follows an orderly sequence of phases:
 
 ### Phase 3: Directory Isolation (`junk/`)
 - Builds run with `-output-directory=junk`.
-- Previous compilation state is saved in `junk/old/` to maintain cross-reference stability across incremental passes.
+- Build state is recorded in `junk/.build_state.json` (engine, option signature, and a SHA256 per input) and checked by `targets_up_to_date?` before any pass runs.
 
 ### Phase 4: Convergence Pass Scheduling
 - **Check State**: Checks compiler recorder dependencies (`.fls`) and checksums. If no inputs changed and target PDF exists, exits in 0 passes.

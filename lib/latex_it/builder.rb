@@ -496,13 +496,13 @@ class LatexBuilder
   end
 
   def paper_cleanup
-    if File.exist?("#{@bfilename}.aux") && !File.exist?("junk/#{@bfilename}.aux") && !File.exist?("junk/old/#{@bfilename}.aux")
+    if File.exist?("#{@bfilename}.aux") && !File.exist?("junk/#{@bfilename}.aux")
       FileUtils.mkdir_p('junk')
       FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux")
     end
 
     root_bbl = "#{@bfilename}.bbl"
-    if File.exist?(root_bbl) && !File.exist?("junk/#{root_bbl}") && !File.exist?("junk/old/#{root_bbl}") && LaTeXUtils.bbl_has_entries?(root_bbl)
+    if File.exist?(root_bbl) && !File.exist?("junk/#{root_bbl}") && LaTeXUtils.bbl_has_entries?(root_bbl)
       FileUtils.mkdir_p('junk')
       FileUtils.cp(root_bbl, "junk/#{root_bbl}")
     end

@@ -278,7 +278,7 @@ module LaTeXUtils
     lines << '     l paper.tex                    Compile specified paper.tex'
     lines << '     l -1                           Force first pass (skip up-to-date check), continuing if needed'
     lines << '     l -u                           Fast single pass only (no BibTeX/Biber, no extra passes)'
-    lines << '     lw (or l --fast)               Incremental fast mode reusing cached aux/bbl'
+    lines << '     l                              Incremental by default; skips passes when nothing changed'
     lines << ''
     lines << '  2. Compiler Engines:'
     lines << '     l --lua paper.tex              Compile using LuaLaTeX'

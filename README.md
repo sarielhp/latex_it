@@ -29,7 +29,7 @@ Install the latest standalone binary directly into `~/bin/l` (no clone or build 
 mkdir -p ~/bin && curl -sSL https://github.com/sarielhp/latex_it/releases/latest/download/latex_it -o ~/bin/l && chmod +x ~/bin/l
 ```
 
-*(Ensure `~/bin` is in your `$PATH`. You can also create `ln -s l ~/bin/lw` for fast incremental rebuilds.)*
+*(Ensure `~/bin` is in your `$PATH`.)*
 
 ### From Source
 
@@ -99,7 +99,7 @@ Usage: l [options] [document.tex] [-- extra_files...]
 | Option | Description |
 | :--- | :--- |
 | *(none)* | Build the document (auto-detects main file if omitted). |
-| `--fast` | Fast incremental mode; reuses previous state and skips unchanged passes (or invoke as `lw`). |
+| `--fast` | Accepted for compatibility; incremental rebuilds are automatic (see `-1` to force one). |
 | `-1`, `--force` | Force initial LaTeX run, continuing only if needed for convergence. |
 | `-u`, `--single-pass` | Run exactly one LaTeX pass without BibTeX or extra passes. |
 | `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
@@ -123,7 +123,7 @@ The installer creates several convenient shortcuts based on the executable name:
 | Command | Behavior |
 | :--- | :--- |
 | `l`, `latex_it` | Default build (`xelatex`, up to 3 passes, auto-bib). |
-| `lw` | Fast incremental build (`--fast`). |
+| `lw` | Same as `l`; kept for compatibility with existing symlinks. |
 | `ll`, `llua` | Build using LuaLaTeX (`--engine=lualatex`). |
 | `lp`, `pdflatex` | Build using pdfLaTeX (`--engine=pdflatex`). |
 | `clean_latex`, `latex_clean` | Clean temporary files in current directory. |

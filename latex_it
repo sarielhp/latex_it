@@ -244,7 +244,7 @@ module LatexCLI
   def self.add_compilation_options_primary(opts, options)
     opts.on('-m', '--main', 'Print the detected main LaTeX file and exit') { options[:show_main] = true }
     opts.on('-C', '--clean-only', 'Clean auxiliary and junk files in directory and exit without building') { options[:clean_only] = true }
-    opts.on('--fast', 'Fast incremental mode: reuse aux files and only run subsequent passes/biber/bibtex if needed') { options[:fast] = true }
+    opts.on('--fast', 'Accepted for compatibility; incremental rebuilds are automatic') { options[:fast] = true }
     opts.on('-a', '--all', 'Show all diagnostics across all tiers (including Whatevers and Warnings)') do
       options[:all] = true
       options[:suppress_whatevers] = false

@@ -56,7 +56,7 @@ This document provides architectural guidelines, core invariants, development wo
 - **Canonical Interface & Anti-Alias Policy (Strict No Redundant Aliases)**:
   Maintain a strictly minimal, clean CLI hierarchy without redundant aliases. Aliases blow up the command-line interface of a program. Every command-line option must have at most one canonical long name and optionally at most one single-letter shortcut (e.g. `-1, --force`, `-u, --single-pass`). Never add multiple single-letter shortcuts (e.g. `-u` and `-1` to the same command) or multiple long option names (e.g. `--single-pass` and `--one-pass`) to the same command. A single-letter shortcut is fine, but two single-letter shortcuts to the same command are strictly prohibited.
 - **Isolated Build Output (`junk/`)**:
-  All intermediate build artifacts must remain confined to `junk/`. Only final targets (`<file>.pdf`, `<file>.bbl`, `<file>.synctex.gz`) are exported to the project root. Cache preservation happens exclusively via `junk/old/`.
+  All intermediate build artifacts must remain confined to `junk/`. Only final targets (`<file>.pdf`, `<file>.bbl`, `<file>.synctex.gz`) are exported to the project root. Cache state lives in `junk/.build_state.json`.
 - **Engine Support**:
   `xelatex` is the default engine, with `lualatex` and `pdflatex` supported as alternatives.
 - **Dependency Minimalism**:
@@ -76,7 +76,7 @@ Any modifications to compilation logic must honor the following invariants:
    - **Default**: Tracks source dependencies via `-recorder` (`.fls`) and SHA256 build state. Exits in 0 passes if targets are up to date; runs 1 pass if citations/labels are stable; runs pre-primary BibTeX/Biber if `.bib` changed; and only executes extra passes (up to `-n`, default 3) when `.aux` changes or rerun is requested in logs.
    - **Force Rebuild (`-1` / `--force`)**: Bypasses the initial up-to-date check and forces the first LaTeX pass, continuing with subsequent passes and BibTeX only if needed for convergence.
    - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled (forces a single rebuild pass and exits immediately).
-   - **Fast Incremental (`--fast` / `lw`)**: Aliased to reuse build state cache and avoid redundant recompilations.
+   - **`--fast` / `lw`**: Accepted for compatibility and currently no-ops. Incremental behaviour is provided unconditionally by `targets_up_to_date?`; either implement a distinct meaning for this flag or remove it.
 2. **Bibliography Safety**:
    - Detect tool automatically: Biber (via `.bcf` / `.run.xml`) or BibTeX (via `\bibdata` and `\citation` in `.aux`).
    - Root `.bbl` is only overwritten if the generated `junk/*.bbl` contains valid bibliography entries (`\bibitem` or `\entry`).
@@ -184,7 +184,7 @@ When reviewing, refactoring, or evaluating changes to `latex_it`, evaluate acros
    - Missing compilers (`xelatex`, `biber`, `bibtex`) or system tools must fail fast with actionable error messages.
    - Subprocess noise (METAFONT, `mktextfm`) must be filtered cleanly without suppressing underlying TeX errors.
 4. **Performance & Incremental Efficiency**:
-   - Fast mode (`--fast`) must avoid redundant LaTeX and bibliography passes whenever cache is valid.
+   - `targets_up_to_date?` must avoid redundant LaTeX and bibliography passes whenever the cached build state is valid.
    - Text diff checking (`-d`) must avoid disk writes and unnecessary PDF viewer reloads when content is identical.
 5. **CLI Consistency & User Experience**:
    - Clean, readable `-h` help text.

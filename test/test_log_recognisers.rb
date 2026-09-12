@@ -210,4 +210,21 @@ class TestLogRecognisers < Minitest::Test
       end
     end
   end
+
+  def test_undefined_control_sequence_names_the_last_macro_on_the_line
+    {
+      ['! Undefined control sequence.', 'l.5 \\textbf{Hello} \\badmacro'] => '\\badmacro',
+      ['! Undefined control sequence.', 'l.9 \\item Foo \\barbaz'] => '\\barbaz',
+      ['! Undefined control sequence.', 'l.3 \\alone'] => '\\alone'
+    }.each do |block, expected|
+      token = LaTeXErrorCatalog::UNDEFINED_CS_EXTRACTOR.call(nil, block)
+      assert_equal expected, token,
+                   "named the wrong macro for #{block.last.inspect}"
+    end
+  end
+
+  def test_recently_read_still_wins
+    block = ['! Undefined control sequence.', '<recently read> \\reallyit', 'l.5 \\textbf{x} \\other']
+    assert_equal '\\reallyit', LaTeXErrorCatalog::UNDEFINED_CS_EXTRACTOR.call(nil, block)
+  end
 end

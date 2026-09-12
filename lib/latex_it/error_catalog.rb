@@ -103,13 +103,17 @@ module LaTeXErrorCatalog
     LaTeXUtils.edit_distance(cmd, best) <= max_dist ? best : nil
   end
 
+  # TeX breaks the l.N context line immediately after the offending token, so
+  # the culprit is the LAST control sequence on it, not the first. The old
+  # pattern was non-greedy and captured the first, which for any context line
+  # with more than one macro named the wrong command and produced a nonsensical
+  # "Did you mean ...?" hint -- on the single most common LaTeX error there is.
   UNDEFINED_CS_EXTRACTOR = lambda do |_match, err_block|
     block_text = err_block.join("\n")
-    if block_text =~ /<recently read>\s*(\\\S+)/
-      Regexp.last_match(1)
-    elsif block_text =~ /l\.\d+.*?(\\[a-zA-Z@]+)(?:\s|$|[^a-zA-Z@])/
-      Regexp.last_match(1)
-    end
+    return Regexp.last_match(1) if block_text =~ /<recently read>\s*(\\\S+)/
+
+    context = err_block.find { |line| line =~ /\Al\.\d+/ }
+    context&.scan(/\\[a-zA-Z@]+/)&.last
   end
 
   MATH_NON_ALIGN_ENVS = (

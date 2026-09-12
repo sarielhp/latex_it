@@ -119,6 +119,8 @@
   - Recorded all unexecuted checks as `SKIP` when the build fails.
   - Wrapped `#save` in `rescue SystemCallError => e`, cleaning up `.tmp` and warning rather than raising.
 - **Verification**:
+- **Footprint**: 4 files changed, 701 insertions(+), 61 deletions(-)
+- **Differential Audit**: 4 warning(s)
   - `test/test_arxiv_worker.rb` (`test_all_checks_recorded_as_skip_when_environment_fails`): verified all 16 checks in `ALL_CHECKS` appear in the report (1 `FAIL`, 15 `SKIP`).
   - `test/test_arxiv_worker.rb` (`test_save_handles_system_call_error_gracefully`): verified `save` catches `Errno::ENOSPC` and emits warning without raising.
 

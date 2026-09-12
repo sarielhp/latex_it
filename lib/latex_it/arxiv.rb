@@ -42,13 +42,28 @@ class LatexArxivPackager
       write_arxiv_metadata(meta_filename)
 
       reference_pdf = arxiv_reference_pdf
-      verified = verify_arxiv_sandbox!(zip_filename, reference_pdf) unless @options[:arxiv_verify] == false
-      return false if @options[:arxiv_verify] != false && !verified
+      if @options[:arxiv_verify] != false
+        verified = verify_arxiv_sandbox!(zip_filename, reference_pdf)
+        return quarantine_unverified_package(zip_filename, meta_filename) unless verified
+      end
 
       file_count = count_zip_entries(zip_filename)
       announce_arxiv_completion(zip_filename, meta_filename, file_count)
       true
     end
+  end
+
+  # The zip and the metadata file are written before verification runs, so a
+  # failed check used to leave them sitting in the project directory looking
+  # exactly like a verified pair. Renaming them makes the state visible, so a
+  # user who scrolls past the red [FAIL] -- or a script that ignores the exit
+  # code -- cannot upload a package the tool has already rejected.
+  def quarantine_unverified_package(zip_filename, meta_filename)
+    quarantined = "#{zip_filename}.unverified"
+    FileUtils.mv(zip_filename, quarantined, force: true) if File.file?(zip_filename)
+    FileUtils.rm_f(meta_filename)
+    warn Rainbow("[FAIL] Verification failed. Package renamed to #{quarantined} -- do not submit it.").red.bright
+    false
   end
 
   def ensure_compiled!

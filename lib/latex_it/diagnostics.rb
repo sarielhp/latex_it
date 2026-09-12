@@ -826,6 +826,44 @@ module LaTeXDiagnostics
     target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}"
   end
 
+  def throttle_errors(errors)
+    return [errors, nil] if (@options && @options[:all]) || errors.size <= 1
+
+    groups = errors.group_by { |e| format_display_path(e[:file]) }
+    first_file, file_errors = groups.first
+    return [errors, nil] if groups.size <= 1 && file_errors.size <= 10
+
+    displayed = file_errors.first(10)
+    other_files = groups.keys[1..] || []
+    cascade_info = {
+      first_file: first_file,
+      remaining_in_first: file_errors.size - displayed.size,
+      other_files: other_files,
+      other_errors_count: other_files.sum { |f| groups[f].size }
+    }
+    [displayed, cascade_info]
+  end
+
+  def format_other_files_list(other_list)
+    return other_list.join(', ') if other_list.size <= 4
+
+    "#{other_list.first(3).join(', ')}, and #{other_list.size - 3} more files"
+  end
+
+  def print_cascade_notice(cascade_info, io: $stderr)
+    io.puts Rainbow("\n═══════════════════════════════════════════════════════════════════════════════").yellow
+    if cascade_info[:remaining_in_first] > 0
+      io.puts Rainbow("▸ #{cascade_info[:remaining_in_first]} more errors in #{cascade_info[:first_file]} were truncated (likely cascades).").yellow
+    end
+    if cascade_info[:other_errors_count] > 0
+      files_str = format_other_files_list(cascade_info[:other_files])
+      io.puts Rainbow("▸ #{cascade_info[:other_errors_count]} more errors were detected across #{cascade_info[:other_files].size} other files (#{files_str}).").yellow
+      io.puts Rainbow('  These may be cascades caused by the earlier error. Please resolve the issues above first.').yellow
+    end
+    io.puts Rainbow("  (Run with 'l -a' / '--all' to display all errors across all files).").yellow
+    io.puts Rainbow('═══════════════════════════════════════════════════════════════════════════════').yellow
+  end
+
   def report_errors(loga, io: $stderr)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
@@ -837,11 +875,13 @@ module LaTeXDiagnostics
     brace_errors = check_source_braces
     errors = brace_errors + extract_errors(content)
     fallback = errors.empty? ? content.lines.last(15) : []
-    _num_warnings, num_errors = print_diagnostics_body([], errors, fallback_lines: fallback, tier_label: 'errors', io: io)
+    displayed_errors, cascade_info = throttle_errors(errors)
+    _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)
+    print_cascade_notice(cascade_info, io: io) if cascade_info
 
     io.puts Rainbow('===============================================================').red.bright
     io.puts "See #{loga} for full error details."
-    report_error_summary(content, raw, brace_errors, num_errors, io: io)
+    report_error_summary(content, raw, brace_errors, errors.size, io: io)
     exit 1
   end
 
@@ -978,8 +1018,10 @@ module LaTeXDiagnostics
 
   def render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
     if errors > 0 || !err_items.empty?
-      _num_warnings, num_errors = print_diagnostics_body([], err_items, tier_label: 'errors')
-      [num_errors, errors].max
+      displayed_errors, cascade_info = throttle_errors(err_items)
+      _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
+      print_cascade_notice(cascade_info, io: $stdout) if cascade_info
+      [err_items.size, errors].max
     else
       render_non_error_tiers(alert_items, reg_warns, what_items)
       errors

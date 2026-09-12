@@ -1407,4 +1407,56 @@ class TestLatexItCLI < Minitest::Test
       end
     end
   end
+
+  def test_throttle_errors_caps_first_file_at_ten
+    diag = LaTeXDiagnostics.new('main.tex', {})
+    errors = (1..15).map { |i| { file: 'ch1.tex', line: i, text: "Error #{i}" } }
+    displayed, info = diag.send(:throttle_errors, errors)
+
+    assert_equal 10, displayed.size
+    refute_nil info
+    assert_equal 5, info[:remaining_in_first]
+    assert_empty info[:other_files]
+  end
+
+  def test_throttle_errors_stops_after_first_file
+    diag = LaTeXDiagnostics.new('main.tex', {})
+    ch1_errors = (1..3).map { |i| { file: 'ch1.tex', line: i, text: "Ch1 Error #{i}" } }
+    ch2_errors = (1..5).map { |i| { file: 'ch2.tex', line: i, text: "Ch2 Error #{i}" } }
+    displayed, info = diag.send(:throttle_errors, ch1_errors + ch2_errors)
+
+    assert_equal 3, displayed.size
+    refute_nil info
+    assert_equal 0, info[:remaining_in_first]
+    assert_equal ['ch2.tex'], info[:other_files]
+    assert_equal 5, info[:other_errors_count]
+  end
+
+  def test_throttle_errors_bypassed_with_all_option
+    diag = LaTeXDiagnostics.new('main.tex', all: true)
+    ch1_errors = (1..15).map { |i| { file: 'ch1.tex', line: i, text: "Error #{i}" } }
+    ch2_errors = (1..5).map { |i| { file: 'ch2.tex', line: i, text: "Error #{i}" } }
+    displayed, info = diag.send(:throttle_errors, ch1_errors + ch2_errors)
+
+    assert_equal 20, displayed.size
+    assert_nil info
+  end
+
+  def test_print_cascade_notice_output
+    diag = LaTeXDiagnostics.new('main.tex', {})
+    info = {
+      first_file: 'ch1.tex',
+      remaining_in_first: 4,
+      other_files: %w[ch2.tex ch3.tex],
+      other_errors_count: 12
+    }
+    io = StringIO.new
+    diag.send(:print_cascade_notice, info, io: io)
+    out = io.string
+
+    assert_includes out, '4 more errors in ch1.tex were truncated'
+    assert_includes out, '12 more errors were detected across 2 other files'
+    assert_includes out, 'ch2.tex, ch3.tex'
+    assert_includes out, "Run with 'l -a' / '--all'"
+  end
 end

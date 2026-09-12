@@ -138,7 +138,7 @@ class LatexBuilder
     return false unless sources.is_a?(Hash) && !sources.empty?
 
     pdf_mtime = File.mtime(target_pdf)
-    root_files = Dir['*.tex', '*.bib', 'refs/*.bib'].select { |f| File.file?(f) }
+    root_files = Dir['*.tex'].select { |f| File.file?(f) } + bib_files_on_disk
     return false if root_files.any? { |f| File.mtime(f) > pdf_mtime }
 
     sources.all? do |path, meta|
@@ -206,8 +206,7 @@ class LatexBuilder
     return false unless File.exist?("junk/#{@bfilename}.aux") || File.exist?("junk/#{@bfilename}.bcf")
 
     bbl_mtime = File.mtime(fnbbl)
-    bib_files = Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }
-    bib_files.any? { |b| File.mtime(b) > bbl_mtime }
+    bib_files_on_disk.any? { |b| File.mtime(b) > bbl_mtime }
   end
 
   def extract_fls_dependencies(fls_path)
@@ -238,7 +237,8 @@ class LatexBuilder
     @build_start_time = Time.now
     @input_snapshots = {}
     files_to_snapshot = [@filename]
-    files_to_snapshot.concat(Dir['*.tex', '*.bib', 'refs/*.bib'].select { |f| File.file?(f) })
+    files_to_snapshot.concat(Dir['*.tex'].select { |f| File.file?(f) })
+    files_to_snapshot.concat(bib_files_on_disk)
     if File.exist?("junk/#{@bfilename}.fls")
       files_to_snapshot.concat(extract_fls_dependencies("junk/#{@bfilename}.fls"))
     end
@@ -282,7 +282,7 @@ class LatexBuilder
     fls_path = "junk/#{@bfilename}.fls"
     deps = extract_fls_dependencies(fls_path)
     deps << @filename if File.exist?(@filename)
-    Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }.each { |b| deps << b }
+    bib_files_on_disk.each { |b| deps << b }
     deps.uniq
   end
 
@@ -320,6 +320,22 @@ class LatexBuilder
     Digest::SHA256.hexdigest(JSON.generate(payload))
   end
 
+  # The single source of truth for where bibliographies live. Five call sites
+  # used to hardcode Dir['*.bib', 'refs/*.bib'] while discover_bib_files knew
+  # about bib/ and bibliography/ as well, and bib_dirs is user-configurable.
+  # A .bib never appears in the .fls either -- LaTeX reads the .bbl out of
+  # junk/, which extract_fls_dependencies excludes -- so a bibliography under
+  # bib/ was tracked by nothing at all, and editing it left targets_up_to_date?
+  # reporting the stale PDF as current.
+  def bib_globs
+    dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
+    ['*.bib'] + dirs.map { |d| "#{d.to_s.chomp('/')}/*.bib" }
+  end
+
+  def bib_files_on_disk
+    Dir[*bib_globs].select { |f| File.file?(f) }
+  end
+
   def export_dependencies
     deps = []
     if File.exist?('junk/.build_state.json')
@@ -341,7 +357,7 @@ class LatexBuilder
     end
 
     deps << @filename if File.exist?(@filename)
-    Dir['*.bib', 'refs/*.bib'].select { |f| File.file?(f) }.each { |b| deps << b }
+    bib_files_on_disk.each { |b| deps << b }
     deps.uniq!
     deps.sort!
 
@@ -703,7 +719,7 @@ class LatexBuilder
   end
 
   def discover_bib_files
-    bibs = Dir['*.bib', 'refs/*.bib', 'bib/*.bib', 'bibliography/*.bib'].select { |f| File.file?(f) }
+    bibs = bib_files_on_disk
     bibs.concat(extract_aux_bib_files)
     bibs.uniq
   end

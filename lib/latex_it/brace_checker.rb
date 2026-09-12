@@ -63,7 +63,7 @@ class LaTeXBraceChecker
 
     content.each_line.with_index(1) do |raw_line, line_no|
       if in_verbatim
-        if raw_line =~ /\\end\{#{Regexp.escape(verbatim_end)}\}/
+        if raw_line.include?("\\end{#{verbatim_end}}")
           in_verbatim = false
           verbatim_end = nil
         end
@@ -75,7 +75,7 @@ class LaTeXBraceChecker
 
       if line =~ VERBATIM_START_PATTERN
         name = Regexp.last_match(1)
-        unless line =~ /\\end\{#{Regexp.escape(name)}\}/
+        unless line.include?("\\end{#{name}}")
           in_verbatim = true
           verbatim_end = name
         end
@@ -165,7 +165,7 @@ class LaTeXBraceChecker
   def scan_line(raw_line, line_no)
     @in_macro_definition = raw_line.match?(MACRO_DEFINITION_PATTERN)
     if @in_verbatim
-      if raw_line =~ /\\end\{#{Regexp.escape(@verbatim_end)}\}/
+      if raw_line.include?("\\end{#{@verbatim_end}}")
         @in_verbatim = false
         @verbatim_end = nil
       end

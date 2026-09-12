@@ -171,4 +171,85 @@ class TestBuildCache < Minitest::Test
       assert File.exist?('junk/log.txt'), 'build log was deleted on cached build'
     end
   end
+
+  def test_targets_up_to_date_when_pdf_timestamp_is_older_than_build_state
+    in_cached_project('refs') do |builder, _bib|
+      # Simulate update_on_diff preserving an older PDF while build state has current timestamp
+      older = Time.now - 100
+      File.utime(older, older, 'paper.pdf')
+
+      assert builder.send(:targets_up_to_date?),
+             'an older PDF preserved by update_on_diff must not falsely invalidate cache'
+    end
+  end
+
+  def test_targets_up_to_date_when_file_touched_without_content_change
+    in_cached_project('refs') do |builder, _bib|
+      future = Time.now + 100
+      File.utime(future, future, 'paper.tex')
+
+      assert builder.send(:targets_up_to_date?),
+             'touching a source file without modifying content must not invalidate build cache'
+    end
+  end
+
+  def test_targets_up_to_date_invalidates_when_content_changes
+    in_cached_project('refs') do |builder, _bib|
+      future = Time.now + 100
+      File.write('paper.tex', "\\documentclass{article}\n% Modified content\n")
+      File.utime(future, future, 'paper.tex')
+
+      refute builder.send(:targets_up_to_date?),
+             'modifying source content must invalidate build cache'
+    end
+  end
+
+  def test_targets_up_to_date_invalidates_when_untracked_root_file_added
+    in_cached_project('refs') do |builder, _bib|
+      future = Time.now + 100
+      File.write('chapter2.tex', "\\section{Two}\n")
+      File.utime(future, future, 'chapter2.tex')
+
+      refute builder.send(:targets_up_to_date?),
+             'adding a new root .tex file must invalidate build cache'
+    end
+  end
+
+  def test_needs_latex_rerun_uses_passed_curr_aux_hash
+    builder = LatexBuilder.new('paper.tex', options)
+    assert builder.send(:needs_latex_rerun?, 'nonexistent_log', 'old_hash', 'new_hash')
+    refute builder.send(:needs_latex_rerun?, 'nonexistent_log', 'same_hash', 'same_hash')
+  end
+
+  def test_extract_aux_bib_files_with_in_memory_aux_contents
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('refs')
+        File.write('refs/refs.bib', '@book{a, title={Test}}')
+        builder = LatexBuilder.new('paper.tex', options(bib_dirs: ['refs']))
+
+        aux_data = "junk/paper.aux:\\relax\n\\bibdata{refs}\n"
+        found = builder.send(:extract_aux_bib_files, aux_data)
+        assert_equal ['refs/refs.bib'], found
+      end
+    end
+  end
+
+  def test_detect_bib_tool_with_in_memory_aux_contents
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p('refs')
+        File.write('refs/refs.bib', '@book{a, title={Test}}')
+        builder = LatexBuilder.new('paper.tex', options(bib_dirs: ['refs']))
+
+        aux_data = "junk/paper.aux:\\relax\n\\bibdata{refs}\n\\citation{a}\n"
+        assert_equal :bibtex, builder.send(:detect_bib_tool, aux_data)
+
+        FileUtils.mkdir_p('junk')
+        File.write('junk/paper.bcf', '<bcf:citekey>key1</bcf:citekey>')
+        biber_aux = "junk/paper.aux:\\relax\n\\abx@aux@bcf{paper.bcf}\n"
+        assert_equal :biber, builder.send(:detect_bib_tool, biber_aux)
+      end
+    end
+  end
 end

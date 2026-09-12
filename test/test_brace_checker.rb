@@ -96,4 +96,19 @@ class TestBraceChecker < Minitest::Test
   def test_real_comment_still_ends_the_line
     assert_silent("x % an unbalanced { in a comment\n", 'a brace inside a real comment')
   end
+
+  def test_verbatim_environments_with_braces_are_ignored
+    %w[verbatim lstlisting minted filecontents].each do |env|
+      src = <<~TEX
+        \\documentclass{article}
+        \\begin{document}
+        \\begin{#{env}}
+        def unclosed_brace {
+          x = y[0];
+        \\end{#{env}}
+        \\end{document}
+      TEX
+      assert_silent(src, "verbatim environment #{env} with unbalanced brace")
+    end
+  end
 end

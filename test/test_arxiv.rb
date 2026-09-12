@@ -21,6 +21,12 @@ class TestArxivSupport < Minitest::Test
     assert_equal "Fast Approximations of α ≤ β in R^d", LaTeXMetaExtractor.extract_title(tex)
   end
 
+  def test_clean_latex_math_comprehensive
+    raw = "\\alpha \\beta \\gamma \\Delta \\Omega \\leq \\ge \\approx \\times \\cdot \\in \\infty \\sum \\log(x) \\sqrt{y+1} \\mathbb{R} \\mathcal{H} \\mathfrak{g} $z$"
+    expected = "α β γ Δ Ω ≤ ≥ ≈ × · ∈ ∞ ∑ log(x) √(y+1) R H g z"
+    assert_equal expected, LaTeXMetaExtractor.clean_latex_math(raw)
+  end
+
   def test_meta_extraction_authors
     tex = <<~TEX
       \\documentclass{article}

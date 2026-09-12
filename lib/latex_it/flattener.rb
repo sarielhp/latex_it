@@ -231,7 +231,7 @@ module LaTeXFlattener
     len = line.length
     while i < len
       c = line[i]
-      if line[i..].start_with?('\\url{', '\\href{')
+      if c == '\\' && (line[i, 5] == '\\url{' || line[i, 6] == '\\href{')
         in_url = true
       elsif in_url && c == '}'
         in_url = false

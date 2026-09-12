@@ -194,4 +194,13 @@ class TestFlattener < Minitest::Test
       refute_includes out, 'CONFIDENTIAL_DATA'
     end
   end
+
+  def test_inline_comment_index_handles_urls_and_comments
+    assert_equal 12, LaTeXFlattener.inline_comment_index('hello world % comment')
+    assert_nil LaTeXFlattener.inline_comment_index('hello \\% escaped percent')
+    assert_equal 45, LaTeXFlattener.inline_comment_index('\\url{https://arxiv.org/abs/2601.12345%20foo} % comment')
+    assert_equal 27, LaTeXFlattener.inline_comment_index('\\href{http://x.org/%20foo} % outside')
+    assert_nil LaTeXFlattener.inline_comment_index('no comments here')
+    assert_equal 2, LaTeXFlattener.inline_comment_index('\\\\% double escaped')
+  end
 end

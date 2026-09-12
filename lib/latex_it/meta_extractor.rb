@@ -54,6 +54,11 @@ module LaTeXMetaExtractor
   TEXT_MACROS_TO_STRIP = %w[thanks footnote].freeze
   TEXT_MACROS_TO_UNWRAP = %w[textbf textit texttt textmd textsc textsl textnormal emph text mathsf mathbf mathit mathrm].freeze
   MATH_FUNCTIONS = %w[log ln exp min max sin cos tan det dim ker].freeze
+  MATH_REPLACEMENTS = GREEK_SYMBOLS.merge(MATH_SYMBOLS).merge(MATH_FUNCTIONS.to_h { |f| [f, f] }).freeze
+  MATH_TOKEN_PATTERN = /\\(#{Regexp.union(MATH_REPLACEMENTS.keys.sort_by { |k| -k.length }).source})\b/.freeze
+  MATH_FONT_PATTERN = /\\(?:mathbb|mathcal|mathfrak)\{([A-Za-z])\}/.freeze
+  MATH_SQRT_PATTERN = /\\sqrt\{([^}]+)\}/.freeze
+  MATH_INLINE_PATTERN = /\$([^\$]+)\$/.freeze
 
   def self.extract(main_tex, base_dir = '.', pdf_path = nil, fls_path = nil, log_path = nil, extra_comments = nil)
     raw_content = LaTeXUtils.safe_read(File.join(base_dir, main_tex))
@@ -172,19 +177,11 @@ module LaTeXMetaExtractor
     return '' if text.nil?
 
     str = text.dup
-    GREEK_SYMBOLS.each { |tex, uni| str.gsub!(/\\#{tex}\b/, uni) }
-    MATH_SYMBOLS.each { |tex, uni| str.gsub!(/\\#{tex}\b/, uni) }
-
-    str.gsub!(/\\mathbb\{([A-Za-z])\}/, '\1')
-    str.gsub!(/\\mathcal\{([A-Za-z])\}/, '\1')
-    str.gsub!(/\\mathfrak\{([A-Za-z])\}/, '\1')
-    str.gsub!(/\\sqrt\{([^}]+)\}/, '√(\1)')
-
-    MATH_FUNCTIONS.each { |fn| str.gsub!(/\\#{fn}\b/, fn) }
-
-    str.gsub!(/\$([^\$]+)\$/, '\1')
-    str.gsub!(/\$/, '')
-    str
+    str.gsub!(MATH_TOKEN_PATTERN) { MATH_REPLACEMENTS[Regexp.last_match(1)] }
+    str.gsub!(MATH_FONT_PATTERN, '\1')
+    str.gsub!(MATH_SQRT_PATTERN, '√(\1)')
+    str.gsub!(MATH_INLINE_PATTERN, '\1')
+    str.delete('$')
   end
 
   def self.extract_title(content)

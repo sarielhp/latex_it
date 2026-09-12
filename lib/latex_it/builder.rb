@@ -162,9 +162,11 @@ class LatexBuilder
     sources = state['sources']
     return false unless sources.is_a?(Hash) && !sources.empty?
 
-    pdf_mtime = File.mtime(target_pdf)
+    build_time = state['saved_at'] || (File.exist?(state_file) ? File.mtime(state_file).to_i : 0)
     root_files = Dir['*.tex'].select { |f| File.file?(f) } + bib_files_on_disk
-    return false if root_files.any? { |f| File.mtime(f) > pdf_mtime }
+    return false if root_files.any? do |f|
+      File.mtime(f).to_i > build_time && (!sources[f] || Digest::SHA256.file(f).hexdigest != sources[f]['sha'])
+    end
 
     sources.all? do |path, meta|
       next false unless File.exist?(path)
@@ -197,22 +199,24 @@ class LatexBuilder
 
   def run_pass_iterations(max_passes, bib_ran, bib_tool)
     pass = 0
+    aux_before = compute_aux_hash
     loop do
       pass += 1
       prefix = (pass == 1 && !bib_ran) ? '      ' : ', '
       print "#{prefix}#{Rainbow(@engine_name).bright} (#{pass})"
 
-      aux_before = compute_aux_hash
       return false unless run_latex_pass("_#{pass}")
 
-      rerun_needed = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before)
+      curr_aux_hash = compute_aux_hash
+      rerun_needed = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux_hash)
+      aux_before = curr_aux_hash
       if pass >= max_passes
         @cacheable_build = false if rerun_needed
         break
       end
 
-      bib_tool ||= detect_bib_tool
-      if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}")
+      bib_tool ||= detect_bib_tool(curr_aux_hash)
+      if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux_hash)
         print ", #{Rainbow(bib_tool).bright}"
         return false unless run_bib_pass(bib_tool)
 
@@ -634,16 +638,21 @@ class LatexBuilder
     end
   end
 
-  def detect_bib_tool
+  def detect_bib_tool(aux_contents = nil)
     return nil if @options[:bib] == false
 
     biber_detected = detect_biber_control_file
     return :biber if biber_detected
 
-    aux_files = Dir.glob('junk/**/*.aux')
-    return (@options[:bib] == true ? :bibtex : nil) if aux_files.empty?
+    if aux_contents.nil?
+      aux_files = Dir.glob('junk/**/*.aux')
+      return (@options[:bib] == true ? :bibtex : nil) if aux_files.empty?
 
-    aux_contents = aux_files.map { |f| LaTeXUtils.safe_read(f) }.join("\n")
+      aux_contents = aux_files.map { |f| LaTeXUtils.safe_read(f) }.join("\n")
+    elsif aux_contents.empty?
+      return (@options[:bib] == true ? :bibtex : nil)
+    end
+
     detect_bib_tool_from_aux(aux_contents)
   end
 
@@ -771,17 +780,23 @@ class LatexBuilder
     FileUtils.cp(source, junk_bbl) unless source == junk_bbl
   end
 
-  def discover_bib_files
+  def discover_bib_files(aux_contents = nil)
     bibs = bib_files_on_disk
-    bibs.concat(extract_aux_bib_files)
+    bibs.concat(extract_aux_bib_files(aux_contents))
     bibs.uniq
   end
 
-  def extract_aux_bib_files
+  def extract_aux_bib_files(aux_contents = nil)
     files = []
-    Dir.glob('junk/**/*.aux').each do |aux|
-      LaTeXUtils.safe_read(aux).scan(/\\bibdata\{([^}]+)\}/) do |m|
+    if aux_contents
+      aux_contents.scan(/\\bibdata\{([^}]+)\}/) do |m|
         collect_bib_candidates(m.first, files)
+      end
+    else
+      Dir.glob('junk/**/*.aux').each do |aux|
+        LaTeXUtils.safe_read(aux).scan(/\\bibdata\{([^}]+)\}/) do |m|
+          collect_bib_candidates(m.first, files)
+        end
       end
     end
     files
@@ -822,7 +837,7 @@ class LatexBuilder
     aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
   end
 
-  def needs_bib_pass?(tool, loga)
+  def needs_bib_pass?(tool, loga, aux_contents = nil)
     return false if @options[:bib] == false
     return true if @options[:bib] == true
 
@@ -830,7 +845,7 @@ class LatexBuilder
     return true unless File.exist?(fnbbl) && File.size(fnbbl) > 0
 
     bbl_mtime = File.mtime(fnbbl)
-    bib_files = discover_bib_files
+    bib_files = discover_bib_files(aux_contents)
     return true if bib_files.any? { |b| File.mtime(b) > bbl_mtime }
 
     log_content = LaTeXUtils.safe_read(loga)
@@ -848,8 +863,8 @@ class LatexBuilder
     false
   end
 
-  def needs_latex_rerun?(loga, prev_aux_hash = nil)
-    curr_aux_hash = compute_aux_hash
+  def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
+    curr_aux_hash ||= compute_aux_hash
     if prev_aux_hash && !prev_aux_hash.empty?
       return true if curr_aux_hash != prev_aux_hash
     elsif prev_aux_hash && prev_aux_hash.empty?

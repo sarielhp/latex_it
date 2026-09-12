@@ -12,7 +12,8 @@ REPO_ROOT = File.expand_path('..', __dir__)
 VERSION = '0.1.0'
 
 def detect_project_language(dir = REPO_ROOT)
-  if Dir.exist?(File.join(dir, 'lib', 'latex_it')) || File.exist?(File.join(dir, 'latex_it'))
+  pname = File.basename(dir)
+  if Dir.exist?(File.join(dir, 'lib', pname)) || File.exist?(File.join(dir, pname))
     :ruby
   elsif File.exist?(File.join(dir, 'Gemfile')) || File.exist?(File.join(dir, '.rubocop.yml'))
     :ruby
@@ -473,8 +474,9 @@ def default_search_path(lang)
   if lang == :rust && Dir.exist?(File.join(REPO_ROOT, 'src'))
     [File.join(REPO_ROOT, 'src')]
   elsif lang == :ruby && Dir.exist?(File.join(REPO_ROOT, 'lib'))
-    bin_file = File.join(REPO_ROOT, 'latex_it')
-    [File.join(REPO_ROOT, 'lib'), (File.file?(bin_file) ? bin_file : nil)].compact
+    pname = File.basename(REPO_ROOT)
+    bin_file = [File.join(REPO_ROOT, pname), File.join(REPO_ROOT, 'bin', pname), File.join(REPO_ROOT, 'exe', pname)].find { |f| File.file?(f) }
+    [File.join(REPO_ROOT, 'lib'), bin_file].compact
   else
     [REPO_ROOT]
   end

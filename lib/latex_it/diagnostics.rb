@@ -226,12 +226,23 @@ module LaTeXDiagnostics
       i += 1
     end
 
-    warn_text = warn_block.join(' ')
+    warn_text = condense_package_warning(warn_block.join(' '))
     file_name, line_no, line_str = extract_warning_location(warn_text, file_stack)
 
     formatted = format_diagnostic_line(line_str, warn_text, :yellow)
     item = { type: :warn, file: file_name, line: line_no, line_str: line_str, text: warn_text, base_color: :yellow, formatted: formatted, index: start_idx }
     [item, i]
+  end
+
+  def condense_package_warning(text)
+    if text =~ /Package biblatex Warning: The following entr(?:y|ies) could not be found/i
+      sub = text[/(?:in the database:)\s*(.*?)\s*(?:Please verify the spelling|$)/i, 1]
+      if sub
+        keys = sub.gsub(/\(biblatex\)/i, '').strip.gsub(/\s+/, ' ')
+        return "Package biblatex Warning: Entry '#{keys}' not found in database."
+      end
+    end
+    text
   end
 
   def extract_warning_location(warn_text, file_stack)

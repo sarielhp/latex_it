@@ -206,4 +206,15 @@ class TestDeepDiagnostics < Minitest::Test
       assert_includes content, 'Errors: 1'
     end
   end
+
+  def test_condense_biblatex_missing_entry_warning
+    builder = LatexBuilder.new('main.tex', {})
+    raw_warning = "Package biblatex Warning: The following entry could not be found\n" \
+                  "(biblatex)                in the database:\n" \
+                  "(biblatex)                w-nfm-74\n" \
+                  "(biblatex)                Please verify the spelling and rerun\n" \
+                  "(biblatex)                LaTeX afterwards."
+    condensed = builder.condense_package_warning(raw_warning.lines.map(&:strip).join(' '))
+    assert_equal "Package biblatex Warning: Entry 'w-nfm-74' not found in database.", condensed
+  end
 end

@@ -44,7 +44,11 @@ class LatexPackager
 
     puts Rainbow("==> Created portable zip: #{zip_filename}").green.bright
 
-    return false if @options[:verify] && !verify_archive!(zip_filename)
+    if @options[:verify] && !verify_archive!(zip_filename)
+      FileUtils.rm_f(zip_filename)
+      warn Rainbow("[FAIL] Verification failed. Removed unverified #{zip_filename}.").red.bright
+      return false
+    end
 
     zip_filename
   end
@@ -290,7 +294,9 @@ class LatexPackager
 
     ruby_bin = RbConfig.ruby
     script_bin = LATEX_IT_EXECUTABLE
-    cmd = [ruby_bin, script_bin, '--no-env', '--engine', @builder.engine_name, @filename]
+    cmd = [ruby_bin, script_bin, '--no-env', '--engine', @builder.engine_name]
+    cmd += ['--timeout', @options[:timeout].to_s] if @options[:timeout]
+    cmd << @filename
 
     compile_out, compile_stat = Open3.capture2e(sandbox_environment(tmpdir), *cmd, chdir: tmpdir)
     new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")

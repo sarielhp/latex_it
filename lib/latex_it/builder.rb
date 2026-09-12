@@ -544,6 +544,12 @@ class LatexBuilder
     env
   end
 
+  def kill_process_group(pid)
+    pgid = Process.getpgid(pid) rescue nil
+    Process.kill('-KILL', pgid) if pgid rescue nil
+    Process.kill('KILL', pid) rescue nil
+  end
+
   def capture_pass_output(cmd_args)
     timeout = (@options[:timeout] || ENV['LATEX_IT_TIMEOUT'] || DEFAULT_PASS_TIMEOUT).to_i
     env = pass_environment
@@ -551,21 +557,21 @@ class LatexBuilder
 
     Open3.popen2e(env, *cmd_args, pgroup: true) do |stdin, stdout_err, wait_thr|
       stdin.close rescue nil
-      output = ''
+      output = +''
       reader = Thread.new { output = stdout_err.read }
-      unless wait_thr.join(timeout)
-        begin
-          pgid = Process.getpgid(wait_thr.pid)
-          Process.kill('-KILL', pgid)
-        rescue StandardError
-          Process.kill('KILL', wait_thr.pid) rescue nil
+      begin
+        unless wait_thr.join(timeout)
+          kill_process_group(wait_thr.pid)
+          reader.kill rescue nil
+          msg = "\n! LaTeX Error: Compilation timed out after #{timeout}s (suspected runaway loop).\n"
+          return [msg, ProcessResultStatus.new(124, false, nil, false)]
         end
+        reader.join(2.0) || reader.kill rescue nil
+        [output, wait_thr.value]
+      ensure
+        kill_process_group(wait_thr.pid) if wait_thr&.alive?
         reader.kill rescue nil
-        msg = "\n! LaTeX Error: Compilation timed out after #{timeout}s (suspected runaway loop).\n"
-        return [msg, ProcessResultStatus.new(124, false, nil, false)]
       end
-      reader.join
-      [output, wait_thr.value]
     end
   rescue Errno::ENOENT
     raise
@@ -826,10 +832,10 @@ class LatexBuilder
   end
 
   def copy_style_files_for_bibtex
-    return unless File.directory?('../styles')
+    return unless File.directory?('styles')
 
-    FileUtils.mkdir_p('styles')
-    Dir['../styles/*'].each { |s| FileUtils.cp_r(s, 'styles/') unless File.basename(s) == 'junk' }
+    FileUtils.mkdir_p('junk/styles')
+    Dir['styles/*'].each { |s| FileUtils.cp_r(s, 'junk/styles/') unless File.basename(s) == 'junk' }
   end
 
   def compute_aux_hash

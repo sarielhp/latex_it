@@ -329,4 +329,136 @@ class TestRepairFailures < Minitest::Test
       end
     end
   end
+
+  def test_kill_process_group_signals_pgid_and_pid
+    with_project do |builder|
+      killed = []
+      Process.stub(:getpgid, ->(_pid) { 12_345 }) do
+        Process.stub(:kill, ->(sig, target) { killed << [sig, target] }) do
+          builder.send(:kill_process_group, 9999)
+        end
+      end
+      assert_includes killed, ['-KILL', 12_345]
+      assert_includes killed, ['KILL', 9999]
+    end
+  end
+
+  def test_capture_pass_output_cleans_up_alive_process_on_exception
+    with_project do |builder|
+      builder.options[:timeout] = 10
+      killed_pids = []
+      builder.stub(:kill_process_group, ->(pid) { killed_pids << pid }) do
+        fake_wait_thr = Object.new
+        fake_wait_thr.define_singleton_method(:pid) { 8888 }
+        fake_wait_thr.define_singleton_method(:alive?) { true }
+        fake_wait_thr.define_singleton_method(:join) { |_t = nil| raise Interrupt, 'interrupted' }
+
+        fake_stdout = Object.new
+        fake_stdout.define_singleton_method(:read) { sleep 0.01; '' }
+
+        popen_stub = lambda do |_env, *_cmd, **_opts, &blk|
+          blk.call(StringIO.new, fake_stdout, fake_wait_thr)
+        end
+
+        assert_raises(Interrupt) do
+          Open3.stub(:popen2e, popen_stub) do
+            builder.send(:capture_pass_output, ['dummy'])
+          end
+        end
+      end
+      assert_includes killed_pids, 8888
+    end
+  end
+
+  def test_copy_style_files_for_bibtex_copies_from_styles_to_junk_styles
+    with_project do |builder|
+      FileUtils.mkdir_p('styles')
+      File.write('styles/sample.bst', '% custom bst')
+      FileUtils.mkdir_p('styles/junk')
+      File.write('styles/junk/ignored.txt', 'do not copy')
+
+      builder.send(:copy_style_files_for_bibtex)
+
+      assert File.directory?('junk/styles')
+      assert File.file?('junk/styles/sample.bst')
+      assert_equal '% custom bst', File.read('junk/styles/sample.bst')
+      refute File.exist?('junk/styles/junk')
+    end
+  end
+
+  def test_count_zip_entries_resilient_when_unzip_missing_or_fails
+    with_project do |builder|
+      packager = LatexArxivPackager.new(builder)
+
+      LaTeXUtils.stub(:command_available?, false) do
+        assert_equal 0, packager.send(:count_zip_entries, 'archive.zip')
+      end
+
+      LaTeXUtils.stub(:command_available?, true) do
+        Open3.stub(:capture2, ->(*_args) { raise Errno::ENOENT, 'unzip not found' }) do
+          assert_equal 0, packager.send(:count_zip_entries, 'archive.zip')
+        end
+      end
+    end
+  end
+
+  def test_packager_removes_zip_on_failed_verification
+    with_project do |builder|
+      builder.options[:verify] = true
+      packager = LatexPackager.new(builder)
+      def packager.collect_fls_dependencies(_fls); { figures: [], styles: [], tex_inputs: [] }; end
+      def packager.discover_figure_sources(_figs); []; end
+      def packager.stage_and_create_zip(zip_name, *_a); File.write(zip_name, 'dummy'); true; end
+      def packager.verify_archive!(_zip); false; end
+
+      _out, err = capture_io { refute packager.send(:do_package) }
+      refute File.exist?('paper.zip')
+      assert_includes err, 'Removed unverified paper.zip'
+    end
+  end
+
+  def test_meta_extractor_page_count_uses_command_available_without_which
+    with_project do
+      File.write('paper.pdf', '%PDF-1.4')
+      checked_commands = []
+      cmd_check = ->(cmd) { checked_commands << cmd; true }
+      fake_capture = ->(*_cmd) { ["Pages: 17\n", '', Status.new(0)] }
+
+      LaTeXUtils.stub(:command_available?, cmd_check) do
+        Open3.stub(:capture3, fake_capture) do
+          assert_equal 17, LaTeXMetaExtractor.extract_page_count('paper.pdf', nil)
+          assert_includes checked_commands, 'pdfinfo'
+        end
+      end
+    end
+  end
+
+  def test_sandbox_verification_forwards_timeout_option
+    with_project do |builder|
+      builder.options[:timeout] = 42
+      packager = LatexPackager.new(builder)
+      arxiv_packager = LatexArxivPackager.new(builder)
+      captured_cmds = []
+      stub_capture = ->(_env, *cmd, **_opts) { captured_cmds << cmd; ['', Status.new(0)] }
+
+      Open3.stub(:capture2e, stub_capture) do
+        capture_io do
+          packager.send(:run_sandbox_compile, Dir.tmpdir)
+          arxiv_packager.send(:run_sandbox_verify, Dir.tmpdir, 'paper.pdf')
+        end
+      end
+
+      captured_cmds.each do |cmd|
+        assert_includes cmd, '--timeout'
+        assert_equal '42', cmd[cmd.index('--timeout') + 1]
+      end
+    end
+  end
+
+  def test_cli_parses_timeout_option
+    options = {}
+    parser = LatexCLI.build_option_parser(options)
+    parser.parse!(['--timeout', '25', 'paper.tex'])
+    assert_equal 25, options[:timeout]
+  end
 end

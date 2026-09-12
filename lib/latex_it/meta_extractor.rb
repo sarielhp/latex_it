@@ -352,7 +352,7 @@ module LaTeXMetaExtractor
   end
 
   def self.extract_page_count(pdf_path, log_path)
-    if pdf_path && File.file?(pdf_path) && system('which pdfinfo > /dev/null 2>&1')
+    if pdf_path && File.file?(pdf_path) && LaTeXUtils.command_available?('pdfinfo')
       out, _err, status = Open3.capture3('pdfinfo', pdf_path)
       return Regexp.last_match(1).to_i if status.success? && out =~ /^Pages:\s*(\d+)/
     end

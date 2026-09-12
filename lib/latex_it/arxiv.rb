@@ -288,7 +288,9 @@ class LatexArxivPackager
   def run_sandbox_verify(tmpdir, reference_pdf)
     ruby_bin = RbConfig.ruby
     script_bin = LATEX_IT_EXECUTABLE
-    cmd = [ruby_bin, script_bin, '--no-env', '--engine', @builder.engine_name, @filename]
+    cmd = [ruby_bin, script_bin, '--no-env', '--engine', @builder.engine_name]
+    cmd += ['--timeout', @options[:timeout].to_s] if @options[:timeout]
+    cmd << @filename
     compile_out, compile_stat = Open3.capture2e(sandbox_environment(tmpdir), *cmd, chdir: tmpdir)
     new_pdf = File.join(tmpdir, "#{@bfilename}.pdf")
 
@@ -510,11 +512,15 @@ class LatexArxivPackager
   end
 
   def count_zip_entries(zip_filename)
+    return 0 unless LaTeXUtils.command_available?('unzip')
+
     out, stat = Open3.capture2('unzip', '-l', zip_filename)
     return 0 unless stat.success?
 
     lines = out.lines[3..-3] || []
     lines.size
+  rescue SystemCallError
+    0
   end
 
   def sandbox_environment(tmpdir)

@@ -173,6 +173,7 @@ module LatexCLI
       update_on_diff: cfg['update_on_diff'] == true,
       bib: cfg['bib'],
       passes: (cfg['passes'] || 3).to_i.clamp(1, 3),
+      timeout: cfg['timeout'],
       time: cfg['time'] == true,
       lock: cfg.key?('lock') ? (cfg['lock'] == true) : true,
       score: false,
@@ -270,6 +271,7 @@ module LatexCLI
     opts.on('-c', '--clean', 'Clean temporary build files (junk/, .bbl, .aux) before building') { options[:clean] = true }
     opts.on('-b', '--[no-]bib', 'Force or skip BibTeX pass (default: auto-detect)') { |v| options[:bib] = v }
     opts.on('-n', '--passes NUM', Integer, 'Number of compilation passes (1-3, default: 3)') { |v| options[:passes] = v.clamp(1, 3) }
+    opts.on('--timeout SECONDS', Integer, 'Maximum compilation timeout per pass in seconds') { |v| options[:timeout] = v }
     opts.on('-T', '--time', 'Show execution time diagnostics per pass') { options[:time] = true }
     opts.on('-t', '--verify', 'Verify self-contained portability of generated zip in /tmp sandbox') { options[:verify] = true; options[:zip] = true }
     opts.on('-z', '--zip', 'Create self-contained portable zip archive of paper') { options[:zip] = true }

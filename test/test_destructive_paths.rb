@@ -7,6 +7,8 @@ require 'open3'
 
 require_relative '../lib/latex_it/utils'
 require_relative '../lib/latex_it/builder'
+require_relative '../lib/latex_it/arxiv'
+require_relative '../lib/latex_it/packager'
 
 # Guards every path that deletes files in the user's project directory.
 # The tool writes all of its own scratch output under junk/; anything these
@@ -211,5 +213,89 @@ class TestDestructivePaths < Minitest::Test
                          '--meta wrote the metadata file next to the caller, not the document'
       refute_path_exists File.join(dir, 'arxiv_paper_meta.txt')
     end
+  end
+
+  def test_arxiv_copy_preserving_path_rejects_out_of_tree_and_symlinks
+    Dir.mktmpdir('latex_it_arxiv_copy_test') do |root|
+      outside = File.join(root, 'outside.png')
+      File.write(outside, 'secret outside')
+
+      proj = File.join(root, 'proj')
+      stage = File.join(root, 'stage')
+      FileUtils.mkdir_p(File.join(proj, 'figs'))
+      FileUtils.mkdir_p(stage)
+
+      local = File.join(proj, 'figs', 'local.png')
+      File.write(local, 'local figure')
+
+      link = File.join(proj, 'figs', 'link.png')
+      File.symlink(outside, link)
+
+      Dir.chdir(proj) do
+        arxiv = LatexArxivPackager.allocate
+        arxiv.send(:copy_preserving_path, outside, stage)
+        arxiv.send(:copy_preserving_path, '../outside.png', stage)
+        arxiv.send(:copy_preserving_path, 'figs/link.png', stage)
+        arxiv.send(:copy_preserving_path, 'figs/local.png', stage)
+      end
+
+      refute_path_exists File.join(stage, 'outside.png')
+      refute_path_exists File.join(stage, 'figs', 'link.png')
+      assert_path_exists File.join(stage, 'figs', 'local.png')
+    end
+  end
+
+  def test_packager_copy_preserving_path_rejects_out_of_tree_and_symlinks
+    Dir.mktmpdir('latex_it_packager_copy_test') do |root|
+      outside = File.join(root, 'outside.png')
+      File.write(outside, 'secret outside')
+
+      proj = File.join(root, 'proj')
+      stage = File.join(root, 'stage')
+      FileUtils.mkdir_p(File.join(proj, 'figs'))
+      FileUtils.mkdir_p(stage)
+
+      local = File.join(proj, 'figs', 'local.png')
+      File.write(local, 'local figure')
+
+      link = File.join(proj, 'figs', 'link.png')
+      File.symlink(outside, link)
+
+      Dir.chdir(proj) do
+        packager = LatexPackager.allocate
+        packager.send(:copy_preserving_path, outside, stage)
+        packager.send(:copy_preserving_path, '../outside.png', stage)
+        packager.send(:copy_preserving_path, 'figs/link.png', stage)
+        packager.send(:copy_preserving_path, 'figs/local.png', stage)
+      end
+
+      refute_path_exists File.join(stage, 'outside.png')
+      refute_path_exists File.join(stage, 'figs', 'link.png')
+      assert_path_exists File.join(stage, 'figs', 'local.png')
+    end
+  end
+
+  def test_review_cycle_run_with_auto_triage_prevents_shell_injection
+    load File.expand_path('../tools/review_cycle', __dir__) unless defined?(MultiProfileReviewCycle)
+    Dir.mktmpdir('review_cycle_pty_test') do |dir|
+      out_file = File.join(dir, 'output.txt')
+      marker = 'ARG_WITH_METAS_`echo evil`_${PATH}_;&|'
+      cmd = ['ruby', '-e', 'File.write(ARGV[0], ARGV[1])', out_file, marker]
+      cycle = MultiProfileReviewCycle.allocate
+      def cycle.log_write(_msg); end
+      def cycle.stream_pty_output(_stdout, _stdin); end
+
+      cycle.send(:run_with_auto_triage, cmd)
+      assert_path_exists out_file
+      assert_equal marker, File.read(out_file), 'argument with metacharacters was altered or evaluated by shell'
+    end
+  end
+
+  def test_image_generation_scripts_avoid_shell_string_interpolation
+    gallery_src = File.read(File.expand_path('../tools/generate_gallery', __dir__))
+    error_src = File.read(File.expand_path('../tools/generate_error_comparison', __dir__))
+
+    refute_match(/system\(["']convert .*#\{/, gallery_src, 'generate_gallery interpolates paths into convert shell string')
+    refute_match(/system\(["']convert .*#\{/, error_src, 'generate_error_comparison interpolates paths into convert shell string')
   end
 end

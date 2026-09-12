@@ -324,8 +324,8 @@ module GalleryGenerator
     puts "      Wrote #{svg_path}"
 
     png_path = File.join(IMAGES_DIR, "#{scenario[:filename]}.png")
-    if system('which convert >/dev/null 2>&1')
-      system("convert -density 150 '#{svg_path}' '#{png_path}'")
+    if system('which', 'convert', out: File::NULL, err: File::NULL)
+      system('convert', '-density', '150', svg_path, png_path)
       puts "      Wrote #{png_path}" if File.exist?(png_path)
     end
   end

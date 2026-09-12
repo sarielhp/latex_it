@@ -38,7 +38,7 @@ class String
 end
 
 REPO_ROOT = File.expand_path('..', __dir__)
-VERSION = '0.1.0'
+VERSION = '0.1.0' unless defined?(VERSION)
 STATE_FILE = File.join(REPO_ROOT, 'reviews', 'state.json')
 
 AUDIT_PROFILES = %w[systems security correctness resilience performance cli].freeze
@@ -956,11 +956,10 @@ class MultiProfileReviewCycle
   end
 
   def run_with_auto_triage(cmd_args)
-    command_str = cmd_args.map { |a| a.include?(' ') ? %("#{a.gsub('"', '\"')}") : a }.join(' ')
     status = nil
-    log_write("--> Spawning PTY: #{command_str}\n")
+    log_write("--> Spawning PTY: #{cmd_args.join(' ')}\n")
 
-    PTY.spawn(command_str) do |stdout, stdin, pid|
+    PTY.spawn(*cmd_args) do |stdout, stdin, pid|
       begin
         stream_pty_output(stdout, stdin)
       rescue Interrupt, SignalException => e

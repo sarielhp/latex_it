@@ -200,13 +200,22 @@ class LatexArxivPackager
     return unless File.exist?(src)
 
     cwd = Dir.pwd
-    expanded = File.expand_path(src)
-    rel_path = if expanded.start_with?(cwd + '/')
-                 expanded.sub(cwd + '/', '')
-               else
-                 File.basename(src)
-               end
+    real_cwd = begin
+      File.realpath(cwd)
+    rescue StandardError
+      cwd
+    end
+    real_src = begin
+      File.realpath(src)
+    rescue StandardError
+      nil
+    end
+    return unless real_src && (real_src == real_cwd || real_src.start_with?(real_cwd + File::SEPARATOR))
 
+    expanded = File.expand_path(src)
+    return unless expanded.start_with?(cwd + File::SEPARATOR)
+
+    rel_path = expanded.sub(cwd + File::SEPARATOR, '')
     dest = File.join(dest_root, rel_path)
     FileUtils.mkdir_p(File.dirname(dest))
     FileUtils.cp(src, dest)

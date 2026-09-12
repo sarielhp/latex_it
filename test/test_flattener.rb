@@ -117,6 +117,55 @@ class TestFlattener < Minitest::Test
     src = "\\verb+x+\nTEXT % a comment\n\\verb+y+\n"
     out = LaTeXFlattener.strip_comments(src)
     refute_includes out, 'a comment',
-                     'a \\verb span crossed a newline and protected a real comment'
+                    'a \\verb span crossed a newline and protected a real comment'
+  end
+
+  def test_out_of_tree_input_is_not_inlined
+    Dir.mktmpdir('latex_it_containment_test') do |root|
+      outside = File.join(root, 'outside.tex')
+      File.write(outside, "SECRET_OUTSIDE_DATA\n")
+
+      proj = File.join(root, 'proj')
+      FileUtils.mkdir_p(proj)
+      main = File.join(proj, 'main.tex')
+      File.write(main, "DOCUMENT_START\n\\input{../outside.tex}\nDOCUMENT_END\n")
+
+      out = LaTeXFlattener.flatten(main, proj)
+      refute_includes out, 'SECRET_OUTSIDE_DATA', 'out-of-tree input was inlined across project boundary'
+      assert_includes out, '\\input{../outside.tex}'
+    end
+  end
+
+  def test_symlink_pointing_out_of_tree_is_not_inlined
+    Dir.mktmpdir('latex_it_symlink_test') do |root|
+      outside = File.join(root, 'outside.tex')
+      File.write(outside, "SECRET_SYMLINK_TARGET\n")
+
+      proj = File.join(root, 'proj')
+      FileUtils.mkdir_p(proj)
+      link = File.join(proj, 'link.tex')
+      File.symlink(outside, link)
+
+      main = File.join(proj, 'main.tex')
+      File.write(main, "DOCUMENT_START\n\\input{link.tex}\nDOCUMENT_END\n")
+
+      out = LaTeXFlattener.flatten(main, proj)
+      refute_includes out, 'SECRET_SYMLINK_TARGET', 'symlink pointing outside tree was inlined'
+      assert_includes out, '\\input{link.tex}'
+    end
+  end
+
+  def test_in_tree_nested_subfolder_input_is_inlined
+    Dir.mktmpdir('latex_it_nested_test') do |proj|
+      FileUtils.mkdir_p(File.join(proj, 'chapters'))
+      File.write(File.join(proj, 'chapters', 'ch1.tex'), "CHAPTER_ONE_DATA\n")
+
+      main = File.join(proj, 'main.tex')
+      File.write(main, "START\n\\input{chapters/ch1}\nEND\n")
+
+      out = LaTeXFlattener.flatten(main, proj)
+      assert_includes out, 'CHAPTER_ONE_DATA'
+      refute_includes out, '\\input{chapters/ch1}'
+    end
   end
 end

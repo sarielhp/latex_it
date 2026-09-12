@@ -35,14 +35,35 @@ module LaTeXFlattener
     strip_comments ? strip_comments(cleaned) : cleaned
   end
 
+  def self.within_tree?(candidate, base_expanded, real_base)
+    expanded = File.expand_path(candidate)
+    return false unless expanded == base_expanded || expanded.start_with?(base_expanded + File::SEPARATOR)
+
+    real_cand = begin
+      File.realpath(candidate)
+    rescue StandardError
+      nil
+    end
+    return false unless real_cand
+
+    real_cand == real_base || real_cand.start_with?(real_base + File::SEPARATOR)
+  end
+
   def self.inline_file(filepath, base_dir, stack)
+    base_expanded = File.expand_path(base_dir)
+    real_base = begin
+      File.realpath(base_expanded)
+    rescue StandardError
+      base_expanded
+    end
+
     real_path = File.expand_path(filepath, base_dir)
+    return '' unless File.file?(real_path) && within_tree?(real_path, base_expanded, real_base)
+
     if stack.include?(real_path)
       chain = (stack + [real_path]).map { |path| File.basename(path) }.join(' -> ')
       raise "Cyclic LaTeX input detected: #{chain}"
     end
-
-    return '' unless File.file?(real_path)
 
     stack << real_path
     entered = true
@@ -50,13 +71,13 @@ module LaTeXFlattener
     file_dir = File.dirname(real_path)
 
     transform_tex(content) do |chunk|
-      chunk.lines.map { |line| inline_line(line, file_dir, stack) }.join
+      chunk.lines.map { |line| inline_line(line, base_expanded, real_base, file_dir, stack) }.join
     end
   ensure
     stack.pop if entered
   end
 
-  def self.inline_line(line, file_dir, stack)
+  def self.inline_line(line, base_expanded, real_base, file_dir, stack)
     match = line.match(/^\s*\\(?:input|include)\{([^}]+)\}(.*)$/)
     return line unless match
 
@@ -64,9 +85,9 @@ module LaTeXFlattener
     target = target.strip
     target += '.tex' unless target.end_with?('.tex')
     candidate = File.expand_path(target, file_dir)
-    return line unless File.file?(candidate)
+    return line unless File.file?(candidate) && within_tree?(candidate, base_expanded, real_base)
 
-    inlined = inline_file(candidate, file_dir, stack)
+    inlined = inline_file(candidate, base_expanded, stack)
     return inlined if rest.strip.empty?
 
     inlined + rest + (line.end_with?("\n") ? "\n" : '')

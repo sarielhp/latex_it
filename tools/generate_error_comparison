@@ -143,8 +143,8 @@ File.write(SVG_FILE, full_svg)
 puts "Wrote #{SVG_FILE}"
 
 # 2. Generate high-res PNG using ImageMagick
-if system('which convert >/dev/null 2>&1')
-  system("convert -density 150 '#{SVG_FILE}' '#{PNG_FILE}'")
+if system('which', 'convert', out: File::NULL, err: File::NULL)
+  system('convert', '-density', '150', SVG_FILE, PNG_FILE)
   puts "Wrote #{PNG_FILE}" if File.exist?(PNG_FILE)
 
   # 3. Generate animated GIF of simulated build session
@@ -153,25 +153,25 @@ if system('which convert >/dev/null 2>&1')
     f1_svg = File.join(tmpdir, 'f1.svg')
     f1_png = File.join(tmpdir, 'f1.png')
     File.write(f1_svg, render_svg(LEFT_LINES.first(1), RIGHT_LINES.first(1), show_left_pill: false, show_right_pill: false))
-    system("convert -density 150 '#{f1_svg}' '#{f1_png}'")
+    system('convert', '-density', '150', f1_svg, f1_png)
 
     # Frame 2: Compiler running
     f2_svg = File.join(tmpdir, 'f2.svg')
     f2_png = File.join(tmpdir, 'f2.png')
     File.write(f2_svg, render_svg(LEFT_LINES.first(6), RIGHT_LINES.first(5), show_left_pill: false, show_right_pill: false))
-    system("convert -density 150 '#{f2_svg}' '#{f2_png}'")
+    system('convert', '-density', '150', f2_svg, f2_png)
 
     # Frame 3: Error detected
     f3_svg = File.join(tmpdir, 'f3.svg')
     f3_png = File.join(tmpdir, 'f3.png')
     File.write(f3_svg, render_svg(LEFT_LINES.first(13), RIGHT_LINES.first(10), show_left_pill: false, show_right_pill: true))
-    system("convert -density 150 '#{f3_svg}' '#{f3_png}'")
+    system('convert', '-density', '150', f3_svg, f3_png)
 
     # Frame 4: Final full state
     f4_png = PNG_FILE
 
     # Assemble into animated GIF: Frame 1 (1.2s), Frame 2 (0.8s), Frame 3 (1.2s), Frame 4 (4.5s)
-    system("convert -delay 120 '#{f1_png}' -delay 80 '#{f2_png}' -delay 120 '#{f3_png}' -delay 450 '#{f4_png}' -loop 0 '#{GIF_FILE}'")
+    system('convert', '-delay', '120', f1_png, '-delay', '80', f2_png, '-delay', '120', f3_png, '-delay', '450', f4_png, '-loop', '0', GIF_FILE)
     puts "Wrote #{GIF_FILE}" if File.exist?(GIF_FILE)
   end
 end

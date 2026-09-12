@@ -18,6 +18,16 @@ module LaTeXDiagnostics
 
   LOG_FILE_PATTERN = %r{\A\((?:"([^"]+)"?|((?:\.{1,2}[\\/][^\s()]+|[a-zA-Z0-9_\-./]+?\.(?:#{LOG_FILE_EXTENSIONS}))\b))}.freeze
 
+  # One canonical recogniser for a LaTeX/package/class warning header. Five
+  # near-but-not-equal variants of this used to be spelled out inline, and the
+  # two that mattered most used a package-name class of [-A-Za-z0-9], which
+  # excludes '.'. That made `Package pdftex.def Warning:` neither a warning
+  # start nor a block boundary, so it was appended to the preceding warning's
+  # text -- and when that predecessor was a Whatever, a real warning vanished
+  # into a tier suppressed by default. luatex.def, xetex.def, dvips.def and
+  # epstopdf-base all shared the fate.
+  WARNING_LINE_PATTERN = /^(?:LaTeX|Class|Package|\*)(?:\s+[-\w.@*]+)*\s+[Ww]arning:/.freeze
+
   # Every pattern here must be anchored. TeX echoes the offending paragraph
   # after each Overfull \hbox, so the document's own prose reaches this log
   # verbatim: an unanchored `include?('Error:')` made a paper that discusses
@@ -164,7 +174,7 @@ module LaTeXDiagnostics
   end
 
   def track_log_file(line, file_stack)
-    return if line =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/ ||
+    return if line =~ WARNING_LINE_PATTERN ||
               line =~ /^(?:Overfull|Underfull)/ || line =~ /^!\s+/
 
     pos = 0
@@ -195,7 +205,7 @@ module LaTeXDiagnostics
 
   def diagnostic_boundary_line?(line)
     return true if line.strip.empty? ||
-                   line =~ /^(?:LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/ ||
+                   line =~ WARNING_LINE_PATTERN ||
                    line =~ /^(?:Overfull|Underfull)/ || line =~ /^\[\d+\]/ ||
                    line =~ /^!\s+/ || line =~ /^.+:\d+:/ ||
                    line =~ /^Runaway argument\?/ || line =~ /^\s*\)/ ||
@@ -298,7 +308,7 @@ module LaTeXDiagnostics
       l = lines[i]
       track_log_file(l, file_stack)
 
-      if l =~ /^(?:LaTeX|Class|Package|\*) [-A-Za-z0-9]* ?[Ww]arning:/
+      if l =~ WARNING_LINE_PATTERN
         item, i = parse_package_warning(lines, i, file_stack)
         if item && !seen_warnings[item[:text]]
           seen_warnings[item[:text]] = true
@@ -333,7 +343,7 @@ module LaTeXDiagnostics
       break if curr =~ /^!\s*(?:==>\s*)?(?:Emergency stop|Fatal error occurred)/i ||
                curr =~ /^.+:\d+:\s+(?!warning\b)/i ||
                curr =~ /^!\s+\S+/ || curr =~ /^Runaway argument\?/ ||
-               curr =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/ ||
+               curr =~ WARNING_LINE_PATTERN ||
                curr =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/ ||
                curr =~ /^\s*\)/ || curr =~ /^\s*\((?:\.[\\\/]|[a-zA-Z0-9_\-\.\/]+?\.(?:tex|sty|cls|aux|bbl|bib))/
 
@@ -1018,7 +1028,7 @@ module LaTeXDiagnostics
     content.each_line do |line|
       next if line.include?('multiply defined') && line.include?('LaTeX Warning')
 
-      if line =~ /^(?:LaTeX|Class|Package|\*)[\s\-A-Za-z0-9]*?[Ww]arning:/ ||
+      if line =~ WARNING_LINE_PATTERN ||
          line =~ /^.+:\d+:\s+warning:/i || line =~ /^Warning:\s+/i ||
          line =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/
         warnings += 1

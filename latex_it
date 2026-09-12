@@ -340,10 +340,18 @@ module LatexCLI
     puts Rainbow("==> Wrote paper metadata to: #{meta_filename}\n").green.bright
   end
 
+  # A submission package must never be assembled from a cached build. All three
+  # staging scanners read junk/<base>.fls and the reference PDF is taken from
+  # junk/ as well, so an up-to-date cache silently omits any figure or style
+  # added since the last real compile and compares the rebuild against a
+  # possibly days-old reference -- which \today alone is enough to make differ.
+  def self.arxiv_build_options(options)
+    options.merge(force: true)
+  end
+
   def self.process_arxiv_target(target, options)
-    builder = LatexBuilder.new(target, options)
-    arxiv_packager = LatexArxivPackager.new(builder, options)
-    exit 1 unless arxiv_packager.package!
+    builder = LatexBuilder.new(target, arxiv_build_options(options))
+    exit 1 unless LatexArxivPackager.new(builder).package!
   end
 
   def self.process_standard_target(target, options)

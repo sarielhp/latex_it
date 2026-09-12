@@ -9,6 +9,7 @@ require 'digest'
 
 require_relative '../lib/latex_it/utils'
 require_relative '../lib/latex_it/builder'
+load File.expand_path('../latex_it', __dir__)
 
 # targets_up_to_date? decides whether to skip the build entirely, so anything
 # it fails to watch produces a silently stale PDF and an "up-to-date" message.
@@ -91,5 +92,17 @@ class TestBuildCache < Minitest::Test
                         'discover_bib_files ignored bib_dirs and used its own hardcoded list'
       end
     end
+  end
+
+  def test_force_defeats_the_cache
+    in_cached_project('refs', force: true) do |builder, _bib|
+      refute builder.send(:targets_up_to_date?), 'force must always rebuild'
+    end
+  end
+
+  def test_arxiv_always_forces_a_rebuild
+    merged = LatexCLI.arxiv_build_options(engine: 'xelatex', passes: 3)
+    assert_equal true, merged[:force],
+                 '--arxiv must not assemble a submission package from a cached build'
   end
 end

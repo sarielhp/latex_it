@@ -91,6 +91,8 @@ All 6 defects were evaluated, confirmed as genuine defects, and resolved with mi
   - Added `opts.on('--timeout SECONDS', Integer, ...)` to `add_compilation_options_secondary` in `latex_it`.
   - Appended `['--timeout', @options[:timeout].to_s]` to verification `cmd` in `LatexPackager#run_sandbox_compile` and `LatexArxivPackager#run_sandbox_verify`.
 - **Verification**:
+- **Footprint**: 8 files changed, 422 insertions(+), 18 deletions(-)
+- **Differential Audit**: 2 warning(s)
   - `test/test_repair_failures.rb` (`test_sandbox_verification_forwards_timeout_option`): verified `--timeout` is passed to both sandbox verification runners when `@options[:timeout]` is set.
   - `test/test_repair_failures.rb` (`test_cli_parses_timeout_option`): verified `--timeout 25` correctly sets `options[:timeout] = 25`.
 

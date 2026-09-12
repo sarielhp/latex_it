@@ -40,6 +40,8 @@ All 4 findings from `reviews/002_security.md` were evaluated and identified as g
 - **Issue**: ImageMagick `convert` invocations used single-quote string interpolation `system("convert -density 150 '#{svg_path}' '#{png_path}'")` and `system('which convert >/dev/null 2>&1')`. Filenames with single quotes or shell metacharacters could escape quoting and execute shell commands under `/bin/sh`.
 - **Status / Mitigation**: Fixed. Replaced string-interpolated `system()` calls with safe multi-argument array calls (`system('convert', '-density', '150', svg_path, png_path)` and `system('which', 'convert', out: File::NULL, err: File::NULL)`).
 - **Verification**: Added regression unit test `test_image_generation_scripts_avoid_shell_string_interpolation` in `test/test_destructive_paths.rb`, verified syntax via `ruby -cw`, and verified code metrics via `tools/gate_audit_code`.
+- **Footprint**: 10 files changed, 345 insertions(+), 29 deletions(-)
+- **Differential Audit**: Clean (0 defects in diff)
 
 ---
 

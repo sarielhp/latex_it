@@ -321,9 +321,20 @@ class LatexArxivPackager
       return false
     end
 
-    invalid = authors.select { |name| arxiv_placeholder_author?(name) || name.include?('\\') }
-    unless invalid.empty?
-      warn Rainbow("[FAIL] arXiv verification found unusable or unextractable author name(s): #{invalid.join(', ')}. Replace Unknown/Anonymous with real names and check author formatting.").red.bright
+    placeholders = authors.select { |name| arxiv_placeholder_author?(name) }
+    unless placeholders.empty?
+      warn Rainbow("[FAIL] arXiv verification found placeholder author name(s): #{placeholders.join(', ')}. Replace Unknown/Anonymous with real names.").red.bright
+      return false
+    end
+
+    # A residual backslash means the metadata extractor did not understand a
+    # macro in the name. Name the macro rather than blaming the user's \author
+    # formatting, which is what the old combined message did.
+    unresolved = authors.select { |name| name.include?('\\') }
+    unless unresolved.empty?
+      macros = unresolved.flat_map { |name| name.scan(/\\[a-zA-Z]+|\\./) }.uniq
+      warn Rainbow("[FAIL] arXiv verification could not resolve author name(s): #{unresolved.join(', ')}.").red.bright
+      warn Rainbow("        Unrecognised macro(s): #{macros.join(' ')}. Add them to LaTeXMetaExtractor::SYMBOL_ACCENTS, LETTER_ACCENTS or LIGATURE_MACROS.").red
       return false
     end
 

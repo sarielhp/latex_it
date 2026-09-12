@@ -128,9 +128,43 @@ module LaTeXMetaExtractor
     str.gsub!(/\\newline/, ' ')
     str.gsub!(/~/, ' ')
     str.gsub!(/\\%/, '%')
-    str.gsub!(/\\(?:['"`^~=\.])\s*\{([^{}]*)\}/, '\\1')
-    str.gsub!(/\\(?:['"`^~=\.])\s*([A-Za-z])/, '\\1')
-    str.gsub!(/\\[c]\s*\{([^{}]*)\}/, '\\1')
+    strip_accent_macros(str)
+    str
+  end
+
+  # Accent macros taking an argument. The set used to be only ' " ` ^ ~ = .
+  # plus \c, so every other one survived into the extracted name -- and
+  # verify_arxiv_authors_match rejects any name containing a backslash, so
+  # Erdos, Novak, Jorgensen and Ulam each blocked --arxiv outright with a
+  # message blaming the user's \author formatting for a gap in this cleaner.
+  # Split by spelling, not by meaning. A symbol accent may sit directly against
+  # its letter (\'e), but a letter accent may not: \vS is a different macro from
+  # \v S, and treating them alike made \b swallow the start of \beta.
+  SYMBOL_ACCENTS = %w[' " ` ^ ~ = .].freeze
+  LETTER_ACCENTS = %w[c v u r H k b d t].freeze
+
+  # Standalone letter macros, which have no argument and may be written either
+  # as \o or as \o{} and may be followed directly by text (\o rgensen).
+  LIGATURE_MACROS = {
+    'ss' => 'ss', 'AA' => 'AA', 'aa' => 'aa', 'AE' => 'AE', 'ae' => 'ae',
+    'OE' => 'OE', 'oe' => 'oe', 'O' => 'O', 'o' => 'o', 'L' => 'L',
+    'l' => 'l', 'i' => 'i', 'j' => 'j', 'DH' => 'D', 'dh' => 'd',
+    'TH' => 'Th', 'th' => 'th', 'NG' => 'N', 'ng' => 'n'
+  }.freeze
+
+  def self.strip_accent_macros(str)
+    symbols = SYMBOL_ACCENTS.map { |a| Regexp.escape(a) }.join('|')
+    letters = LETTER_ACCENTS.join('|')
+
+    str.gsub!(/\\(?:#{symbols})\s*\{([^{}]*)\}/, '\\1')
+    str.gsub!(/\\(?:#{symbols})\s*([A-Za-z])/, '\\1')
+    str.gsub!(/\\(?:#{letters})(?![a-zA-Z])\s*\{([^{}]*)\}/, '\\1')
+    str.gsub!(/\\(?:#{letters})(?![a-zA-Z])\s+([A-Za-z])/, '\\1')
+
+    # Longest first, so \AA is not consumed as \A followed by 'A'.
+    LIGATURE_MACROS.keys.sort_by { |k| -k.length }.each do |macro|
+      str.gsub!(/\\#{macro}(?![a-zA-Z])\s*(?:\{\})?/, LIGATURE_MACROS[macro])
+    end
     str
   end
 

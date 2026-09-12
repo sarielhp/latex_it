@@ -1006,10 +1006,22 @@ module LaTeXDiagnostics
       suppressed_whatevers: suppressed_wht && whatevers > 0
     )
 
-    if @options[:werror] && (alerts > 0 || warnings > 0)
-      puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
+    fail_on_diagnostics(errors, alerts, warnings)
+  end
+
+  # The exit status has to agree with the summary line the user just read.
+  # summarize_and_check_werror printed `errors` and then ignored it, so a run
+  # that reported "Errors: 2" still exited 0 -- and -W only ever looked at
+  # alerts and warnings, so even that flag could not make an error fatal.
+  def fail_on_diagnostics(errors, alerts, warnings)
+    if errors.positive?
+      puts Rainbow("\n#{errors} error(s) reported; exiting with a non-zero status.").red.bright
       exit 1
     end
+    return unless @options[:werror] && (alerts.positive? || warnings.positive?)
+
+    puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
+    exit 1
   end
 
   def find_last_latex_log
@@ -1071,5 +1083,10 @@ module LaTeXDiagnostics
       suppressed_warnings: suppress_warnings && warnings > 0,
       suppressed_whatevers: suppress_whatevers && whatevers > 0
     )
+
+    # analyze_output returns early for :score, so without this `l -s -W` could
+    # never fail -- the flag whose only purpose is a non-zero exit status was
+    # silently disabled by the flag whose purpose is a quiet one.
+    fail_on_diagnostics(errors, alerts, warnings)
   end
 end

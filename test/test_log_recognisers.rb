@@ -176,4 +176,38 @@ class TestLogRecognisers < Minitest::Test
                    'a benign INFO line was promoted to an error item, which hides every other tier'
     end
   end
+
+  def test_reported_errors_produce_a_nonzero_exit
+    b = builder
+    out, = capture_io do
+      assert_raises(SystemExit, 'a run reporting errors exited 0') do
+        b.send(:summarize_and_check_werror, 2, 0, 0, 0)
+      end
+    end
+    assert_match(/Errors: 2/, out)
+  end
+
+  def test_clean_run_does_not_exit
+    b = builder
+    capture_io { b.send(:summarize_and_check_werror, 0, 0, 1, 0) }
+  end
+
+  def test_werror_fails_on_warnings
+    b = LatexBuilder.new('paper.tex', OPTIONS.merge(werror: true))
+    capture_io do
+      assert_raises(SystemExit) { b.send(:summarize_and_check_werror, 0, 0, 1, 0) }
+    end
+  end
+
+  def test_score_mode_still_honours_werror
+    with_log("Overfull \\hbox (30.0pt too wide) in paragraph at lines 3--4\n") do |path, _c|
+      b = LatexBuilder.new('paper.tex', OPTIONS.merge(werror: true, score: true))
+      b.instance_variable_set(:@biberr, nil)
+      capture_io do
+        assert_raises(SystemExit, 'l -s -W could not fail on warnings') do
+          b.send(:output_score, path, 0)
+        end
+      end
+    end
+  end
 end

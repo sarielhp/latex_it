@@ -251,4 +251,40 @@ class TestLogRecognisers < Minitest::Test
     block = ['! Undefined control sequence.', '<recently read> \\reallyit', 'l.5 \\textbf{x} \\other']
     assert_equal '\\reallyit', LaTeXErrorCatalog::UNDEFINED_CS_EXTRACTOR.call(nil, block)
   end
+
+  def test_consolidate_missing_bib_entries_deduplicates_biber_and_bbl
+    b = builder
+    warn_items = [
+      { file: './bibliography', line: 0, text: "WARN - I didn't find a database entry for 'c-dmr-01' (section 0)" },
+      { file: 'junk/book.bbl', line: 0, text: "Package biblatex Warning: Entry 'c-dmr-01' not found in database." }
+    ]
+
+    b.send(:consolidate_missing_bib_entries!, warn_items)
+    assert_equal 1, warn_items.size
+    assert_equal './bibliography', warn_items.first[:file]
+    assert_equal 1, warn_items.first[:count]
+    assert_includes warn_items.first[:text], "Missing database entry: 'c-dmr-01'"
+  end
+
+  def test_consolidate_missing_bib_entries_groups_multiple_keys_cleanly
+    b = builder
+    keys = %w[h-a6q-61 h-a6f-61 fr-etbs-75 fr-a4s-75 c-dmr-01]
+    warn_items = keys.map do |k|
+      { file: './bibliography', line: 0, text: "WARN - I didn't find a database entry for '#{k}' (section 0)" }
+    end
+    # Also add duplicate biblatex .bbl warnings
+    warn_items += keys.map do |k|
+      { file: 'junk/book.bbl', line: 0, text: "Package biblatex Warning: Entry '#{k}' not found in database." }
+    end
+
+    b.send(:consolidate_missing_bib_entries!, warn_items)
+    assert_equal 1, warn_items.size
+    item = warn_items.first
+    assert_equal './bibliography', item[:file]
+    assert_equal 5, item[:count]
+    assert_includes item[:text], 'Missing database entries (5):'
+    refute_includes item[:text], 'WARN - '
+    refute_includes item[:text], 'Package biblatex Warning'
+    keys.each { |k| assert_includes item[:text], "'#{k}'" }
+  end
 end

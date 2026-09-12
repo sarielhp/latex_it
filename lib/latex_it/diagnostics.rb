@@ -118,7 +118,15 @@ module LaTeXDiagnostics
                 end
 
     formatted = highlight_line_numbers(message, base_color)
-    left_side + highlight_latex_it_tag(formatted, base_color)
+    if formatted.include?("\n")
+      sub_indent = ' ' * (width + 2)
+      lines = formatted.split("\n")
+      first = left_side + highlight_latex_it_tag(lines[0], base_color)
+      rest = lines[1..].map { |l| "#{sub_indent}#{highlight_latex_it_tag(l, base_color)}" }
+      ([first] + rest).join("\n")
+    else
+      left_side + highlight_latex_it_tag(formatted, base_color)
+    end
   end
 
   def highlight_latex_it_tag(str, base_color = :red)
@@ -569,6 +577,13 @@ module LaTeXDiagnostics
     (t.include?('Overfull') && t.include?('hbox')) || txt =~ /\AOverfull\s+\\hbox/i
   end
 
+  def diagnostic_item_sort_key(item)
+    idx = item[:index] || 0
+    target = item[:companion_to] ? format_display_path(item[:companion_to]) : format_display_path(item[:file])
+    rank = item[:companion_to] ? 1 : 0
+    [target, rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, item[:line] || 0, idx]
+  end
+
   def sort_diagnostic_items(warnings, errors)
     overfull_warnings, other_warnings = warnings.partition { |w| overfull_hbox?(w) }
 
@@ -580,14 +595,10 @@ module LaTeXDiagnostics
     sorted_errors = errors.sort_by { |e| [format_display_path(e[:file]), e[:line] || 0, e[:index] || 0] }
 
     all_items = sorted_other + sorted_overfull + sorted_errors
-    all_sorted = all_items.sort_by do |item|
-      idx = item[:index] || 0
-      comp_target = item[:companion_to] ? format_display_path(item[:companion_to]) : format_display_path(item[:file])
-      comp_rank = item[:companion_to] ? 1 : 0
-      [comp_target, comp_rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, item[:line] || 0, idx]
-    end
+    all_sorted = all_items.sort_by { |item| diagnostic_item_sort_key(item) }
 
-    [all_sorted, sorted_other.size + sorted_overfull.size, sorted_errors.size]
+    total_warn_count = other_warnings.sum { |w| w[:count] || 1 } + sorted_overfull.size
+    [all_sorted, total_warn_count, sorted_errors.size]
   end
 
   def print_diagnostics_body(warnings, errors, fallback_lines: [], tier_label: nil, io: $stdout)
@@ -609,7 +620,7 @@ module LaTeXDiagnostics
     all_sorted.each do |item|
       f = format_display_path(item[:file])
       lbl = tier_label_for(item, tier_label)
-      counts[[f, lbl]] += 1
+      counts[[f, lbl]] += (item[:count] || 1)
     end
     counts
   end
@@ -1157,6 +1168,72 @@ module LaTeXDiagnostics
     end
   end
 
+  MISSING_DB_ENTRY_PATTERNS = [
+    /WARN\s+-\s+I didn't find a database entry for '([^']+)'/i,
+    /Warning--I didn't find a database entry for "([^"]+)"/i,
+    /Package biblatex Warning: Entry '([^']+)' not found in database/i,
+    /Package biblatex Warning: The following entr(?:y|ies) could not be found in the database:\s*([^\n\r]+)/i
+  ].freeze
+
+  def consolidate_missing_bib_entries!(warn_items)
+    missing_keys = []
+
+    warn_items.reject! do |w|
+      txt = w[:text].to_s
+      matched = false
+      MISSING_DB_ENTRY_PATTERNS.each do |pat|
+        if (m = txt.match(pat))
+          raw_keys = m[1].split(/[,\s]+/).map { |k| k.gsub(/['"]/, '').strip }.reject(&:empty?)
+          missing_keys.concat(raw_keys)
+          matched = true
+          break
+        end
+      end
+      if !matched && w[:file].to_s.end_with?('.bbl') && txt =~ /Entry '([^']+)' not found in database/i
+        missing_keys << Regexp.last_match(1)
+        matched = true
+      end
+      matched
+    end
+
+    missing_keys.uniq!
+    missing_keys.sort!
+    return if missing_keys.empty?
+
+    formatted_msg = format_missing_bib_entries(missing_keys)
+    warn_items << {
+      file: './bibliography',
+      line: 0,
+      line_str: '',
+      text: formatted_msg,
+      base_color: :yellow,
+      count: missing_keys.size,
+      formatted: format_diagnostic_line('', formatted_msg, :yellow),
+      index: 100000
+    }
+  end
+
+  def format_missing_bib_entries(keys)
+    if keys.size == 1
+      "Missing database entry: '#{keys.first}'"
+    else
+      lines = ["Missing database entries (#{keys.size}):"]
+      curr = '  '
+      keys.each_with_index do |k, idx|
+        tok = "'#{k}'"
+        tok += ',' if idx < keys.size - 1
+        if curr.length + tok.length + 1 > 72 && curr.strip != ''
+          lines << curr
+          curr = "  #{tok}"
+        else
+          curr += (curr == '  ' ? tok : " #{tok}")
+        end
+      end
+      lines << curr unless curr.strip.empty?
+      lines.join("\n")
+    end
+  end
+
   def analyze_output
     pdferr = find_last_latex_log
     if @options[:score]
@@ -1170,6 +1247,7 @@ module LaTeXDiagnostics
     raw_warns = extract_warnings(clean_content, @options[:verbose])
     err_items = extract_errors(clean_content)
     append_bib_diagnostics!(raw_warns, err_items) if counts[:cbib] > 0
+    consolidate_missing_bib_entries!(raw_warns)
 
     alert_items, reg_warns, what_items = partition_diagnostics(clean_content, raw_warns)
     errors = count_latex_errors(new_content, 0) + counts[:biberr]
@@ -1179,9 +1257,9 @@ module LaTeXDiagnostics
 
   def display_analyzed_diagnostics(counts, err_items, alert_items, reg_warns, what_items, errors)
     total_diag = counts[:cbib] + counts[:undef_cite] + counts[:undef_ref] + counts[:mult_def] + counts[:overfull] + counts[:underfull]
-    alerts = alert_items.size
-    warnings = reg_warns.size
-    whatevers = what_items.size
+    alerts = alert_items.sum { |i| i[:count] || 1 }
+    warnings = reg_warns.sum { |i| i[:count] || 1 }
+    whatevers = what_items.sum { |i| i[:count] || 1 }
 
     if total_diag > 0 || errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
       print_diagnostic_banner(counts) if total_diag > 0 || errors > 0 || alerts > 0

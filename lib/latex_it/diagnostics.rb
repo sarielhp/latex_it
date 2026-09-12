@@ -866,14 +866,27 @@ module LaTeXDiagnostics
     }
   end
 
+  # Match the tools' actual error grammar. A bare scan for /error/i counted the
+  # word anywhere it appeared -- including inside a .bib path the tool prints
+  # back, such as "Found BibTeX data source 'papers/error-bounds/refs.bib'".
+  # One such line set counts[:biberr], and render_diagnostics_tiers then renders
+  # only the errors tier, so every real alert and warning was hidden. The same
+  # scan also missed bibtex's actual failure text, which never says "error".
+  BIB_ERROR_PATTERN = Regexp.union(
+    /^ERROR\s+-\s/i,
+    /couldn't open \w+ file/i,
+    /^\s*I couldn't open/i,
+    /\(There (?:was|were) \d+ error message/i
+  ).freeze
+
+  BIB_WARNING_PATTERN = /^Warning--|^Repeated entry---|^WARN\s+-\s/i.freeze
+
   def count_bib_messages
     return { warns: 0, errors: 0 } unless @biberr && File.exist?(@biberr)
 
     bib_content = LaTeXUtils.safe_read(@biberr)
-    warns = bib_content.scan(/Warning--/i).size +
-            bib_content.scan(/Repeated entry---/i).size +
-            bib_content.scan(/WARN - /).size
-    errors = bib_content.scan(/error/i).size
+    warns = bib_content.each_line.count { |l| l =~ BIB_WARNING_PATTERN }
+    errors = bib_content.each_line.count { |l| l =~ BIB_ERROR_PATTERN }
     { warns: warns, errors: errors }
   end
 
@@ -904,11 +917,11 @@ module LaTeXDiagnostics
     return unless @biberr && File.exist?(@biberr)
 
     LaTeXUtils.safe_read(@biberr).each_line.with_index do |bl, bidx|
-      if bl =~ /Repeated entry---/i || bl =~ /Warning--/i || bl =~ /WARN - /
+      if bl =~ BIB_WARNING_PATTERN
         line_str = (bl =~ /line\s+(\d+)/i) ? Regexp.last_match(1) : ''
         formatted = format_diagnostic_line(line_str, bl.strip, :yellow)
         warn_items << { file: './bibliography', line: line_str.to_i, line_str: line_str, text: bl.strip, formatted: formatted, index: 100000 + bidx }
-      elsif bl =~ /couldn't open/i || bl =~ /error/i
+      elsif bl =~ BIB_ERROR_PATTERN
         formatted = @options[:emacs] ? bl.strip : highlight_line_numbers(bl.strip, :red, bright: true)
         err_items << { file: './bibliography', line: 0, text: bl.strip, formatted: formatted, index: 100000 + bidx }
       end

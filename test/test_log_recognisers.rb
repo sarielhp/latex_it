@@ -122,4 +122,58 @@ class TestLogRecognisers < Minitest::Test
                    "a warning from package #{pkg} was dropped"
     end
   end
+
+  def bib_builder(content)
+    Dir.mktmpdir('latex_it_bib_test') do |dir|
+      path = File.join(dir, 'err_bib')
+      File.write(path, content)
+      yield builder(path)
+    end
+  end
+
+  # A substring scan for /error/i counted the word wherever it appeared,
+  # including inside a path that the tool itself prints back.
+  def test_benign_bibliography_output_is_not_an_error
+    benign = <<~BIB
+      INFO - This is Biber 2.19
+      INFO - Found BibTeX data source '/home/me/papers/error-bounds/refs.bib'
+      INFO - Overriding locale 'C' with 'en_US.UTF-8'
+    BIB
+
+    bib_builder(benign) do |b|
+      assert_equal 0, b.send(:count_bib_messages)[:errors],
+                   'a .bib path containing the word "error" was counted as a compile error'
+    end
+  end
+
+  def test_real_bibliography_errors_are_counted
+    {
+      "ERROR - Cannot find 'refs.bib'!\n" => 'biber ERROR line',
+      "I couldn't open database file refs.bib\n" => 'bibtex missing database',
+      "(There were 2 error messages)\n" => 'bibtex error summary'
+    }.each do |content, label|
+      bib_builder(content) do |b|
+        assert_operator b.send(:count_bib_messages)[:errors], :>, 0,
+                        "#{label} was not counted as an error"
+      end
+    end
+  end
+
+  def test_bibliography_warnings_are_still_counted
+    bib_builder("Warning--I didn't find a database entry for \"smith\"\n") do |b|
+      assert_operator b.send(:count_bib_messages)[:warns], :>, 0
+    end
+  end
+
+  def test_benign_bibliography_output_does_not_suppress_other_tiers
+    benign = "INFO - Found BibTeX data source 'papers/error-bounds/refs.bib'\n"
+
+    bib_builder(benign) do |b|
+      warn_items = []
+      err_items = []
+      b.send(:append_bib_diagnostics!, warn_items, err_items)
+      assert_empty err_items,
+                   'a benign INFO line was promoted to an error item, which hides every other tier'
+    end
+  end
 end

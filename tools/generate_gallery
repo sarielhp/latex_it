@@ -215,8 +215,8 @@ module GalleryGenerator
     if l.start_with?('$')
       color = '#7dcfff'
       bold = true
-    elsif l =~ /\A<deleted \d+ lines>/
-      return [{ text: l, color: '#e0af68', bold: true, italic: true, font_size: '14.5px' }]
+    elsif l =~ /\A(?:<<< DELETED \d+ LINES? >>>|<deleted \d+ lines?>)/i
+      return [{ text: l, color: '#e0af68', bold: true, font_size: '15.5px' }]
     elsif l =~ /\A(?:!|Collected error summary)/i
       color = '#f7768e'
       bold = true
@@ -347,21 +347,26 @@ module GalleryGenerator
     end
   end
 
+  def self.format_deleted(count)
+    unit = count == 1 ? 'LINE' : 'LINES'
+    "<<< DELETED #{count} #{unit} >>>"
+  end
+
   def self.truncate_latexmk_error(cmd_line, rest, err_idx)
     pre_start = [err_idx - 1, 0].max
     post_end = [err_idx + 6, rest.size - 1].min
 
     res = [cmd_line]
-    res << "<deleted #{pre_start} lines>" if pre_start > 3
+    res << format_deleted(pre_start) if pre_start > 3
     res.concat(rest[pre_start..post_end])
 
     summary_idx = rest.rindex { |l| l =~ /Collected error summary/ }
     if summary_idx && summary_idx > post_end
       skipped = summary_idx - post_end - 1
-      res << "<deleted #{skipped} lines>" if skipped > 2
+      res << format_deleted(skipped) if skipped > 2
       res.concat(rest[summary_idx..[summary_idx + 3, rest.size - 1].min])
     elsif rest.size - (post_end + 1) > 3
-      res << "<deleted #{rest.size - (post_end + 1)} lines>"
+      res << format_deleted(rest.size - (post_end + 1))
     end
     res
   end
@@ -372,7 +377,7 @@ module GalleryGenerator
     skipped = rest.size - tail.size
 
     res = [cmd_line]
-    res << "<deleted #{skipped} lines>" if skipped > 3
+    res << format_deleted(skipped) if skipped > 3
     res.concat(tail)
     res
   end

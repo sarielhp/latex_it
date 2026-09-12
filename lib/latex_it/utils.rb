@@ -54,6 +54,13 @@ module LaTeXUtils
   DEFAULT_JUNK_SUBDIRS = %w[figs fragment].freeze
   DEFAULT_STRIP_HOST_PATTERNS = %w[computer local private].freeze
 
+  # Engines this tool is willing to execute. The engine name reaches here from a
+  # project-local .l.jsonc, from a `% !TEX program =` magic comment, and from
+  # PDFBIN/LATEX_ENGINE -- all of which travel inside a repository or an
+  # environment the user may not control. Anything outside this list is refused
+  # rather than passed through to Open3 as a program name.
+  KNOWN_ENGINES = %w[xelatex lualatex pdflatex latex tectonic].freeze
+
   def self.normalize_engine(engine)
     return 'xelatex' if engine.nil? || engine.to_s.strip.empty?
 
@@ -67,8 +74,11 @@ module LaTeXUtils
       'xelatex'
     when 'pdf', 'pdflatex', 'pdftex'
       'pdflatex'
-    else
+    when *KNOWN_ENGINES
       base
+    else
+      warn " -- Warning: unknown LaTeX engine #{base.inspect}; using xelatex."
+      'xelatex'
     end
   end
 

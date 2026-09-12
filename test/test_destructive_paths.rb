@@ -113,4 +113,23 @@ class TestDestructivePaths < Minitest::Test
                          'l -C -h performed the destructive sweep instead of printing help'
     end
   end
+
+  def test_normalize_engine_rejects_arbitrary_programs
+    # A project-local .l.jsonc ships inside any cloned repository, and its
+    # engine value used to flow straight through to the executed binary.
+    %w[python3 sh curl bash ruby nc].each do |hostile|
+      assert_equal 'xelatex', LaTeXUtils.normalize_engine(hostile),
+                   "normalize_engine passed #{hostile.inspect} through as an engine"
+    end
+    assert_equal 'xelatex', LaTeXUtils.normalize_engine('/usr/bin/python3')
+  end
+
+  def test_normalize_engine_keeps_real_engines
+    assert_equal 'xelatex', LaTeXUtils.normalize_engine('xelatex')
+    assert_equal 'xelatex', LaTeXUtils.normalize_engine('xetex')
+    assert_equal 'lualatex', LaTeXUtils.normalize_engine('lualatex')
+    assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdftex')
+    assert_equal 'tectonic', LaTeXUtils.normalize_engine('tectonic')
+    assert_equal 'xelatex', LaTeXUtils.normalize_engine('xelatex -shell-escape')
+  end
 end

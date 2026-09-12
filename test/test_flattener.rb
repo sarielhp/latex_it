@@ -168,4 +168,30 @@ class TestFlattener < Minitest::Test
       refute_includes out, '\\input{chapters/ch1}'
     end
   end
+
+  def test_multiple_inputs_on_single_line_are_all_inlined
+    Dir.mktmpdir('latex_it_multi_input_test') do |proj|
+      File.write(File.join(proj, 'macros.tex'), "\\def\\foo{bar}\n")
+      File.write(File.join(proj, 'content.tex'), "SECTION_BODY\n")
+      File.write(File.join(proj, 'ignored.tex'), "SHOULD_BE_IGNORED\n")
+      File.write(File.join(proj, 'secret.tex'), "CONFIDENTIAL_DATA\n")
+
+      main = File.join(proj, 'main.tex')
+      File.write(main, <<~TEX)
+        START
+        \\input{macros}\\input{content}
+        \\input{macros} % \\input{ignored}
+        % \\input{secret}
+        END
+      TEX
+
+      out = LaTeXFlattener.flatten(main, proj)
+      assert_includes out, "\\def\\foo{bar}"
+      assert_includes out, 'SECTION_BODY'
+      refute_includes out, '\\input{macros}'
+      refute_includes out, '\\input{content}'
+      refute_includes out, 'SHOULD_BE_IGNORED'
+      refute_includes out, 'CONFIDENTIAL_DATA'
+    end
+  end
 end

@@ -39,6 +39,7 @@ class LaTeXBraceChecker
                                DeclareRobustCommand|(?:e|g|x)?def)\b/x.freeze
 
   LABEL_TOKEN_PATTERN = /\\(?:begin\{(figure\*?|table\*?|algorithm|listing|subfigure|subtable|equation\*|align\*|gather\*|multline\*|flalign\*)\}|end\{(figure\*?|table\*?|algorithm|listing|subfigure|subtable|equation\*|align\*|gather\*|multline\*|flalign\*)\}|caption\b|subcaption\b|label\{([^}]+)\})/.freeze
+  VERBATIM_START_PATTERN = /\\begin\{(#{Regexp.union(VERBATIM_ENVS).source})\}/.freeze
 
   def self.check_file(path)
     return [] unless File.file?(path)
@@ -57,10 +58,29 @@ class LaTeXBraceChecker
   def self.scan_inverted_labels(path, content)
     alerts = []
     float_stack = []
+    in_verbatim = false
+    verbatim_end = nil
 
     content.each_line.with_index(1) do |raw_line, line_no|
+      if in_verbatim
+        if raw_line =~ /\\end\{#{Regexp.escape(verbatim_end)}\}/
+          in_verbatim = false
+          verbatim_end = nil
+        end
+        next
+      end
+
       line = raw_line.sub(/(?<!\\)%.*\z/, '')
       next if line.strip.empty?
+
+      if line =~ VERBATIM_START_PATTERN
+        name = Regexp.last_match(1)
+        unless line =~ /\\end\{#{Regexp.escape(name)}\}/
+          in_verbatim = true
+          verbatim_end = name
+        end
+        next
+      end
 
       scan_line_for_labels(line, line_no, path, float_stack, alerts)
     end

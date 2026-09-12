@@ -74,6 +74,39 @@ class TestDeepDiagnostics < Minitest::Test
     end
   end
 
+  def test_inverted_label_ignored_inside_verbatim_or_lstlisting
+    Dir.mktmpdir('latex_it_test_verbatim_label_') do |dir|
+      path = File.join(dir, 'test.tex')
+      File.write(path, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\begin{lstlisting}
+        \\begin{figure}[h]
+          \\label{fig:example}
+          \\caption{An example figure.}
+        \\end{figure}
+        \\end{lstlisting}
+        \\begin{verbatim}
+        \\begin{figure}[h]
+          \\label{fig:example_verb}
+          \\caption{Another example.}
+        \\end{figure}
+        \\end{verbatim}
+        \\begin{figure}[h]
+          \\label{fig:real_inverted}
+          \\caption{A real figure}
+        \\end{figure}
+        \\end{document}
+      TEX
+
+      alerts = LaTeXBraceChecker.check_inverted_labels(path)
+      assert_equal 1, alerts.size
+      assert_equal :inverted_label, alerts.first[:alert_type]
+      assert_includes alerts.first[:text], 'fig:real_inverted'
+      refute_includes alerts.first[:text], 'fig:example'
+    end
+  end
+
   def test_type3_font_detection_from_pdffonts_output
     pdffonts_clean = <<~OUT
       name                                 type              encoding         emb sub uni object ID

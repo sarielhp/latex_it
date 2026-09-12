@@ -64,6 +64,30 @@ class TestLogRecognisers < Minitest::Test
     end
   end
 
+  def test_document_text_containing_citation_words_not_counted_as_reference_warnings
+    echoed_prose_log = <<~LOG
+      Overfull \\hbox (7.0pt too wide) in paragraph at lines 21--22
+      []\\OT1/cmr/m/n/10 when a citation key is undefined, LaTeX reports it without a reference on this page.
+      Overfull \\hbox (5.0pt too wide) in paragraph at lines 25--26
+      []\\OT1/cmr/m/n/10 an unnumbered label multiply defined in this context is invalid.
+    LOG
+
+    counts = builder.send(:count_reference_messages, echoed_prose_log)
+    assert_equal [0, 0, 0], counts,
+                 'echoed document text talking about undefined citations/references was counted as real warnings'
+
+    real_warnings_log = <<~LOG
+      LaTeX Warning: Citation `foo' on page 1 undefined on input line 5.
+      Package natbib Warning: Citation `bar' on page 2 undefined on input line 8.
+      LaTeX Warning: Reference `sec:intro' on page 3 undefined on input line 12.
+      LaTeX Warning: Label `eq:one' multiply defined.
+    LOG
+
+    real_counts = builder.send(:count_reference_messages, real_warnings_log)
+    assert_equal [2, 1, 1], real_counts,
+                 'authentic citation, reference, and label warnings were not counted correctly'
+  end
+
   def test_real_errors_are_still_counted
     file_line = "./paper.tex:12: LaTeX Error: Environment foo undefined.\nl.12 \\begin{foo}\n"
     bang = "! Undefined control sequence.\nl.5 \\badmacro\n"

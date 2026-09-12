@@ -890,15 +890,15 @@ module LaTeXDiagnostics
     { warns: warns, errors: errors }
   end
 
+  UNDEF_CITE_PATTERN = /^(?:LaTeX|Package\s+[-\w.@*]+)\s+Warning:\s+Citation\s+[`'"]?.*?['"]?\s+.*undefined/i.freeze
+  UNDEF_REF_PATTERN  = /^(?:LaTeX|Package\s+[-\w.@*]+)\s+Warning:\s+Reference\s+[`'"]?.*?['"]?\s+.*undefined/i.freeze
+  MULT_DEF_PATTERN   = /^(?:LaTeX|Package\s+[-\w.@*]+)\s+Warning:\s+Label\s+[`'"]?.*?['"]?\s+multiply defined/i.freeze
+
   def count_reference_messages(new_content)
-    undef_cite = 0
-    undef_ref = 0
-    mult_def = 0
-    new_content.each_line do |line|
-      undef_cite += 1 if line =~ /citation/i && line =~ /undefined/i
-      undef_ref += 1 if line =~ /reference/i && line =~ /undefined/i && line =~ /page/i
-      mult_def += 1 if line =~ /multiply defined/i && line =~ /label/i
-    end
+    content = LaTeXUtils.filter_subcommand_noise(new_content)
+    undef_cite = content.scan(UNDEF_CITE_PATTERN).size
+    undef_ref  = content.scan(UNDEF_REF_PATTERN).size
+    mult_def   = content.scan(MULT_DEF_PATTERN).size
     [undef_cite, undef_ref, mult_def]
   end
 

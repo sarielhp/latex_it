@@ -78,19 +78,32 @@ module LaTeXFlattener
   end
 
   def self.inline_line(line, base_expanded, real_base, file_dir, stack)
-    match = line.match(/^\s*\\(?:input|include)\{([^}]+)\}(.*)$/)
-    return line unless match
+    comment_idx = inline_comment_index(line)
+    code_part = comment_idx ? line[0...comment_idx] : line
+    comment_part = comment_idx ? line[comment_idx..] : ''
 
-    target, rest = match.captures
-    target = target.strip
-    target += '.tex' unless target.end_with?('.tex')
-    candidate = File.expand_path(target, file_dir)
-    return line unless File.file?(candidate) && within_tree?(candidate, base_expanded, real_base)
+    return line unless code_part =~ /\\(?:input|include)\{([^}]+)\}/
 
-    inlined = inline_file(candidate, base_expanded, stack)
-    return inlined if rest.strip.empty?
+    has_newline = code_part.end_with?("\n")
+    had_only_directives = code_part.gsub(/\\(?:input|include)\{[^}]+\}/, '').strip.empty?
 
-    inlined + rest + (line.end_with?("\n") ? "\n" : '')
+    inlined_code = code_part.gsub(/\\(?:input|include)\{([^}]+)\}/) do |match|
+      target = Regexp.last_match(1).strip
+      target += '.tex' unless target.end_with?('.tex')
+      candidate = File.expand_path(target, file_dir)
+      if File.file?(candidate) && within_tree?(candidate, base_expanded, real_base)
+        inline_file(candidate, base_expanded, stack)
+      else
+        match
+      end
+    end
+
+    if had_only_directives && comment_part.empty? && inlined_code.end_with?("\n")
+      inlined_code = inlined_code.chomp if has_newline && inlined_code.end_with?("\n\n")
+      inlined_code += "\n" unless inlined_code.end_with?("\n")
+    end
+
+    inlined_code + comment_part
   end
 
   CONDITIONAL_MACRO = '\IfFileExists'

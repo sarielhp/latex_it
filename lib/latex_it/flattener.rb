@@ -22,10 +22,10 @@ module LaTeXFlattener
     output << yield(content[offset..])
   end
 
-  def self.flatten(main_tex, base_dir = '.', strip_patterns = nil)
+  def self.flatten(main_tex, base_dir = '.', strip_patterns = nil, strip_comments: true)
     inlined = inline_file(main_tex, base_dir, [])
     cleaned = clean_host_specific(inlined, strip_patterns)
-    strip_comments(cleaned)
+    strip_comments ? strip_comments(cleaned) : cleaned
   end
 
   def self.inline_file(filepath, base_dir, stack)

@@ -119,10 +119,9 @@ module LaTeXConfig
         // Automatically bundle local biblatex files to prevent version mismatch
         "bundle_biblatex": true,
 
-        // Recursively inline all \\input and \\include statements into a single .tex file
-        "flatten": true,
-
-        // Strip private comments (% ...) from sources
+        // Strip private comments (% ...) from the flattened source.
+        // Inlining of \\input and \\include is not optional: the staging and
+        // verification pipeline assumes a single self-contained .tex file.
         "strip_comments": true,
 
         // Verify package in isolated /tmp sandbox before completing

@@ -161,6 +161,7 @@ module LatexCLI
       arxiv_visual_verify: cfg.dig('arxiv', 'visual_verify') != false,
       biblatex_shield: cfg.dig('arxiv', 'bundle_biblatex') != false,
       comments: cfg.dig('arxiv', 'comments'),
+      strip_comments: cfg.dig('arxiv', 'strip_comments') != false,
       exclude_main_tex: cfg['exclude_main_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_MAIN_PATTERNS,
       exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
       bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,

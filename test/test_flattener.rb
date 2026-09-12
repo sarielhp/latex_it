@@ -72,4 +72,18 @@ class TestFlattener < Minitest::Test
     assert_equal src, LaTeXFlattener.clean_host_specific(src),
                  'a conditional inside verbatim must be shown, not stripped'
   end
+
+  def test_strip_comments_is_configurable
+    Dir.mktmpdir('latex_it_flatten_test') do |dir|
+      main = File.join(dir, 'main.tex')
+      File.write(main, "TEXT % a private note\nMORE\n")
+
+      stripped = LaTeXFlattener.flatten(main, dir)
+      refute_includes stripped, 'a private note'
+
+      kept = LaTeXFlattener.flatten(main, dir, nil, strip_comments: false)
+      assert_includes kept, 'a private note',
+                      'arxiv.strip_comments: false was advertised but had no effect'
+    end
+  end
 end

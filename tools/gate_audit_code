@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 # ==============================================================================
-# tools/audit_code
+# tools/gate_audit_code
 #
 # High-performance AST code metrics auditor using RubyVM::AbstractSyntaxTree.
 # Enforces:
@@ -158,7 +158,7 @@ module CodeMetricsAuditor
     }
 
     parser = OptionParser.new do |opts|
-      opts.banner = 'Usage: tools/audit_code [options] [files...]'
+      opts.banner = 'Usage: tools/gate_audit_code [options] [files...]'
       opts.on('--max-depth N', Integer, "Max nesting depth (default: #{DEFAULT_MAX_DEPTH})") { |v| options[:max_depth] = v }
       opts.on('--max-complexity N', Integer, "Max cognitive complexity (default: #{DEFAULT_MAX_COMPLEXITY})") { |v| options[:max_complexity] = v }
       opts.on('--max-logic-lines N', Integer, "Max lines for logic methods (default: #{DEFAULT_MAX_LOGIC_LINES})") { |v| options[:max_logic_lines] = v }

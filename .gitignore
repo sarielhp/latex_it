@@ -57,6 +57,7 @@ vendor/bundle/
 
 # Local reviews & audit scratch
 reviews/archive/
+reviews/logs/
 .review_state.json
 
 # Local tooling shim and example corpus

@@ -79,7 +79,7 @@ The codebase is organized into modular files under `lib/latex_it/`:
 ## 4. Development & Quality Tooling
 
 - **Standalone Bundler (`tools/bundle`)**: Bundles `lib/` modules into the single standalone executable `latex_it`.
-- **Code Metrics Auditor (`tools/audit_code`)**: Enforces method complexity invariants: Cognitive Complexity $\le 15$, indentation depth $\le 4$, method length $\le 80$ lines.
+- **Code Metrics Auditor (`tools/gate_audit_code`)**: Enforces method complexity invariants: Cognitive Complexity $\le 15$, indentation depth $\le 4$, method length $\le 80$ lines.
 - **Tiered Quality Gate (`tools/gate`)**:
   - `--fast`: Syntax check + unit tests in $\sim 2$ seconds.
   - `--medium`: Adds core LaTeX integration tests.

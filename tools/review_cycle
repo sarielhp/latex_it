@@ -1,0 +1,1649 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+require 'fileutils'
+require 'pty'
+require 'open3'
+require 'date'
+require 'time'
+require 'json'
+require 'English'
+require 'set'
+
+begin
+  require 'colorize'
+rescue LoadError
+  class String
+    def colorize_code(code)
+      "\e[#{code}m#{self}\e[0m"
+    end
+
+    def bold; colorize_code('1'); end
+    def red; colorize_code('31'); end
+    def green; colorize_code('32'); end
+    def yellow; colorize_code('33'); end
+    def blue; colorize_code('34'); end
+    def magenta; colorize_code('35'); end
+    def cyan; colorize_code('36'); end
+    def gray; colorize_code('90'); end
+    def light_cyan; colorize_code('96'); end
+  end
+end
+
+class String
+  def gray
+    respond_to?(:light_black) ? light_black : "\e[90m#{self}\e[0m"
+  end unless method_defined?(:gray)
+end
+
+REPO_ROOT = File.expand_path('..', __dir__)
+VERSION = '0.1.0'
+STATE_FILE = File.join(REPO_ROOT, 'reviews', 'state.json')
+
+AUDIT_PROFILES = %w[systems security correctness resilience performance cli].freeze
+
+MODEL_CADENCE = [
+  { tier: 'tier0', backend: 'gemini', label: 'Gemini 3.8 Flash (Tier 0 Workhorse)' },
+  { tier: 'tier0', backend: 'gemini', label: 'Gemini 3.8 Flash (Tier 0 Workhorse)' },
+  { tier: 'standard', backend: 'auto', label: 'Claude / Codex (Tier 1 Standard)' },
+  { tier: 'tier0', backend: 'gemini', label: 'Gemini 3.8 Flash (Tier 0 Workhorse)' },
+  { tier: 'tier0', backend: 'gemini', label: 'Gemini 3.8 Flash (Tier 0 Workhorse)' },
+  { tier: 'standard', backend: 'auto', label: 'Claude / Codex (Tier 1 Standard)' },
+  { tier: 'deep', backend: 'auto', label: 'Flagship Opus / Deep (Tier 2 Deep)' }
+].freeze
+
+options = {
+  profile: 'auto',
+  backend: nil,
+  tier: nil,
+  cadence: 'pyramid',
+  loop: false,
+  max_cycles: 7,
+  target: ENV['AUDIT_TARGET'],
+  skip_gate: false,
+  dry_run: false,
+  keep_reviews: false,
+  effort: 'high',
+  push: true,
+  gate_cmd: ENV['GATE_CMD'],
+  audit_cmd: ENV['AUDIT_CMD'],
+  build_cmd: ENV['BUILD_CMD'],
+  reports_dir: ENV['REPORTS_DIR'],
+  max_diff_lines: 800,
+  strict_diff: false,
+  skip_diff_audit: false,
+  ignore_version: false,
+  config: nil
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = 'Usage: ./tools/review_cycle [options] (or ./tools/review-cycle)'
+
+  opts.on('-p', '--profile PROFILE', "Audit profile (auto|random|#{AUDIT_PROFILES.join('|')}, default: auto)") do |p|
+    options[:profile] = p
+  end
+
+  opts.on('-b', '--backend BACKEND', 'Override backend (auto|gemini|claude|codex|openai_api)') do |b|
+    options[:backend] = b.downcase
+  end
+
+  opts.on('-T', '--tier TIER', 'Override model tier (tier0|standard|deep)') do |t|
+    options[:tier] = t.downcase
+  end
+
+  opts.on('-c', '--cadence TYPE', 'Model rotation cadence (pyramid|fixed, default: pyramid [4 Flash : 2 Tier1 : 1 Tier2])') do |c|
+    options[:cadence] = c.downcase
+  end
+
+  opts.on('-l', '--loop', 'Continuously run review cycles across profiles until all pass clean') do
+    options[:loop] = true
+  end
+
+  opts.on('-m', '--max-cycles N', Integer, 'Maximum review cycles when looping (default: 7)') do |n|
+    options[:max_cycles] = n
+  end
+
+  opts.on('-t', '--target PATH', 'Target directory or file for audit (default: auto-detected)') do |t|
+    options[:target] = t
+  end
+
+  opts.on('-e', '--effort LEVEL', 'Effort level for agy-run-wild (low|medium|high, default: high)') do |e|
+    options[:effort] = e
+  end
+
+  opts.on('--max-diff-lines N', Integer, 'Maximum diff lines allowed before warning or aborting (default: 800)') do |n|
+    options[:max_diff_lines] = n
+  end
+
+  opts.on('--strict-diff', 'Roll back and abort cycle if remediation diff exceeds max-diff-lines') do
+    options[:strict_diff] = true
+  end
+
+  opts.on('--skip-diff-audit', 'Skip differential re-audit of remediation diff') do
+    options[:skip_diff_audit] = true
+  end
+
+  opts.on('--gate-cmd CMD', 'Command or script to run for quality gate (default: auto-detected)') do |cmd|
+    options[:gate_cmd] = cmd
+  end
+
+  opts.on('--audit-cmd CMD', 'Command or path to audit executable (default: auto-detected tools/audit)') do |cmd|
+    options[:audit_cmd] = cmd
+  end
+
+  opts.on('--build-cmd CMD', 'Command to rebuild binary (default: auto-detected)') do |cmd|
+    options[:build_cmd] = cmd
+  end
+
+  opts.on('--reports-dir DIR', 'Directory for review artifacts (default: reviews, or reports if present)') do |dir|
+    options[:reports_dir] = dir
+  end
+
+  opts.on('--skip-gate', 'Skip pre-flight quality gate verification') do
+    options[:skip_gate] = true
+  end
+
+  opts.on('--dry-run', 'Run audit and create review report without dispatching remediation') do
+    options[:dry_run] = true
+  end
+
+  opts.on('--keep-reviews', 'Do not move completed reviews to archive directory') do
+    options[:keep_reviews] = true
+  end
+
+  opts.on('--no-push', 'Do not push commits to remote after review cycle completion') do
+    options[:push] = false
+  end
+
+  opts.on('--config PATH', 'Explicit path to configuration file (default: tools/review_cycle.json)') do |c|
+    options[:config] = c
+  end
+
+  opts.on('--archive', 'Archive completed review reports and plans into archive directory (untracked by git)') do
+    MultiProfileReviewCycle.archive_all(options)
+    exit 0
+  end
+
+  opts.on('--status', 'Display current rotation state, cadence step, and cycle history') do
+    MultiProfileReviewCycle.show_status(options)
+    exit 0
+  end
+
+  opts.on('--reset-state', 'Reset review state machine (state.json) to initial state') do
+    MultiProfileReviewCycle.reset_state(options)
+    exit 0
+  end
+
+  opts.on('--init-config [PATH]', 'Generate a default review_cycle.json configuration for this repository') do |path|
+    MultiProfileReviewCycle.generate_config_template(path)
+    exit 0
+  end
+
+  opts.on('-v', '--version', 'Show version and exit') do
+    puts "review_cycle v#{VERSION}"
+    exit 0
+  end
+
+  opts.on('--ignore-version', 'Bypass version agreement check between review_cycle and audit') do
+    options[:ignore_version] = true
+  end
+
+  opts.on('--agents-doc', '--help-agent', 'Print AGENTS.md documentation block for review_cycle and exit') do
+    puts MultiProfileReviewCycle.agents_doc
+    exit 0
+  end
+
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
+  end
+end
+
+class MultiProfileReviewCycle
+  attr_reader :options, :state
+
+  def initialize(options)
+    config = load_config_file(options[:config])
+    # CLI options take precedence over config file, which takes precedence over defaults
+    @options = config.merge(options.reject { |_k, v| v.nil? })
+    @state = load_state
+  end
+
+  def load_config_file(explicit_path = nil)
+    if explicit_path
+      unless File.file?(explicit_path)
+        warn "⚠️ Config file not found: #{explicit_path}".yellow
+        return {}
+      end
+      return parse_config_file(explicit_path)
+    end
+
+    cfg_path = self.class.default_config_paths.find { |p| File.file?(p) }
+    cfg_path ? parse_config_file(cfg_path) : {}
+  end
+
+  def parse_config_file(path)
+    parsed = JSON.parse(File.read(path))
+    parsed.transform_keys(&:to_sym)
+  rescue StandardError => e
+    warn "⚠️ Failed to parse config file #{path}: #{e.message}".yellow
+    {}
+  end
+
+  def run
+    puts "==> review_cycle v#{VERSION}".bold.cyan
+    Dir.chdir(REPO_ROOT) do
+      cycle_count = 0
+      clean_profiles = Set.new
+
+      loop do
+        cycle_count += 1
+        active_profile, p_cand_idx = peek_profile
+        model_step, c_cand_idx = peek_model_step
+
+        review_num = next_review_number
+        init_cycle_log(review_num, active_profile, model_step)
+        print_cycle_header(cycle_count, active_profile, model_step)
+        preflight_check
+
+        puts "\n==> Target Review Artifact: #{reports_dir}/#{review_num}_#{active_profile}.md".bold.yellow
+
+        begin
+          findings, review_content = run_audit(active_profile, model_step)
+          advance_state(p_cand_idx, c_cand_idx)
+
+          if findings.zero?
+            clean_profiles << active_profile
+            handle_clean_audit(review_num, active_profile, model_step, review_content: review_content)
+            break if loop_converged?(clean_profiles, active_profile)
+          else
+            clean_profiles.clear
+            proceed = handle_defect_audit(review_num, active_profile, model_step, findings, review_content)
+            break unless proceed
+          end
+        ensure
+          close_cycle_log
+        end
+
+        break unless options[:loop]
+        break if cycle_limit_reached?(cycle_count)
+      end
+
+      print_loop_summary(cycle_count, clean_profiles) if options[:loop] && cycle_count > 1
+    end
+  end
+
+  def print_cycle_header(cycle_count, active_profile, model_step)
+    puts "\n" + ('=' * 74).cyan
+    puts " 🚀 Starting Review Cycle #{cycle_count} [Lens: #{active_profile.upcase}, #{model_step[:label]}]".bold.cyan
+    puts ('=' * 74).cyan
+  end
+
+  def handle_clean_audit(review_num, active_profile, model_step, review_content: nil)
+    puts "\n🎉 Profile [#{active_profile}] reported 0 defects! Clean bill of health.".bold.green
+    record_history(review_num, active_profile, model_step, 0, 'clean', files_edited: 0)
+    commit_and_push_cycle(review_num, active_profile, clean: true)
+    print_bottom_summary(
+      num: review_num, profile: active_profile, model_step: model_step,
+      findings: 0, review_content: review_content, footprint: nil, outcome: 'clean'
+    )
+  end
+
+  def loop_converged?(clean_profiles, active_profile)
+    return false unless options[:loop]
+
+    if %w[auto random].include?(options[:profile]) && clean_profiles.size >= AUDIT_PROFILES.size
+      puts "\n🌟 COMPLETE CONVERGENCE: All #{AUDIT_PROFILES.size} audit profiles passed with 0 defects!".bold.green
+      true
+    elsif !%w[auto random].include?(options[:profile]) && clean_profiles.include?(active_profile)
+      puts "\n🌟 Profile [#{active_profile}] verified clean with 0 defects!".bold.green
+      true
+    else
+      false
+    end
+  end
+
+  def cycle_limit_reached?(cycle_count)
+    if cycle_count >= options[:max_cycles]
+      puts "\nReached maximum cycle count (#{options[:max_cycles]}). Halting loop.".yellow
+      true
+    else
+      false
+    end
+  end
+
+  def handle_defect_audit(review_num, active_profile, model_step, findings, review_content)
+    puts "\n==> Found #{findings} defect(s). Generating #{reports_dir}/#{review_num}_#{active_profile}.md...".yellow
+    save_review_report(review_num, active_profile, model_step, review_content)
+
+    if options[:dry_run]
+      puts 'Dry-run enabled. Skipping sandbox remediation.'.yellow
+      print_bottom_summary(
+        num: review_num, profile: active_profile, model_step: model_step,
+        findings: findings, review_content: review_content, footprint: nil, outcome: 'dry_run'
+      )
+      return false
+    end
+
+    base_sha = `git rev-parse HEAD`.strip
+
+    unless remediate_in_sandbox(review_num, active_profile)
+      rollback_workspace(base_sha, 'Sandbox remediation failed or was discarded')
+      record_history(review_num, active_profile, model_step, findings, 'failed_sandbox', files_edited: 0)
+      print_bottom_summary(
+        num: review_num, profile: active_profile, model_step: model_step,
+        findings: findings, review_content: review_content, footprint: nil, outcome: 'failed_sandbox'
+      )
+      return options[:loop]
+    end
+
+    footprint = check_diff_footprint(base_sha)
+    if footprint[:aborted]
+      rollback_workspace(base_sha, footprint[:reason])
+      record_history(review_num, active_profile, model_step, findings, 'rejected_diff', files_edited: 0)
+      print_bottom_summary(
+        num: review_num, profile: active_profile, model_step: model_step,
+        findings: findings, review_content: review_content, footprint: nil, outcome: 'rejected_diff'
+      )
+      return options[:loop]
+    end
+
+    unless verify_quality_gate
+      rollback_workspace(base_sha, 'Post-merge quality gate verification failed')
+      record_history(review_num, active_profile, model_step, findings, 'failed_gate', files_edited: 0)
+      print_bottom_summary(
+        num: review_num, profile: active_profile, model_step: model_step,
+        findings: findings, review_content: review_content, footprint: nil, outcome: 'failed_gate'
+      )
+      return options[:loop]
+    end
+
+    reinstall_binary
+    diff_audit = run_differential_audit(active_profile, base_sha) unless options[:skip_diff_audit]
+    summary_content = generate_post_work_summary(review_num, active_profile, model_step, findings,
+                                                  footprint: footprint, diff_audit: diff_audit)
+    output_summary(review_num, summary_content)
+    archive_artifacts(review_num) unless options[:keep_reviews]
+    record_history(review_num, active_profile, model_step, findings, 'remediated',
+                   files_edited: footprint[:files]&.size)
+    commit_and_push_cycle(review_num, active_profile)
+
+    puts "\n✅ Review Cycle #{review_num} (#{active_profile}) completed and archived!".bold.green
+    print_bottom_summary(
+      num: review_num, profile: active_profile, model_step: model_step,
+      findings: findings, review_content: review_content, footprint: footprint, outcome: 'remediated'
+    )
+    true
+  end
+
+  def init_cycle_log(num, profile, model_step)
+    ldir = logs_dir
+    FileUtils.mkdir_p(ldir)
+    @current_log_path = File.join(ldir, "review_#{num}_#{profile}.log")
+    @log_file&.close rescue nil
+    @log_file = File.open(@current_log_path, 'a')
+    @log_file.sync = true
+
+    latest_path = File.join(ldir, 'latest.log')
+    File.delete(latest_path) if File.exist?(latest_path) || File.symlink?(latest_path)
+    File.symlink(@current_log_path, latest_path) rescue nil
+
+    log_write("=== Review Cycle #{num} [Lens: #{profile}, Model: #{model_step[:label]}] Started at #{Time.now.utc.iso8601} ===\n")
+    puts "==> Execution Log: #{@current_log_path}".cyan
+  end
+
+  def log_write(str)
+    return unless @log_file
+
+    clean_str = str.gsub(/\e\[[0-9;]*[mK]/, '')
+    @log_file.write(clean_str)
+  end
+
+  def close_cycle_log
+    return unless @log_file
+
+    log_write("=== Review Cycle Log Finished at #{Time.now.utc.iso8601} ===\n\n")
+    @log_file.close rescue nil
+    @log_file = nil
+  end
+
+  def rollback_workspace(base_sha, reason)
+    msg = "\n⚠️ [Rollback] #{reason}. Reverting workspace to #{base_sha[0..8]}..."
+    puts msg.bold.red
+    log_write("#{msg}\n")
+    system('git', 'reset', '--hard', base_sha)
+    system('git', 'clean', '-fd')
+    done_msg = "Workspace rolled back cleanly to #{base_sha[0..8]}."
+    puts done_msg.yellow
+    log_write("#{done_msg}\n")
+  end
+
+  # Language & Framework Helpers
+  def detect_project_language
+    if Dir.exist?(File.join(REPO_ROOT, 'lib', 'latex_it')) || File.exist?(File.join(REPO_ROOT, 'latex_it'))
+      :ruby
+    elsif File.exist?(File.join(REPO_ROOT, 'Gemfile'))
+      :ruby
+    elsif File.exist?(File.join(REPO_ROOT, 'go.mod'))
+      :go
+    elsif File.exist?(File.join(REPO_ROOT, 'Cargo.toml'))
+      :rust
+    elsif Dir.glob(File.join(REPO_ROOT, '**', '*.rb')).any?
+      :ruby
+    elsif Dir.glob(File.join(REPO_ROOT, '**', '*.go')).any?
+      :go
+    elsif Dir.glob(File.join(REPO_ROOT, '**', '*.rs')).any?
+      :rust
+    else
+      :generic
+    end
+  end
+
+  def target_directory
+    return options[:target] if options[:target] && !options[:target].strip.empty?
+    return ENV['AUDIT_TARGET'] if ENV['AUDIT_TARGET'] && !ENV['AUDIT_TARGET'].strip.empty?
+
+    lang = detect_project_language
+    if lang == :rust && Dir.exist?(File.join(REPO_ROOT, 'src'))
+      'src/'
+    else
+      '.'
+    end
+  end
+
+  def reports_dir
+    @reports_dir ||= begin
+      if options[:reports_dir] && !options[:reports_dir].strip.empty?
+        options[:reports_dir]
+      elsif Dir.exist?(File.join(REPO_ROOT, 'reviews'))
+        'reviews'
+      elsif Dir.exist?(File.join(REPO_ROOT, 'reports'))
+        'reports'
+      else
+        'reviews'
+      end
+    end
+  end
+
+  def logs_dir
+    File.join(REPO_ROOT, reports_dir, 'logs')
+  end
+
+  def archive_dir
+    File.join(REPO_ROOT, reports_dir, 'archive')
+  end
+
+  def guideline_instructions
+    hints = []
+    hints << options[:guidelines] if options[:guidelines] && !options[:guidelines].strip.empty?
+
+    agents_file = File.join(REPO_ROOT, 'AGENTS.md')
+    claude_file = File.join(REPO_ROOT, 'CLAUDE.md')
+    audit_code_file = [File.join(REPO_ROOT, 'tools', 'gate_audit_code'), File.join(REPO_ROOT, 'tools', 'audit_code')].find { |f| File.exist?(f) }
+
+    if File.exist?(agents_file)
+      content = File.read(agents_file)
+      hints << (content.include?('80 lines') ? 'Adhere strictly to AGENTS.md (<= 80 lines per function, decompose in place)' : 'Adhere strictly to all guidelines in AGENTS.md')
+    elsif File.exist?(claude_file)
+      hints << 'Adhere strictly to all guidelines in CLAUDE.md'
+    end
+
+    if audit_code_file && !options[:guidelines]
+      tool_name = File.basename(audit_code_file)
+      hints << "Adhere strictly to tools/#{tool_name} (method length <= 80 lines, cognitive complexity <= 15, depth <= 4)"
+    end
+
+    hints.empty? ? '' : " #{hints.join('. ')}."
+  end
+
+  def candidate_gate_commands
+    [
+      File.expand_path('gate', __dir__),
+      File.expand_path('check', __dir__),
+      File.expand_path('check.rb', __dir__)
+    ]
+  end
+
+  def language_gate_command
+    case detect_project_language
+    when :rust then File.exist?(File.join(REPO_ROOT, 'Cargo.toml')) ? 'cargo test' : nil
+    when :go   then File.exist?(File.join(REPO_ROOT, 'go.mod')) ? 'go test ./...' : nil
+    when :ruby then Dir.exist?(File.join(REPO_ROOT, 'test')) ? 'ruby -I. test/test_*.rb' : nil
+    end
+  end
+
+  def resolve_gate_cmd
+    return options[:gate_cmd] if options[:gate_cmd] && !options[:gate_cmd].strip.empty?
+    return ENV['GATE_CMD'] if ENV['GATE_CMD'] && !ENV['GATE_CMD'].strip.empty?
+
+    candidate = candidate_gate_commands.find { |p| File.file?(p) && (File.executable?(p) || p.end_with?('.rb')) }
+    return candidate.end_with?('.rb') && !File.executable?(candidate) ? "ruby #{candidate}" : candidate if candidate
+
+    makefile = File.join(REPO_ROOT, 'Makefile')
+    return 'make check' if File.file?(makefile) && File.read(makefile).match?(/^\s*check\s*:/)
+
+    language_gate_command
+  end
+
+  def resolve_audit_executable
+    return options[:audit_cmd] if options[:audit_cmd] && !options[:audit_cmd].strip.empty?
+    return ENV['AUDIT_CMD'] if ENV['AUDIT_CMD'] && !ENV['AUDIT_CMD'].strip.empty?
+
+    tools_audit = File.expand_path('audit', __dir__)
+    return tools_audit if File.exist?(tools_audit) && (File.executable?(tools_audit) || !File.directory?(tools_audit))
+
+    tools_audit_rb = File.expand_path('audit.rb', __dir__)
+    return "ruby #{tools_audit_rb}" if File.exist?(tools_audit_rb)
+
+    root_audit = File.join(REPO_ROOT, 'audit')
+    return root_audit if File.exist?(root_audit) && (File.executable?(root_audit) || !File.directory?(root_audit))
+
+    path_audit = `which audit 2>/dev/null`.strip
+    return path_audit unless path_audit.empty?
+
+    path_agy = `which agy_audit 2>/dev/null`.strip
+    return path_agy unless path_agy.empty?
+
+    nil
+  end
+
+  def safe_install_script?(path)
+    return false unless File.file?(path) && (File.executable?(path) || path.end_with?('.rb'))
+
+    content = File.read(path) rescue ''
+    !content.include?('git commit') && !content.include?('git push')
+  end
+
+  def language_build_command
+    case detect_project_language
+    when :rust then File.exist?(File.join(REPO_ROOT, 'Cargo.toml')) ? 'cargo build --release' : nil
+    when :go   then File.exist?(File.join(REPO_ROOT, 'go.mod')) ? 'go build .' : nil
+    end
+  end
+
+  def resolve_build_cmd
+    return options[:build_cmd] if options[:build_cmd] && !options[:build_cmd].strip.empty?
+    return ENV['BUILD_CMD'] if ENV['BUILD_CMD'] && !ENV['BUILD_CMD'].strip.empty?
+
+    bl_bin = File.expand_path('build_local', __dir__)
+    return bl_bin if File.file?(bl_bin) && File.executable?(bl_bin)
+
+    bl_rb = File.expand_path('build_local.rb', __dir__)
+    return "ruby #{bl_rb}" if File.file?(bl_rb)
+
+    makefile = File.join(REPO_ROOT, 'Makefile')
+    return 'make build' if File.file?(makefile) && File.read(makefile).match?(/^\s*build\s*:/)
+
+    inst = File.expand_path('install', __dir__)
+    return inst if safe_install_script?(inst)
+
+    language_build_command
+  end
+
+  private
+
+  def state_file_path
+    @state_file_path ||= self.class.state_file_path(reports_dir)
+  end
+
+  def load_state
+    target = state_file_path
+    if File.exist?(target)
+      JSON.parse(File.read(target))
+    else
+      migrate_or_init_state(target)
+    end
+  rescue StandardError
+    default_empty_state
+  end
+
+  def migrate_or_init_state(target)
+    legacy = [File.join(REPO_ROOT, '.review_state.json'), File.join(REPO_ROOT, 'review_state.json')].find { |f| File.exist?(f) }
+    if legacy
+      data = JSON.parse(File.read(legacy)) rescue nil
+      if data
+        FileUtils.mkdir_p(File.dirname(target))
+        File.write(target, JSON.pretty_generate(data))
+        FileUtils.rm_f(legacy)
+        return data
+      end
+    end
+    default_empty_state
+  end
+
+  def default_empty_state
+    { 'last_profile_index' => -1, 'last_cadence_index' => -1, 'history' => [] }
+  end
+
+  def save_state
+    FileUtils.mkdir_p(File.dirname(state_file_path))
+    File.write(state_file_path, JSON.pretty_generate(@state))
+  end
+
+  def peek_profile
+    case options[:profile]
+    when 'random'
+      chosen = AUDIT_PROFILES.sample
+      puts "Profile selected randomly: #{chosen}".magenta
+      [chosen, nil]
+    when 'auto'
+      next_idx = ((state['last_profile_index'] || -1) + 1) % AUDIT_PROFILES.size
+      chosen = AUDIT_PROFILES[next_idx]
+      puts "Profile candidate via Round-Robin: #{chosen} (profile #{next_idx + 1}/#{AUDIT_PROFILES.size})".magenta
+      [chosen, next_idx]
+    else
+      prof = AUDIT_PROFILES.include?(options[:profile]) ? options[:profile] : 'systems'
+      [prof, nil]
+    end
+  end
+
+  def peek_model_step
+    if options[:backend] || options[:tier]
+      backend = options[:backend] || 'auto'
+      tier = options[:tier] || 'standard'
+      label = "Manual Override (#{backend.upcase}/#{tier.upcase})"
+      puts "Model selection overridden: #{label}".magenta
+      return [{ tier: tier, backend: backend, label: label }, nil]
+    end
+
+    next_idx = ((state['last_cadence_index'] || -1) + 1) % MODEL_CADENCE.size
+    step = MODEL_CADENCE[next_idx]
+    puts "Model candidate via 4:2:1 Cadence: #{step[:label]} [Cadence Step #{next_idx + 1}/#{MODEL_CADENCE.size}]".magenta
+    [step, next_idx]
+  end
+
+  def advance_state(p_idx, c_idx)
+    state['last_profile_index'] = p_idx if p_idx
+    state['last_cadence_index'] = c_idx if c_idx
+    save_state if p_idx || c_idx
+  end
+
+  def run_quality_gate(label)
+    cmd = resolve_gate_cmd
+    unless cmd
+      warn "⚠️ [#{label}] No quality gate detected (use --gate-cmd or --skip-gate). Skipping gate.".yellow
+      return true
+    end
+
+    puts "==> [#{label}] Running Quality Gate (#{cmd})...".cyan
+    log_write("==> [#{label}] Running Quality Gate (#{cmd})...\n")
+    success = false
+    Open3.popen2e(cmd) do |stdin, stdout_err, wait_thr|
+      stdin.close rescue nil
+      while (line = stdout_err.gets)
+        print line
+        log_write(line)
+      end
+      success = wait_thr.value&.success? || false
+    end
+    log_write("--> Quality Gate [#{label}] #{success ? 'PASSED' : 'FAILED'}\n")
+    success
+  end
+
+  def fetch_auditor_version(audit_bin)
+    out, status = Open3.capture2(audit_bin, '--version')
+    return nil unless status.success?
+
+    out[/v?(\d+\.\d+\.\d+)/, 1]
+  rescue StandardError
+    nil
+  end
+
+  def verify_auditor_version
+    return if options[:ignore_version]
+
+    audit_bin = resolve_audit_executable
+    unless audit_bin
+      puts '❌ Could not find audit executable (checked tools/audit, ./audit, $PATH).'.bold.red
+      exit 1
+    end
+
+    auditor_ver = fetch_auditor_version(audit_bin)
+    return warn "⚠️ Warning: #{audit_bin} did not report a version via --version.".yellow unless auditor_ver
+
+    if auditor_ver != VERSION
+      err = "❌ Version mismatch: review_cycle is v#{VERSION}, but #{audit_bin} is v#{auditor_ver}.\n" \
+            "   Versions must agree for reliable operation (bypass with --ignore-version)."
+      puts err.bold.red
+      log_write("#{err}\n")
+      exit 1
+    end
+
+    puts "  ✓ Auditor verified: #{audit_bin} (v#{auditor_ver}) matches review_cycle (v#{VERSION})".green
+  end
+
+  def preflight_check
+    status = `git status --porcelain`.strip
+    unless status.empty?
+      puts '==> Checkpointing uncommitted tracked changes before review cycle...'.yellow
+      system('git', 'add', '-u')
+      system('git', 'commit', '--no-verify', '-m', 'wip: pre-review-cycle checkpoint')
+    end
+
+    verify_auditor_version
+
+    return if options[:skip_gate]
+
+    unless run_quality_gate('Pre-flight')
+      puts '❌ Baseline quality gate failed. Aborting cycle.'.bold.red
+      exit 1
+    end
+  end
+
+  def next_review_number
+    arch_path = archive_dir
+    archive_files = Dir.glob(File.join(arch_path, '*.md'))
+    archive_numbers = archive_files.map do |f|
+      File.basename(f) =~ /^(\d+)/ ? Regexp.last_match(1).to_i : nil
+    end.compact
+    max_archived = archive_numbers.max || 0
+
+    active_files = Dir.glob(File.join(reports_dir, '*.md'))
+    active_numbers = active_files.map do |f|
+      File.basename(f) =~ /^(\d+)/ ? Regexp.last_match(1).to_i : nil
+    end.compact
+
+    history_numbers = (state['history'] || []).map { |h| h['number'].to_i }.compact
+    max_history = history_numbers.max || 0
+
+    highest_known = [max_archived, max_history].max
+
+    next_id = if active_numbers.include?(highest_known + 1)
+                highest_known + 1
+              else
+                [highest_known, active_numbers.max || 0].max + 1
+              end
+
+    format('%03d', next_id)
+  end
+
+  def resolve_audit_cmd(profile, model_step)
+    audit_bin = resolve_audit_executable
+    unless audit_bin
+      puts '❌ Could not find audit executable (checked tools/audit, ./audit, $PATH).'.bold.red
+      exit 1
+    end
+
+    audit_bin.split + [
+      '-p', profile,
+      '-b', model_step[:backend],
+      '-t', model_step[:tier],
+      target_directory
+    ]
+  end
+
+  def transient_error?(output, exit_status)
+    return true if exit_status == 429 || exit_status == 503
+
+    output.match?(/429|rate\s*limit|overloaded|502|503|504|timeout|connection\s*reset|network\s*error/i)
+  end
+
+  def execute_audit_attempt(cmd)
+    output = String.new
+    status = nil
+    Open3.popen2e(*cmd) do |stdin, stdout_err, wait_thr|
+      stdin.close rescue nil
+      while (line = stdout_err.gets)
+        print line
+        output << line
+        log_write(line)
+      end
+      status = wait_thr.value
+    end
+    [output, status]
+  end
+
+  def run_audit_process(cmd, max_retries = 3)
+    attempt = 0
+    loop do
+      attempt += 1
+      output, status = execute_audit_attempt(cmd)
+      return [output, status] if status&.success?
+      return [output, status] if attempt >= max_retries || !transient_error?(output, status&.exitstatus)
+
+      delay = (2**attempt) + rand(0.5..1.5)
+      warn_msg = "\n⚠️ Transient audit failure (attempt #{attempt}/#{max_retries}). Retrying in #{delay.round(1)}s..."
+      puts warn_msg.bold.yellow
+      log_write("#{warn_msg}\n")
+      sleep delay
+    end
+  end
+
+  def count_audit_findings(output)
+    findings = output.scan(/\[SEVERITY\]/i).size
+    if findings.zero? && output =~ /no\s+defects|0\s+defects|clean/i
+      0
+    elsif findings.zero? && output =~ /^\s*\d+\.\s*\[SEVERITY\]/i
+      output.scan(/^\s*\d+\.\s*\[SEVERITY\]/i).size
+    else
+      findings
+    end
+  end
+
+  def run_audit(profile, model_step)
+    msg = "\n==> [Phase 1/5] Running Adversarial Audit [Lens: #{profile}, Model: #{model_step[:label]}]..."
+    puts msg.bold.cyan
+    log_write("#{msg}\n")
+    cmd = resolve_audit_cmd(profile, model_step)
+    log_write("--> Audit command: #{cmd.join(' ')}\n")
+
+    output, status = run_audit_process(cmd)
+    log_write("--> Audit process exit status: #{status&.exitstatus}\n")
+
+    unless status&.success?
+      err_msg = "\n❌ Audit failed with exit code #{status&.exitstatus || 'unknown'}. Aborting cycle."
+      puts err_msg.bold.red
+      log_write("#{err_msg}\n")
+      exit(status&.exitstatus || 1)
+    end
+
+    findings = count_audit_findings(output)
+    log_write("--> Findings detected: #{findings}\n")
+    [findings, output]
+  end
+
+  def save_review_report(num, profile, model_step, output)
+    FileUtils.mkdir_p(reports_dir)
+    report_path = File.join(reports_dir, "#{num}_#{profile}.md")
+
+    content = if output.include?('# Systems Code Review Report')
+                output
+              else
+                <<~MARKDOWN
+                  # Systems Code Review Report ##{num} (Lens: #{profile})
+
+                  - **Date**: #{Date.today.strftime('%Y-%m-%d')}
+                  - **Auditor**: #{model_step[:label]} via `tools/audit`
+                  - **Focus Lens**: `#{profile}`
+                  - **Model Tier**: `#{model_step[:tier].upcase}`
+                  - **Backend**: `#{model_step[:backend]}`
+                  - **Scope**: `#{target_directory}`
+                  - **Status**: Action Required
+
+                  ---
+
+                  #{output.strip}
+                MARKDOWN
+              end
+
+    File.write(report_path, content)
+    log_write("--> Saved review report: #{report_path}\n")
+    unless options[:dry_run]
+      system('git', 'add', report_path, state_file_path)
+      system('git', 'commit', '-m', "docs: add code review report #{num} (#{profile} via #{model_step[:label]})")
+      log_write("--> Committed review report and #{state_file_path}\n")
+    end
+  end
+
+  def remediate_prompt(profile, plan_path, report_path, summary_path)
+    gate_note = resolve_gate_cmd ? " and verify with #{resolve_gate_cmd}" : ''
+    guide_note = guideline_instructions
+
+    <<~PROMPT.strip.gsub(/\s+/, ' ')
+      /goal Create an architectural plan in #{plan_path} addressing genuine defects from #{report_path},
+      implement fixes across the codebase, and verify all quality checks pass cleanly. Focus area: #{profile} audit.
+      INVARIANTS:
+      1. Triage First: Evaluate each finding in #{report_path}. If a defect is an invalid false positive
+      or intentional design behavior, document the rationale in the plan and summary without modifying code.
+      2. Targeted Fixes: For each genuine defect, implement the minimal, idiomatic fix and add or update at least
+      one regression unit test validating the fix. Keep changes scoped strictly to the reported issues.
+      3. Quality Gate & Metrics: Run `tools/gate`#{gate_note} frequently and ensure all tests pass.
+      Every new or modified method MUST satisfy code metrics: method length <= 80 lines (or <= 120 lines if cognitive complexity <= 5),
+      cognitive complexity <= 15, and nesting depth <= 4.#{guide_note}
+      4. Scope Containment: Do not refactor unaffected modules or modify external CLI behavior unless required by the report.
+      Save plan to #{plan_path}, author post-work summary to #{summary_path} (stating issue, status/mitigation, and verification),
+      and commit all work when complete.
+    PROMPT
+  end
+
+  def remediate_in_sandbox(num, profile)
+    branch = "fix-review-#{num}-#{profile}-remediation"
+    plan_path = "#{reports_dir}/#{num}_#{profile}_plan.md"
+    report_path = "#{reports_dir}/#{num}_#{profile}.md"
+    summary_path = "#{reports_dir}/#{num}_summary.md"
+    prompt = remediate_prompt(profile, plan_path, report_path, summary_path)
+
+    msg = "\n==> [Phase 2/5] Dispatching Sandbox Agent via bws gw on branch #{branch}..."
+    puts msg.bold.cyan
+    log_write("#{msg}\n")
+
+    cmd = [
+      'bws', 'gw', '--allow-dirty', '-b', branch, '--',
+      'agy-run-wild', '--effort', options[:effort],
+      '-p', prompt
+    ]
+
+    success = run_with_auto_triage(cmd)
+    unless success
+      err_msg = "❌ Sandbox execution failed or was discarded. Full log: #{@current_log_path}"
+      puts err_msg.bold.red
+      log_write("#{err_msg}\n")
+    end
+    success
+  end
+
+  def check_squash_prompt(buffer, stdin, responded)
+    return responded if responded || !buffer.include?('What would you like to do with branch')
+
+    auto_msg = "\n[tools/review_cycle] Auto-selecting [s] Squash-merge...\n"
+    puts auto_msg.bold.green
+    log_write(auto_msg)
+    stdin.write("s\n")
+    stdin.flush
+    true
+  end
+
+  def stream_pty_output(stdout, stdin)
+    buffer = String.new
+    responded = false
+    while (char = stdout.getc)
+      print char
+      $stdout.flush
+      log_write(char)
+      buffer << char
+      buffer = buffer[-300..] if buffer.length > 600
+      responded = check_squash_prompt(buffer, stdin, responded)
+    end
+  rescue Errno::EIO
+    # Normal process completion
+  end
+
+  def kill_pty_process(pid)
+    Process.kill('TERM', pid) rescue nil
+    sleep 0.2
+    Process.kill('KILL', pid) rescue nil
+  end
+
+  def run_with_auto_triage(cmd_args)
+    command_str = cmd_args.map { |a| a.include?(' ') ? %("#{a.gsub('"', '\"')}") : a }.join(' ')
+    status = nil
+    log_write("--> Spawning PTY: #{command_str}\n")
+
+    PTY.spawn(command_str) do |stdout, stdin, pid|
+      begin
+        stream_pty_output(stdout, stdin)
+      rescue Interrupt, SignalException => e
+        kill_pty_process(pid)
+        raise e
+      ensure
+        _, status = Process.wait2(pid) rescue [nil, nil]
+      end
+    end
+
+    exit_code = status&.exitstatus || (status&.success? ? 0 : 1)
+    log_write("--> Sandbox PTY exited with status: #{exit_code}\n")
+    status&.success? || false
+  end
+
+  def check_diff_footprint(base_sha)
+    stat_str = `git diff --shortstat #{base_sha}..HEAD`.strip
+    file_list = `git diff --name-only #{base_sha}..HEAD`.lines.map(&:strip).reject(&:empty?)
+
+    puts "\n==> Inspecting Remediation Footprint...".cyan
+    puts "  Files modified: #{file_list.size} file(s)"
+    puts "  Diff stat: #{stat_str.empty? ? 'No changes' : stat_str}"
+
+    test_files = file_list.select do |f|
+      f.start_with?('test/') || f.start_with?('tests/') || f =~ /_test\.(rb|go|rs)$/ || f =~ /^test_.*\.rb$/
+    end
+    if test_files.any?
+      puts "  ✓ Regression test(s) modified/added: #{test_files.join(', ')}".green
+    else
+      warn '  ⚠️ Warning: No regression test files modified in this cycle.'.yellow
+    end
+
+    insertions = stat_str[/(\d+)\s+insertion/, 1].to_i
+    deletions = stat_str[/(\d+)\s+deletion/, 1].to_i
+    total_lines = insertions + deletions
+
+    max_lines = options[:max_diff_lines] || 800
+    if total_lines > max_lines
+      msg = "Diff footprint (#{total_lines} lines) exceeds threshold (#{max_lines} lines)"
+      if options[:strict_diff]
+        return { aborted: true, reason: msg }
+      else
+        warn "  ⚠️ Warning: #{msg}.".yellow
+      end
+    end
+
+    { aborted: false, files: file_list, total_lines: total_lines, test_files: test_files, stat: stat_str }
+  end
+
+  def run_differential_audit(profile, base_sha)
+    diff = `git diff #{base_sha}..HEAD`
+    return { findings: 0, output: 'No code changes in diff' } if diff.strip.empty?
+
+    puts "\n==> Running Differential Audit on Remediation Diff [Lens: #{profile}]...".bold.cyan
+    audit_bin = resolve_audit_executable
+    return nil unless audit_bin
+
+    cmd = audit_bin.split + ['-p', profile, '-t', 'tier0', '-b', 'gemini']
+    output = String.new
+
+    Open3.popen2e(*cmd) do |stdin, stdout_err, wait_thr|
+      stdin.write(diff)
+      stdin.close rescue nil
+      while (line = stdout_err.gets)
+        output << line
+      end
+      wait_thr.value
+    end
+
+    findings = output.scan(/\[SEVERITY\]/i).size
+    if findings.zero?
+      puts '  ✓ Differential audit passed: 0 defects detected in remediation diff.'.bold.green
+    else
+      warn "  ⚠️ Differential audit flagged #{findings} potential defect(s) in remediation diff:".yellow
+      output.scan(/\[SEVERITY\]:\s*([^\n]+).*?\[LOCATION\]:\s*([^\n]+)/m).each do |sev, loc|
+        warn "    - [#{sev.strip}] #{loc.strip}".yellow
+      end
+    end
+
+    { findings: findings, output: output }
+  rescue StandardError => e
+    warn "  ⚠️ Differential audit error: #{e.message}".yellow
+    nil
+  end
+
+  def verify_quality_gate
+    puts "\n==> [Phase 3/5] Verifying Post-Merge Quality Gate...".bold.cyan
+    if run_quality_gate('Post-merge')
+      puts 'Quality gate passed.'.green
+      true
+    else
+      puts '❌ Post-merge quality gate failed!'.bold.red
+      false
+    end
+  end
+
+  def reinstall_binary
+    cmd = resolve_build_cmd
+    return unless cmd
+
+    puts "\n==> Rebuilding binary via #{cmd}...".cyan
+    system(cmd)
+  end
+
+  def generate_post_work_summary(num, profile, model_step, findings, footprint: nil, diff_audit: nil)
+    FileUtils.mkdir_p(reports_dir)
+    root_summary = "#{num}_summary.md"
+    summary_path = "#{reports_dir}/#{num}_summary.md"
+
+    FileUtils.mv(root_summary, summary_path) if File.exist?(root_summary) && !File.exist?(summary_path)
+
+    content = if File.exist?(summary_path) && !File.read(summary_path).strip.empty?
+                append_summary_metadata(File.read(summary_path), footprint, diff_audit)
+              else
+                build_summary(num, profile, model_step, findings, footprint: footprint, diff_audit: diff_audit)
+              end
+
+    File.write(summary_path, content)
+    system('git', 'add', summary_path)
+    system('git', 'commit', '-m', "docs: add post-work summary #{num} (#{profile})")
+    content
+  end
+
+  def append_summary_metadata(content, footprint, diff_audit)
+    lines = content.lines
+    meta_idx = lines.rindex { |l| l =~ /^\s*-\s*\*\*/ }
+    return content unless meta_idx
+
+    extra = []
+    if footprint && footprint[:stat] && !footprint[:stat].empty? && !content.include?('**Footprint**')
+      extra << "- **Footprint**: #{footprint[:stat]}\n"
+    end
+    if diff_audit && !content.include?('**Differential Audit**')
+      label = diff_audit[:findings].zero? ? 'Clean (0 defects in diff)' : "#{diff_audit[:findings]} warning(s)"
+      extra << "- **Differential Audit**: #{label}\n"
+    end
+
+    lines.insert(meta_idx + 1, *extra).join
+  end
+
+  def output_summary(num, _content)
+    puts "\n==> [Phase 4/5] Post-Work Summary authored: #{reports_dir}/#{num}_summary.md".bold.cyan
+  end
+
+  def extract_severity_breakdown(review_content)
+    counts = { 'severe' => 0, 'major' => 0, 'medium' => 0, 'minor' => 0, 'other' => 0 }
+    return counts if review_content.nil? || review_content.empty?
+
+    found = 0
+    review_content.scan(/\[SEVERITY\]:?\s*([a-zA-Z]+)/i).each do |(level)|
+      found += 1
+      categorize_severity(level, counts)
+    end
+
+    if found.zero?
+      heading_regex = /###\s+\d+\.\s*\[(CRITICAL|MAJOR|MODERATE|SEVERE|HIGH|MEDIUM|LOW|MINOR)\]/i
+      review_content.scan(heading_regex).each do |(level)|
+        found += 1
+        categorize_severity(level, counts)
+      end
+    end
+
+    counts
+  end
+
+  def categorize_severity(level, counts)
+    case level.downcase
+    when /crit|sever|block/ then counts['severe'] += 1
+    when /maj|high/        then counts['major'] += 1
+    when /mod|med/         then counts['medium'] += 1
+    when /min|low|info/    then counts['minor'] += 1
+    else counts['other'] += 1
+    end
+  end
+
+  def colorize_severity_count(count, level_type)
+    return '0'.green if count.zero?
+
+    case level_type
+    when :severe then count.to_s.bold.red
+    when :major  then count.to_s.bold.yellow
+    when :medium then count.to_s.bold.cyan
+    when :minor  then count.to_s.bold.blue
+    else count.to_s
+    end
+  end
+
+  def format_status_label(outcome)
+    case outcome
+    when 'remediated'      then 'Remediated & Verified (Quality Gate Passed)'.bold.green
+    when 'clean'           then 'Clean (Zero Defects Detected)'.bold.green
+    when 'failed_sandbox'  then 'Remediation Failed in Sandbox (Rolled Back)'.bold.red
+    when 'failed_gate'     then 'Quality Gate Failed Post-Merge (Rolled Back)'.bold.red
+    when 'rejected_diff'   then 'Diff Footprint Exceeded (Rolled Back)'.bold.red
+    when 'dry_run'         then 'Dry Run (No Changes Applied)'.bold.yellow
+    else outcome.to_s.capitalize.yellow
+    end
+  end
+
+  def emit_summary_line(line)
+    puts line
+    log_write("#{line}\n")
+  end
+
+  def print_summary_issues(findings, severities)
+    if findings.zero?
+      emit_summary_line('  • Issues Found    : '.bold + '0 defects (Clean bill of health)'.bold.green)
+      emit_summary_line("    - Severe (Critical) : #{'0'.green}")
+      emit_summary_line("    - Major (High)      : #{'0'.green}")
+      emit_summary_line("    - Medium (Moderate) : #{'0'.green}")
+      emit_summary_line("    - Minor (Low)       : #{'0'.green}")
+    else
+      emit_summary_line('  • Issues Found    : '.bold + "#{findings} defect(s) detected".bold.yellow)
+      emit_summary_line("    - Severe (Critical) : #{colorize_severity_count(severities['severe'], :severe)}")
+      emit_summary_line("    - Major (High)      : #{colorize_severity_count(severities['major'], :major)}")
+      emit_summary_line("    - Medium (Moderate) : #{colorize_severity_count(severities['medium'], :medium)}")
+      emit_summary_line("    - Minor (Low)       : #{colorize_severity_count(severities['minor'], :minor)}")
+      emit_summary_line("    - Unclassified      : #{severities['other'].to_s.gray}") if severities['other'] > 0
+    end
+  end
+
+  def print_summary_files(footprint, outcome)
+    files = footprint ? (footprint[:files] || []) : []
+    stat_str = footprint ? footprint[:stat] : nil
+
+    if files.empty?
+      note = outcome == 'clean' ? '0 files (clean audit, no changes needed)'.green : '0 files'.yellow
+      emit_summary_line('  • Files Edited    : '.bold + note)
+    else
+      diff_note = stat_str && !stat_str.empty? ? " (#{stat_str})" : ''
+      emit_summary_line('  • Files Edited    : '.bold + "#{files.size} file(s)#{diff_note}".bold.green)
+      files.first(8).each { |f| emit_summary_line("    - #{f}".gray) }
+      emit_summary_line("    - ... and #{files.size - 8} more file(s)".gray) if files.size > 8
+    end
+  end
+
+  def print_bottom_summary(num:, profile:, model_step:, findings:, review_content: nil, footprint: nil, outcome: 'remediated')
+    severities = extract_severity_breakdown(review_content)
+    known = severities['severe'] + severities['major'] + severities['medium'] + severities['minor']
+    severities['other'] = findings - known if findings > known
+
+    sep = ('─' * 74).cyan
+    emit_summary_line("\n#{sep}")
+    emit_summary_line(" 📋 REVIEW CYCLE SUMMARY [##{num}]".bold.cyan)
+    emit_summary_line(sep)
+
+    emit_summary_line('  • Review Type     : '.bold + "#{profile.upcase} (#{profile} audit)".cyan)
+    model_str = "#{model_step[:label]} [backend: #{model_step[:backend]}, tier: #{model_step[:tier]}]"
+    emit_summary_line('  • Model Used      : '.bold + model_str.yellow)
+
+    print_summary_issues(findings, severities)
+    print_summary_files(footprint, outcome)
+    emit_summary_line('  • Status          : '.bold + format_status_label(outcome))
+
+    emit_summary_line("#{sep}\n")
+  end
+
+  def print_loop_summary(total_cycles, clean_profiles)
+    sep = ('─' * 74).cyan
+    puts "\n#{sep}"
+    puts " 🏁 REVIEW CYCLE LOOP COMPLETED (#{total_cycles} cycles executed)".bold.cyan
+    puts sep
+    puts '  • Cycles Executed : '.bold + total_cycles.to_s.yellow
+    clean_str = "#{clean_profiles.size}/#{AUDIT_PROFILES.size} (#{clean_profiles.to_a.join(', ')})"
+    puts '  • Clean Profiles  : '.bold + (clean_profiles.size == AUDIT_PROFILES.size ? clean_str.bold.green : clean_str.yellow)
+    puts "#{sep}\n"
+  end
+
+  def build_summary(num, profile, model_step, findings, footprint: nil, diff_audit: nil)
+    plan_file = Dir.glob("#{reports_dir}/#{num}*plan*.md").first
+    report_file = Dir.glob("#{reports_dir}/#{num}_#{profile}.md").first ||
+                  Dir.glob("#{reports_dir}/#{num}*.md").reject { |f| f =~ /plan|summary/ }.first
+
+    issues = extract_issues_from_plan(plan_file)
+    issues = extract_issues_from_report(report_file) if issues.empty?
+
+    count = issues.any? ? issues.size : findings
+    lines = [
+      "# Review Cycle #{num} Summary (Lens: #{profile})",
+      '',
+      "- **Round**: #{num}",
+      "- **Focus Lens**: `#{profile}`",
+      "- **Auditor**: #{model_step[:label]}",
+      "- **Issues Found**: #{count}",
+      "- **Status**: Remediated & Verified"
+    ]
+    if footprint && footprint[:stat] && !footprint[:stat].empty?
+      lines << "- **Footprint**: #{footprint[:stat]}"
+    end
+    if diff_audit
+      audit_label = diff_audit[:findings].zero? ? 'Clean (0 defects in diff)' : "#{diff_audit[:findings]} warning(s)"
+      lines << "- **Differential Audit**: #{audit_label}"
+    end
+    lines << ''
+    lines << '## Issues & Mitigations'
+    lines << ''
+
+    if issues.empty?
+      lines << "1. **Issue**: #{count} defect(s) identified during audit."
+      lines << '   - **Mitigation**: All identified defects resolved and verified via quality gate.'
+    else
+      issues.each_with_index do |it, i|
+        loc_part = it[:loc] ? " (`#{it[:loc]}`)" : ''
+        lines << "#{i + 1}. **Issue**: #{it[:desc]}#{loc_part}"
+        lines << "   - **Mitigation**: #{it[:rem]}"
+      end
+    end
+
+    lines.join("\n") + "\n"
+  end
+
+  def extract_issues_from_plan(plan_file)
+    return [] unless plan_file && File.exist?(plan_file)
+
+    content = File.read(plan_file)
+    items = extract_table_issues(content)
+    return items unless items.empty?
+
+    extract_section_issues(content)
+  end
+
+  def extract_table_issues(content)
+    table_lines = content.lines.select { |l| l.strip.start_with?('|') }
+    return [] if table_lines.size < 3
+
+    header = table_lines[0].split('|').map(&:strip).reject(&:empty?)
+    issue_col = header.index { |h| h =~ /issue\s*(summary|name|desc)|defect\s*classification/i }
+    rem_col = header.index { |h| h =~ /target\s*resolution|remediated\s*by|fix|resolution/i }
+    loc_col = header.index { |h| h =~ /component|subsystems?|location|target/i }
+    return [] unless issue_col && rem_col
+
+    items = []
+    table_lines[2..].each do |row|
+      cols = row.split('|').map(&:strip).reject(&:empty?)
+      next if cols.empty? || cols.all? { |c| c =~ /^[ \-:]+$/ }
+
+      desc = cols[issue_col]
+      rem = cols[rem_col]
+      loc = loc_col ? cols[loc_col] : nil
+      if desc && rem
+        items << {
+          desc: desc.gsub(/[`*]/, '').strip,
+          rem: rem.gsub(/[`*]/, '').strip,
+          loc: loc&.gsub(/[`*]/, '')&.strip
+        }
+      end
+    end
+    items
+  end
+
+  def extract_section_issues(content)
+    items = []
+    content.scan(/###\s+(?:Issue\s*\d*[:.]?\s*)?([^\n]+)(.*?)(?=###|\Z)/m).each do |title, body|
+      desc = title.strip.gsub(/[`*]/, '')
+      fix = body[/(?:-\s*\*\*Fix\*\*|\*\*Resolution\*\*|Remediation)[:\s]*([^\n]+)/i, 1]
+      items << { desc: desc, rem: fix.strip.gsub(/[`*]/, '') } if fix
+    end
+    items
+  end
+
+  def extract_issues_from_report(report_file)
+    return [] unless report_file && File.exist?(report_file)
+
+    content = File.read(report_file)
+    blocks = content.split(/\[SEVERITY\]:/i)[1..] || []
+    return extract_severity_blocks(blocks) if blocks.any?
+
+    extract_markdown_heading_issues(content)
+  end
+
+  def extract_severity_blocks(blocks)
+    blocks.map do |block|
+      loc = block[/\[LOCATION\]:\s*(.+)/i, 1]&.strip&.gsub(/[`*]/, '')
+      root_cause = block[/\[ROOT CAUSE\]:\s*(.+?)(?=\n\s*\[|\Z)/im, 1]&.strip
+      desc = clean_first_sentence(root_cause) || "Issue detected in #{loc || 'codebase'}"
+      desc = desc[0..130] + '...' if desc.length > 133
+
+      remediation = block[/\[REMEDIATION\]:\s*(.+?)(?=\n\s*---|\Z)/im, 1]&.strip
+      rem = clean_remediation_line(remediation)
+      rem = rem[0..130] + '...' if rem.length > 133
+
+      { desc: desc, rem: rem, loc: loc }
+    end
+  end
+
+  def clean_first_sentence(text)
+    return nil unless text
+
+    first_line = text.lines.first.strip
+    combined = if first_line.length < 35 && text.lines[1]
+                 first_line + ' ' + text.lines[1].strip
+               else
+                 first_line
+               end
+    combined.gsub(/[`*]/, '').sub(/\A[^a-zA-Z0-9]+/, '').strip
+  end
+
+  def clean_remediation_line(remediation)
+    return 'Remediated' unless remediation
+
+    outside_code = remediation.gsub(/```[a-zA-Z0-9_-]*\n.*?```/m, '').strip
+    prose = outside_code.lines.map(&:strip).reject(&:empty?).reject { |l| l =~ /^[>\-*#]/ }.first
+    if prose && prose.length > 5
+      return prose.sub(/^\((.+)\)$/, '\1').gsub(/[`*]/, '').sub(/\A[^a-zA-Z0-9]+/, '').strip
+    end
+
+    comment = remediation.scan(/(?<!:)\/\/\s*([^\n]+)/).flatten.reject { |c| c =~ /resolve\(\)/ }.first
+    return comment.gsub(/[`*]/, '').strip if comment && comment.length > 5
+
+    code_line = remediation.lines.reject { |l| l.strip.empty? || l.strip.start_with?('```') }.first&.strip
+    code_line ? "Code fix: `#{code_line[0..60]}`" : 'Resolved in code'
+  end
+
+  def extract_markdown_heading_issues(content)
+    items = []
+    content.scan(/###\s+\d+\.\s*\[(?:CRITICAL|MAJOR|MODERATE)\]\s*([^\n]+)(.*?)(?=###|\Z)/m).each do |title, body|
+      desc = title.strip.gsub(/[`*]/, '')
+      rem = body[/(?:-\s*\*\*Remediation\*\*|Remediation)[:\s]*([^\n]+)/i, 1]
+      clean_rem = rem ? rem.strip.gsub(/[`*]/, '') : 'Remediated'
+      clean_rem = clean_rem[0..130] + '...' if clean_rem.length > 133
+      items << { desc: desc, rem: clean_rem }
+    end
+    items
+  end
+
+  def archive_artifacts(num)
+    arch_path = archive_dir
+    puts "\n==> [Phase 5/5] Archiving review #{num} artifacts to #{arch_path}/...".bold.cyan
+    FileUtils.mkdir_p(arch_path)
+    self.class.ensure_gitignores(reports_dir)
+
+    files = (Dir.glob("#{reports_dir}/#{num}*.md") + Dir.glob("#{num}*.md")).uniq
+    return if files.empty?
+
+    files.each do |file|
+      dest = File.join(arch_path, File.basename(file))
+      if system('git', 'ls-files', '--error-unmatch', file, out: File::NULL, err: File::NULL)
+        system('git', 'rm', '--cached', file, out: File::NULL, err: File::NULL)
+      end
+      FileUtils.mv(file, dest)
+      puts "  Archived: #{file} -> #{dest}".cyan
+    end
+
+    puts "Review #{num} artifacts safely archived in #{arch_path}/ (untracked by git).".green
+  end
+
+  def record_history(num, profile, model_step, findings, outcome, files_edited: nil)
+    @state['history'] ||= []
+    summary_loc = options[:keep_reviews] ? "#{reports_dir}/#{num}_summary.md" : "#{reports_dir}/archive/#{num}_summary.md"
+    entry = {
+      'number' => num,
+      'profile' => profile,
+      'model' => model_step[:label],
+      'tier' => model_step[:tier],
+      'backend' => model_step[:backend],
+      'findings' => findings,
+      'outcome' => outcome,
+      'log' => @current_log_path ? File.join(reports_dir, 'logs', File.basename(@current_log_path)) : nil,
+      'timestamp' => Time.now.utc.iso8601
+    }
+    entry['files_edited'] = files_edited unless files_edited.nil?
+    entry['summary'] = summary_loc if outcome == 'remediated'
+    @state['history'] << entry
+    save_state
+  end
+
+  def commit_and_push_cycle(num, profile, clean: false)
+    dirty = `git status --porcelain #{reports_dir} #{state_file_path}`.strip
+    unless dirty.empty?
+      system('git', 'add', reports_dir, state_file_path)
+      msg = clean ? "chore(review): record clean audit for #{profile}" : "chore(review): finalize cycle #{num} (#{profile}) state"
+      system('git', 'commit', '-m', msg)
+    end
+
+    return unless options[:push]
+
+    puts "\n==> [Git] Pushing cycle commits to remote...".cyan
+    if system('git', 'push')
+      puts 'Successfully pushed commits to remote.'.green
+    else
+      warn '⚠️ Warning: git push failed. Commits remain local.'.yellow
+    end
+  end
+
+  def self.resolve_reports_dir(opts = {})
+    opts[:reports_dir] || ENV['REPORTS_DIR'] || (Dir.exist?(File.join(REPO_ROOT, 'reports')) ? 'reports' : 'reviews')
+  end
+
+  def self.state_file_path(dir = nil)
+    dir ||= resolve_reports_dir
+    primary = File.join(REPO_ROOT, dir, 'state.json')
+    return primary if File.exist?(primary)
+
+    legacy = [File.join(REPO_ROOT, '.review_state.json'), File.join(REPO_ROOT, 'review_state.json')].find { |f| File.exist?(f) }
+    legacy || primary
+  end
+
+  def self.default_config_paths
+    [
+      File.join(REPO_ROOT, 'tools', 'review_cycle.json'),
+      File.join(REPO_ROOT, 'config', 'review_cycle.json'),
+      File.join(REPO_ROOT, 'review_cycle.json'),
+      File.join(REPO_ROOT, '.review_cycle.json'),
+      File.join(REPO_ROOT, '.review.json')
+    ]
+  end
+
+  def self.default_config_target
+    if Dir.exist?(File.join(REPO_ROOT, 'tools'))
+      File.join(REPO_ROOT, 'tools', 'review_cycle.json')
+    elsif Dir.exist?(File.join(REPO_ROOT, 'config'))
+      File.join(REPO_ROOT, 'config', 'review_cycle.json')
+    else
+      File.join(REPO_ROOT, 'review_cycle.json')
+    end
+  end
+
+  def self.ensure_gitignores(dir = nil)
+    dir ||= resolve_reports_dir
+    ensure_dir_gitignore(File.join(REPO_ROOT, dir, 'archive'))
+    ensure_dir_gitignore(File.join(REPO_ROOT, dir, 'logs'))
+  end
+
+  def self.ensure_dir_gitignore(dir)
+    FileUtils.mkdir_p(dir)
+    gi_path = File.join(dir, '.gitignore')
+    return if File.exist?(gi_path)
+
+    File.write(gi_path, "*\n!.gitignore\n")
+  end
+
+  def self.reset_state(options = {})
+    s_path = state_file_path(resolve_reports_dir(options))
+    initial_state = {
+      'last_profile_index' => -1,
+      'last_cadence_index' => -1,
+      'history' => []
+    }
+    FileUtils.mkdir_p(File.dirname(s_path))
+    File.write(s_path, JSON.pretty_generate(initial_state))
+    puts "Reset #{s_path} to initial state.".green
+  end
+
+  def self.show_status(options = {})
+    s_path = state_file_path(resolve_reports_dir(options))
+    state = load_status_state(s_path)
+    p_idx = state['last_profile_index'] || -1
+    c_idx = state['last_cadence_index'] || -1
+    history = state['history'] || []
+
+    print_status_header(s_path, p_idx, c_idx, history.size)
+    print_status_history(history)
+  end
+
+  def self.load_status_state(path)
+    return {} unless File.exist?(path)
+
+    JSON.parse(File.read(path))
+  rescue StandardError
+    {}
+  end
+
+  def self.print_status_header(s_path, p_idx, c_idx, total_cycles)
+    next_p_idx = (p_idx + 1) % AUDIT_PROFILES.size
+    next_profile = AUDIT_PROFILES[next_p_idx]
+    next_c_idx = (c_idx + 1) % MODEL_CADENCE.size
+    next_model = MODEL_CADENCE[next_c_idx]
+
+    puts "\n" + ('=' * 68).cyan
+    puts " 📊 Autonomous Review Cycle State (#{s_path})".bold.cyan
+    puts ('=' * 68).cyan
+    puts "  • Last Profile Index : #{p_idx} (#{p_idx >= 0 ? AUDIT_PROFILES[p_idx] : 'None'})"
+    puts "  • Next Profile       : #{next_profile} [#{next_p_idx + 1}/#{AUDIT_PROFILES.size}]".bold.yellow
+    puts "  • Last Cadence Index : #{c_idx}"
+    puts "  • Next Model Step    : #{next_model[:label]} [Step #{next_c_idx + 1}/#{MODEL_CADENCE.size}]".bold.yellow
+    puts "  • Total Cycles Run   : #{total_cycles}"
+  end
+
+  def self.print_status_history(history)
+    if history.any?
+      puts "\n  Recent Cycle History (Last 5):".bold
+      history.last(5).each do |h|
+        tag = "[##{h['number']}] #{h['profile']} (#{h['model']}) -> #{h['findings']} defect(s), #{h['outcome']}"
+        puts(h['outcome'] == 'clean' ? "    - #{tag}".green : "    - #{tag}".yellow)
+      end
+    else
+      puts "\n  No review cycles recorded yet.".yellow
+    end
+    puts ('=' * 68).cyan + "\n"
+  end
+
+  def self.archive_all(options = {})
+    instance = new(options)
+    rep_dir = instance.reports_dir
+    arch_dir = instance.archive_dir
+    ensure_gitignores(rep_dir)
+
+    candidates = collect_unarchived_files(rep_dir, arch_dir)
+    if candidates.empty?
+      puts "No unarchived review artifacts found in #{rep_dir}/.".green
+      return
+    end
+
+    puts "Archiving #{candidates.size} review artifact(s) into #{arch_dir}/...".cyan
+    candidates.each { |file| move_to_archive(file, arch_dir) }
+    puts "All artifacts archived in #{arch_dir}/ (untracked by git).".green
+  end
+
+  def self.collect_unarchived_files(rep_dir, arch_dir)
+    patterns = [
+      File.join(REPO_ROOT, rep_dir, '[0-9][0-9][0-9]_*.md'),
+      File.join(REPO_ROOT, rep_dir, '*_plan.md'),
+      File.join(REPO_ROOT, rep_dir, '*_summary.md'),
+      File.join(REPO_ROOT, '[0-9][0-9][0-9]_*.md')
+    ]
+    patterns.flat_map { |p| Dir.glob(p) }.uniq.reject { |f| f.start_with?(arch_dir) }
+  end
+
+  def self.move_to_archive(file, arch_dir)
+    dest = File.join(arch_dir, File.basename(file))
+    if system('git', 'ls-files', '--error-unmatch', file, out: File::NULL, err: File::NULL)
+      system('git', 'rm', '--cached', file, out: File::NULL, err: File::NULL)
+    end
+    FileUtils.mv(file, dest)
+    puts "  Archived: #{File.basename(file)} -> #{arch_dir}/".cyan
+  end
+
+  def self.build_default_config
+    instance = new({})
+    audit_tool = [File.join(REPO_ROOT, 'tools', 'gate_audit_code'), File.join(REPO_ROOT, 'tools', 'audit_code')].find { |f| File.exist?(f) }
+    guideline = if audit_tool
+                  "Adhere strictly to tools/#{File.basename(audit_tool)} (method length <= 80 lines [<= 120 lines if complexity <= 5], cognitive complexity <= 15, depth <= 4)"
+                elsif File.exist?(File.join(REPO_ROOT, 'AGENTS.md'))
+                  'Adhere strictly to AGENTS.md guidelines'
+                end
+
+    {
+      target: instance.target_directory,
+      gate_cmd: instance.resolve_gate_cmd,
+      build_cmd: instance.resolve_build_cmd,
+      audit_cmd: instance.resolve_audit_executable || 'tools/audit',
+      guidelines: guideline,
+      max_diff_lines: 800
+    }.compact
+  end
+
+  def self.generate_config_template(output_path = nil)
+    output_path ||= default_config_target
+    cfg = build_default_config
+    FileUtils.mkdir_p(File.dirname(output_path))
+    File.write(output_path, JSON.pretty_generate(cfg) + "\n")
+    puts "Wrote configuration template to #{output_path}".green
+    puts JSON.pretty_generate(cfg)
+  end
+
+  def self.agents_doc
+    <<~MARKDOWN
+      ## Autonomous Review Cycle (`tools/review_cycle`)
+
+      Single-command orchestration executing adversarial review, sandbox remediation, and quality gate verification.
+      Complete specification: [`tools/REVIEW_CYCLE.md`](tools/REVIEW_CYCLE.md)
+
+      ### Pipeline Execution Phases:
+      1. **Audit**: Runs multi-lens audit (`tools/audit`), producing `<reports-dir>/<NUM>_<profile>.md`.
+      2. **Remediation**: Dispatches sandbox agent (`bws gw` + `agy-run-wild`) to create `<reports-dir>/<NUM>_<profile>_plan.md`, apply fixes, author regression tests, and squash-merge.
+      3. **Quality Gate & Rollback**: Runs quality gate (auto-detected or `--gate-cmd`). If sandbox or gate fails, automatically rolls back workspace to pre-cycle commit.
+      4. **Verification & Summary**: Inspects diff footprint (`--max-diff-lines`), runs differential re-audit on patch (`tools/audit`), and generates `<reports-dir>/<NUM>_summary.md`.
+      5. **Archive & Push**: Moves artifacts to `<reports-dir>/archive/`, records `<reports-dir>/state.json`, and pushes to remote (`--no-push` to bypass).
+
+      ### 4:2:1 Pyramid Cadence & 6-Lens Balancing:
+      Rotates models: `[Flash, Flash, Tier 1, Flash, Flash, Tier 1, Tier 2]` (4 Gemini Flash : 2 Claude/Codex : 1 Opus).
+      Round-robins across the 6 audit lenses (`systems`, `security`, `correctness`, `resilience`, `performance`, `cli`).
+      Because gcd(6, 7) = 1, every lens is audited by every model tier over a 42-cycle non-repeating sequence.
+
+      ### Invariants:
+      - Enforce repository sizing and architectural invariants (e.g. AGENTS.md).
+      - Transactional rollback on failure: no broken code left on working branch.
+      - Mandatory regression test for every remediated defect.
+    MARKDOWN
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME
+  parser.parse!(ARGV)
+  MultiProfileReviewCycle.new(options).run
+end

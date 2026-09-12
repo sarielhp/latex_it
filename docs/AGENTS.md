@@ -23,7 +23,7 @@ This document provides architectural guidelines, core invariants, development wo
   - `packager.rb`: Portable zip archive bundler (`-z`), active figure source discovery, and styles isolation.
   - `arxiv.rb`: Sanitized, flattened arXiv submission packager and sandbox verification.
 - **Workflow & Quality Tooling** (`tools/`):
-  - [`tools/audit_code`](tools/audit_code): High-performance AST metrics auditor enforcing cognitive complexity, depth, and method sizing.
+  - [`tools/gate_audit_code`](tools/gate_audit_code): High-performance AST metrics auditor enforcing cognitive complexity, depth, and method sizing.
   - [`tools/bundle`](tools/bundle): Compiles modular `lib/` components into a single standalone executable.
   - [`tools/gate`](tools/gate): Tiered quality gate (`--fast`, `--medium`, `--full`) verifying syntax, code metrics, and tests.
   - [`tools/setup_ruby_dev`](tools/setup_ruby_dev): Automated environment auditor and installer for Ruby gems, LSPs, and CLI tools.

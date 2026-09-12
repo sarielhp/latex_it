@@ -1,0 +1,8 @@
+{
+  "target": ".",
+  "gate_cmd": "tools/gate",
+  "build_cmd": "tools/install",
+  "audit_cmd": "tools/audit",
+  "guidelines": "Adhere strictly to tools/gate_audit_code (method length <= 80 lines [<= 120 lines if complexity <= 5], cognitive complexity <= 15, depth <= 4)",
+  "max_diff_lines": 800
+}

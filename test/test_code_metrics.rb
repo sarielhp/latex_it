@@ -8,7 +8,7 @@ class TestCodeMetrics < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
 
   def test_ast_code_metrics_zero_violations
-    audit_bin = File.join(ROOT, 'tools', 'audit_code')
+    audit_bin = File.join(ROOT, 'tools', 'gate_audit_code')
     latex_it_bin = File.join(ROOT, 'latex_it')
     lib_files = Dir.glob(File.join(ROOT, 'lib', '**', '*.rb'))
     tool_files = Dir.glob(File.join(ROOT, 'tools', '*')).select do |p|

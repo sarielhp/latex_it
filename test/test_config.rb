@@ -75,6 +75,10 @@ class TestLaTeXConfigAndConventions < Minitest::Test
     refute_includes cleaned, 'computer.tex'
     refute_includes cleaned, 'local.tex'
     assert_includes cleaned, 'Keep this'
+    # Absence of the pattern is not enough: the previous regex-based
+    # implementation deleted only a prefix of the conditional and left stray
+    # braces behind, and this test passed on that output.
+    assert_equal cleaned.count('{'), cleaned.count('}'), "unbalanced braces: #{cleaned.inspect}"
   end
 
   def test_flattener_clean_host_specific_custom
@@ -83,6 +87,7 @@ class TestLaTeXConfigAndConventions < Minitest::Test
     refute_includes cleaned, 'secret.tex'
     assert_includes cleaned, 'computer.tex'
     assert_includes cleaned, 'Keep this'
+    assert_equal cleaned.count('{'), cleaned.count('}'), "unbalanced braces: #{cleaned.inspect}"
   end
 
   def test_builder_junk_subdirs_auto_mirroring

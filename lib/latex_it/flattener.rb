@@ -65,15 +65,83 @@ module LaTeXFlattener
     inlined + rest + (line.end_with?("\n") ? "\n" : '')
   end
 
+  CONDITIONAL_MACRO = '\IfFileExists'
+
+  # Strips \IfFileExists conditionals whose tested filename names a machine the
+  # document should not depend on. This used to be two gsubs matching argument
+  # groups with \{[^}]*\}, which cannot span a nested brace -- and the second
+  # argument of this idiom almost always contains one (\input{...},
+  # \usepackage{...}). The three-argument alternative therefore never matched,
+  # the two-argument one fired, and a *prefix* of the construct was deleted,
+  # leaving stray braces in the .tex that ships inside the arXiv package. The
+  # scan below reads balanced groups instead, and removes a conditional only
+  # when it can account for the whole of it.
   def self.clean_host_specific(content, patterns = nil)
     tokens = patterns || LaTeXUtils::DEFAULT_STRIP_HOST_PATTERNS
     return content if tokens.empty?
 
-    re_str = tokens.map { |t| Regexp.escape(t) }.join('|')
-    transform_tex(content) do |chunk|
-      chunk.gsub(/\\IfFileExists\{[^}]*(?:#{re_str})[^}]*\}\{[^}]*\}\{[^}]*\}/m, '')
-           .gsub(/\\IfFileExists\{[^}]*(?:#{re_str})[^}]*\}\{[^}]*\}/m, '')
+    re = Regexp.union(tokens.map { |t| Regexp.escape(t) })
+    transform_tex(content) { |chunk| strip_host_conditionals(chunk, re) }
+  end
+
+  def self.strip_host_conditionals(chunk, re)
+    output = +''
+    pos = 0
+    while (idx = chunk.index(CONDITIONAL_MACRO, pos))
+      output << chunk[pos...idx]
+      stop = host_conditional_end(chunk, idx, re)
+      if stop
+        pos = stop
+      else
+        output << CONDITIONAL_MACRO
+        pos = idx + CONDITIONAL_MACRO.length
+      end
     end
+    output << chunk[pos..]
+  end
+
+  # Returns the index just past a \IfFileExists whose first argument matches
+  # `re`, or nil when it does not match or the construct is malformed. A
+  # malformed conditional is left in place: emitting half of it is strictly
+  # worse than emitting all of it.
+  def self.host_conditional_end(chunk, idx, re)
+    cursor = idx + CONDITIONAL_MACRO.length
+    groups = []
+    3.times do
+      cursor = skip_blanks(chunk, cursor)
+      break unless chunk[cursor] == '{'
+
+      inner, cursor = balanced_group(chunk, cursor)
+      return nil unless inner
+
+      groups << inner
+    end
+    return nil if groups.size < 2
+
+    groups.first.match?(re) ? cursor : nil
+  end
+
+  def self.skip_blanks(text, index)
+    index += 1 while index < text.length && text[index].match?(/[ \t\r\n]/)
+    index
+  end
+
+  # Reads the balanced group beginning at `start` (which must be '{').
+  # Returns [contents, index_after_closing_brace], or [nil, start] if unclosed.
+  def self.balanced_group(text, start)
+    depth = 0
+    i = start
+    while i < text.length
+      case text[i]
+      when '\\' then i += 1
+      when '{' then depth += 1
+      when '}'
+        depth -= 1
+        return [text[(start + 1)...i], i + 1] if depth.zero?
+      end
+      i += 1
+    end
+    [nil, start]
   end
 
   def self.strip_comments(content)

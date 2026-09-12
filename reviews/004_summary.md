@@ -61,6 +61,8 @@ All 7 findings from `reviews/004_resilience.md` were thoroughly evaluated agains
 - **Issue**: `stage_arxiv_files` called `LaTeXFlattener.flatten` without exception guards. When `LaTeXFlattener` encountered cyclic input dependencies (raising `RuntimeError`) or file read failures, the uncaught exception crashed the process with a stack trace.
 - **Status / Mitigation**: Fixed. Wrapped `LaTeXFlattener.flatten` in `stage_arxiv_files` with `begin ... rescue StandardError => e`, logging a concise, styled diagnostic `[FAIL] Could not flatten LaTeX source: #{e.message}` and returning `false`. In `do_package`, added `return false unless stage_arxiv_files(stage_dir)` to ensure clean abort without generating invalid archives.
 - **Verification**: Added regression unit test `test_arxiv_packaging_handles_cyclic_flattener_exception` in `test/test_repair_failures.rb` asserting that cyclic input errors abort packaging cleanly with appropriate diagnostic output and return code.
+- **Footprint**: 6 files changed, 376 insertions(+), 35 deletions(-)
+- **Differential Audit**: 2 warning(s)
 
 ---
 

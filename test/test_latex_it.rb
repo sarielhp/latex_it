@@ -129,7 +129,8 @@ class TestLatexItCLI < Minitest::Test
       %w[-u], %w[--single-pass], %w[-f], %w[--force], %w[-m], %w[--main],
       %w[-x], %w[--explain], %w[--update-if-changed], %w[-t], %w[--verify],
       %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
-      %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex]
+      %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex],
+      %w[--help-style=lines], %w[--help-lines]
     ]
     canonical_flags.each do |flag_args|
       flag_str = flag_args.join(' ')
@@ -170,6 +171,25 @@ class TestLatexItCLI < Minitest::Test
     assert status_all_color.success?
     assert_match(/(?:\e\[[0-9;]+m)+Pass Control & Compilation:\e\[0m/, stdout_all_color)
     assert_match(/(?:\e\[[0-9;]+m)+-e\e\[0m, (?:\e\[[0-9;]+m)+--engine\e\[0m (?:\e\[[0-9;]+m)+ENGINE\e\[0m/, stdout_all_color)
+  end
+
+  def test_help_lines_style
+    # In dumb terminal (test runner default), dividers use '-'
+    stdout_lines, status_lines = Open3.capture2(BIN, '-h', '--help-lines')
+    assert status_lines.success?
+    assert_includes stdout_lines, '----------------------------------------------------------------------------'
+
+    # In UTF-8 terminal with color, dividers use '─' with faint styling
+    stdout_utf8, status_utf8 = Open3.capture2({ 'TERM' => 'xterm-256color' }, BIN, '-h', '--help-lines', '--color')
+    assert status_utf8.success?
+    assert_includes stdout_utf8, '────────────────────────────────────────────────────────────────────────────'
+    assert_match(/\e\[2m/, stdout_utf8)
+
+    # By default (plain style), no divider lines appear
+    stdout_plain, status_plain = Open3.capture2(BIN, '-h')
+    assert status_plain.success?
+    refute_includes stdout_plain, '----------------------------------------------------------------------------'
+    refute_includes stdout_plain, '────────────────────────────────────────────────────────────────────────────'
   end
 
   def test_difference_between_u_and_1_passes

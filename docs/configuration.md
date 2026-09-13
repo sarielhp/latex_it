@@ -39,6 +39,9 @@ This creates `.l.jsonc` pre-populated with default settings and comments:
   // Enable diff-based PDF replacement (requires pdftotext)
   "update_on_diff": false,
 
+  // Help screen visual style: "plain" (default) or "lines" (subdued horizontal dividers)
+  "help_style": "plain",
+
   // Overfull \hbox threshold (in pt) to classify as an Alert
   "alert_overfull_pt": 24.0,
 

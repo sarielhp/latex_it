@@ -54,6 +54,9 @@ module LaTeXConfig
       // Diagnostic color theme: "blush" (default), "catppuccin", "tokyo-night", "dracula", "nord", "ansi"
       "theme": "blush",
 
+      // Help screen visual style: "plain" (default, standard Unix style) or "lines" (subdued horizontal dividers)
+      "help_style": "plain",
+
       // Lockfile concurrency protection
       "lock": true,
 

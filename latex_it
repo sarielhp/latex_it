@@ -187,6 +187,7 @@ module LatexCLI
       color: cfg['color'],
       theme: cfg['theme'],
       theme_arg: nil,
+      help_style: cfg['help_style'] || (cfg['help_lines'] == true ? 'lines' : 'plain'),
       list_themes: false,
       show_config: false,
       no_env: is_env_free,
@@ -203,12 +204,28 @@ module LatexCLI
       all: false,
       explain: false,
       deps: false,
+      exclude_main_tex: cfg['exclude_main_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_MAIN_PATTERNS,
+      exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
+      bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
+      auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
+      junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS
+    }.merge(build_zip_options(cfg, extra_cli_files))
+     .merge(build_arxiv_options(cfg))
+  end
+
+  def self.build_zip_options(cfg, extra_cli_files)
+    {
       zip: false,
       verify: false,
       zip_name: nil,
       inject_styles: cfg.dig('zip', 'inject_styles') == true,
       fig_sources: cfg.dig('zip', 'fig_sources') || ['.fig', '.ipe', '.svg', '.asy', '.gp', '.gnuplot', '.py', '.R'],
-      extra_files: (Array(cfg.dig('zip', 'include')) + extra_cli_files).uniq,
+      extra_files: (Array(cfg.dig('zip', 'include')) + extra_cli_files).uniq
+    }
+  end
+
+  def self.build_arxiv_options(cfg)
+    {
       arxiv: false,
       arxiv_name: nil,
       meta_only: false,
@@ -217,11 +234,6 @@ module LatexCLI
       biblatex_shield: cfg.dig('arxiv', 'bundle_biblatex') != false,
       comments: cfg.dig('arxiv', 'comments'),
       strip_comments: cfg.dig('arxiv', 'strip_comments') != false,
-      exclude_main_tex: cfg['exclude_main_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_MAIN_PATTERNS,
-      exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
-      bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
-      auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
-      junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
       strip_host_patterns: cfg.dig('arxiv', 'strip_host_patterns') || LaTeXUtils::DEFAULT_STRIP_HOST_PATTERNS
     }
   end
@@ -350,6 +362,8 @@ module LatexCLI
     opts.on('-E', '--examples', 'Show detailed usage examples and common workflows') { options[:show_examples] = true }
     opts.on('-h', '--help', 'Show condensed help summary (see -H for all options)') { options[:show_help] = true }
     opts.on('-H', '--help-all', 'Show all available options with detailed descriptions') { options[:show_help_all] = true }
+    opts.on('--help-style STYLE', %w[plain lines], 'Help display style: plain (default) or lines (subdued dividers)') { |v| options[:help_style] = v }
+    opts.on('--[no-]help-lines', 'Enable or disable horizontal divider lines between options in help') { |v| options[:help_style] = v ? 'lines' : 'plain' }
   end
 
   def self.condensed_help(_prog_name = 'l')
@@ -444,11 +458,50 @@ module LatexCLI
     end
   end
 
-  def self.wrap_help(text, width = terminal_columns)
-    text.to_s.lines.map(&:chomp)
-        .flat_map { |line| wrap_help_line(line, width) }
-        .map { |line| colorize_help_line(line) }
-        .join("\n")
+  def self.divider_character
+    (ENV['TERM'] == 'dumb' || ENV['LC_ALL'] == 'C' || ENV['LANG'] == 'C') ? '-' : '─'
+  end
+
+  def self.build_help_divider(width)
+    char = divider_character
+    raw = '  ' + (char * [width - 4, 10].max)
+    Rainbow.enabled ? Rainbow(raw).faint.to_s : raw
+  end
+
+  def self.insert_help_dividers(lines, width)
+    divider = build_help_divider(width)
+    result = []
+    in_group = false
+    seen_option = false
+
+    lines.each do |line|
+      plain = line.gsub(/\e\[[0-9;]*m/, '')
+      if plain =~ /^(\s*)([A-Za-z0-9\s&,\/\-\.]+:)$/
+        in_group = true
+        seen_option = false
+        result << line
+      elsif plain.strip.empty?
+        in_group = false
+        seen_option = false
+        result << line
+      elsif in_group && plain =~ /^\s{2,}(-[a-zA-Z0-9]|--(?:\[no-\])?[a-zA-Z0-9\-_]+)/
+        result << divider if seen_option
+        seen_option = true
+        result << line
+      else
+        result << line
+      end
+    end
+    result
+  end
+
+  def self.wrap_help(text, width = terminal_columns, help_style = 'plain')
+    wrapped_lines = text.to_s.lines.map(&:chomp)
+                        .flat_map { |line| wrap_help_line(line, width) }
+                        .map { |line| colorize_help_line(line) }
+
+    lines = (help_style == 'lines') ? insert_help_dividers(wrapped_lines, width) : wrapped_lines
+    lines.join("\n")
   end
 
   def self.handle_help_and_examples(parser, options, prog_name, argv = [])
@@ -500,7 +553,7 @@ module LatexCLI
     output = help_output_text(parser, options, prog_name)
     return unless output
 
-    puts wrap_help(output)
+    puts wrap_help(output, terminal_columns, options[:help_style])
     exit 0
   end
 

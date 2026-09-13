@@ -10,7 +10,7 @@
 # - Multi-engine support (xelatex [default], lualatex, pdflatex)
 # - BibTeX and Biber bibliography generation
 # - Single-pass compilation mode (-u)
-# - PDF text diff-based update mode (-d / --diff)
+# - Target PDF update guard mode (--update-if-changed)
 # - Detailed warning and error log analysis
 # - Clean pre-builds and timing diagnostics
 # ==============================================================================
@@ -247,8 +247,11 @@ module LatexCLI
       opts.banner = 'Usage: l [options] [document.tex]'
       opts.separator ''
       opts.separator 'Compilation Options:'
-      add_compilation_options_primary(opts, options)
-      add_compilation_options_secondary(opts, options)
+      add_compilation_options_pass(opts, options)
+      add_compilation_options_target(opts, options)
+      add_compilation_options_diag(opts, options)
+      add_compilation_options_bundle(opts, options)
+      add_compilation_options_env(opts, options)
       opts.separator ''
       opts.separator 'arXiv Preparation Options:'
       add_arxiv_options(opts, options)
@@ -256,56 +259,74 @@ module LatexCLI
     end
   end
 
-  def self.add_compilation_options_primary(opts, options)
-    opts.on('-m', '--main', 'Print the detected main LaTeX file and exit') { options[:show_main] = true }
-    opts.on('-C', '--clean-only', 'Clean auxiliary and junk files in directory and exit without building') { options[:clean_only] = true }
+  def self.add_compilation_options_pass(opts, options)
+    opts.separator ''
+    opts.separator '  Pass Control & Compilation:'
+    opts.on('-f', '-1', '--force', 'Force an initial compilation run unconditionally (bypasses build cache)') { options[:force] = true }
+    opts.on('-u', '--single-pass', 'Execute a single LaTeX pass only (no BibTeX/Biber or convergence passes)') do
+      options[:single_pass] = true
+      options[:passes] = 1
+      options[:bib] = false
+    end
+    opts.on('-n', '--passes NUM', Integer, 'Maximum number of compilation passes (1-3, default: 3)') { |v| options[:passes] = v.clamp(1, 3) }
+    opts.on('-b', '--[no-]bib', 'Explicitly enable or skip bibliography pass (default: auto-detect)') { |v| options[:bib] = v }
+    opts.on('--engine ENGINE', 'Compiler engine: xelatex (default), lualatex, or pdflatex') do |v|
+      options[:engine] = LaTeXUtils.normalize_engine(v)
+      options[:engine_explicit] = true
+    end
+    opts.on('--timeout SECONDS', Integer, 'Maximum execution timeout allowed per pass in seconds') { |v| options[:timeout] = v }
+    opts.on('-T', '--time', 'Show execution wall-clock time breakdown per compilation pass') { options[:time] = true }
+  end
+
+  def self.add_compilation_options_target(opts, options)
+    opts.separator ''
+    opts.separator '  Output Management & Cleaning:'
+    opts.on('-c', '--clean', 'Clean temporary build files in junk/ (.aux, .bbl, .log) before compilation') { options[:clean] = true }
+    opts.on('-C', '--clean-only', 'Clean auxiliary files in directory and exit without building') { options[:clean_only] = true }
+    opts.on('--update-if-changed', 'Only replace target PDF if extracted text changed (prevents viewer reloads)') { options[:update_on_diff] = true }
+  end
+
+  def self.add_compilation_options_diag(opts, options)
+    opts.separator ''
+    opts.separator '  Diagnostics & Error Filtering:'
+    opts.on('-e', '--explain', 'Display boxed plain-English explanations and fixes for diagnostics on first occurrence') { options[:explain] = true }
     opts.on('-a', '--all', 'Show all diagnostics across all tiers (including Whatevers and Warnings)') do
       options[:all] = true
       options[:suppress_whatevers] = false
       options[:suppress_warnings] = false
       options[:suppress_alerts] = false
     end
-    opts.on('-e', '--explain', 'Display boxed plain-English explanations for diagnostics on first occurrence') { options[:explain] = true }
-    opts.on('--engine ENGINE', 'LaTeX compiler: xelatex (default), lualatex, or pdflatex') do |v|
-      options[:engine] = LaTeXUtils.normalize_engine(v)
-      options[:engine_explicit] = true
-    end
+    opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero status') { options[:werror] = true }
+    opts.on('-s', '--score', 'Quiet mode: suppress stdout and print only numeric error/alert/warning counts') { options[:score] = true }
+    opts.on('-v', '--verbose', 'Verbose output mode (show raw overfull hbox snippet text and resolution steps)') { options[:verbose] = true }
+    opts.on('--trace', 'Print exact external subprocess commands, working directory, and environment overrides') { options[:trace] = true }
+    opts.on('--alert-hbox PT', Float, 'Overfull hbox threshold in points to classify as Alert (default: 24.0)') { |v| options[:alert_overfull_pt] = v.to_f }
+    opts.on('--whatever-pt PT', Float, 'Overfull hbox threshold in points to classify as Whatever (default: 2.5)') { |v| options[:whatever_overfull_pt] = v.to_f }
   end
 
-  def self.add_compilation_options_secondary(opts, options)
-    opts.on('-u', '--single-pass', 'Perform a single LaTeX run only (no BibTeX/Biber, no extra passes)') do
-      options[:single_pass] = true
-      options[:passes] = 1
-      options[:bib] = false
-    end
-    opts.on('-1', '--force', 'Force initial LaTeX run, continuing with subsequent passes only if needed') { options[:force] = true }
-    opts.on('-d', '--diff', 'Only replace target PDF if text content changed') { options[:update_on_diff] = true }
-    opts.on('-c', '--clean', 'Clean temporary build files (junk/, .bbl, .aux) before building') { options[:clean] = true }
-    opts.on('-b', '--[no-]bib', 'Force or skip BibTeX pass (default: auto-detect)') { |v| options[:bib] = v }
-    opts.on('-n', '--passes NUM', Integer, 'Number of compilation passes (1-3, default: 3)') { |v| options[:passes] = v.clamp(1, 3) }
-    opts.on('--timeout SECONDS', Integer, 'Maximum compilation timeout per pass in seconds') { |v| options[:timeout] = v }
-    opts.on('-T', '--time', 'Show execution time diagnostics per pass') { options[:time] = true }
-    opts.on('-t', '--verify', 'Verify self-contained portability of generated zip in /tmp sandbox') { options[:verify] = true; options[:zip] = true }
-    opts.on('-z', '--zip', 'Create self-contained portable zip archive of paper') { options[:zip] = true }
-    opts.on('--zip-name NAME', 'Specify custom output name for zip archive') { |v| options[:zip] = true; options[:zip_name] = v }
+  def self.add_compilation_options_bundle(opts, options)
+    opts.separator ''
+    opts.separator '  Paper Bundling & Portability:'
+    opts.on('-z', '--zip', 'Create a self-contained portable zip archive of paper, styles, and figures') { options[:zip] = true }
+    opts.on('-t', '--verify', 'Verify self-contained portability by testing compilation in /tmp sandbox') { options[:verify] = true; options[:zip] = true }
+    opts.on('--zip-name NAME', 'Specify custom output filename for generated zip archive') { |v| options[:zip] = true; options[:zip_name] = v }
     opts.on('--[no-]inject-styles', 'Enable or disable isolating harvested styles into styles/ and injecting \input@path') { |v| options[:inject_styles] = v }
-    opts.on('--init-config', 'Create a local .l.jsonc configuration template in the current directory and exit') do
-      LaTeXConfig.create_local_template!('.')
-      exit 0
-    end
+  end
+
+  def self.add_compilation_options_env(opts, options)
+    opts.separator ''
+    opts.separator '  Environment, Theming & Configuration:'
     opts.on('--[no-]color', 'Enable or disable colored terminal output (default: auto)') { |v| options[:color] = v }
     opts.on('--theme THEME', 'Set diagnostic color theme (e.g. blush, catppuccin, or "+1" to cycle)') { |v| options[:theme_arg] = v }
     opts.on('--list-themes', 'List available diagnostic color themes with previews and exit') { options[:list_themes] = true }
     opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') { |v| options[:lock] = v }
-    opts.on('-s', '--score', 'Suppress stdout and output error/warning count from the last LaTeX run') { options[:score] = true }
     opts.on('--no-env', 'Reset environment variables used by LaTeX/BibTeX/Biber') { options[:no_env] = true }
     opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') { options[:emacs] = true }
-    opts.on('-v', '--verbose', 'Verbose output (e.g. show box text snippets)') { options[:verbose] = true }
-    opts.on('--trace', 'Print exact external subprocess commands, working directory, and environment overrides') { options[:trace] = true }
-    opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero code') { options[:werror] = true }
-    opts.on('-M', '--deps', 'Print Makefile dependency rule for the document and exit') { options[:deps] = true }
-    opts.on('--alert-hbox PT', Float, 'Overfull hbox threshold in pt to classify as Alert (default: 24.0)') { |v| options[:alert_overfull_pt] = v.to_f }
-    opts.on('--whatever-pt PT', Float, 'Overfull hbox threshold in pt to classify as Whatever (default: 2.5)') { |v| options[:whatever_overfull_pt] = v.to_f }
+    opts.on('--init-config', 'Create a local .l.jsonc configuration template in the current directory and exit') do
+      LaTeXConfig.create_local_template!('.')
+      exit 0
+    end
+    opts.on('--show-config', 'Show active configuration sources and resolved settings and exit') { options[:show_config] = true }
   end
 
   def self.add_arxiv_options(opts, options)
@@ -320,14 +341,15 @@ module LatexCLI
   def self.add_general_options(opts, options)
     opts.separator ''
     opts.separator 'General Options:'
+    opts.on('-m', '--main', 'Print the detected main LaTeX root file and exit without compiling') { options[:show_main] = true }
+    opts.on('-M', '--deps', 'Print Makefile dependency rule for the document and exit') { options[:deps] = true }
     opts.on('-V', '--version', 'Show version and exit') do
       puts "l #{LatexIt::VERSION}"
       exit 0
     end
-    opts.on('--show-config', 'Show active configuration sources and resolved settings and exit') { options[:show_config] = true }
     opts.on('-E', '--examples', 'Show detailed usage examples and common workflows') { options[:show_examples] = true }
     opts.on('-h', '--help', 'Show condensed help summary (see -H for all options)') { options[:show_help] = true }
-    opts.on('-H', '--help-all', 'Show all available options') { options[:show_help_all] = true }
+    opts.on('-H', '--help-all', 'Show all available options with detailed descriptions') { options[:show_help_all] = true }
   end
 
   def self.condensed_help(_prog_name = 'l')
@@ -335,23 +357,16 @@ module LatexCLI
       'Usage: l [options] [document.tex]',
       '',
       'Common Options:',
-      '  -1, --force          Force initial LaTeX compilation run',
-      '  -u, --single-pass    Single pass only (no bib/extra passes)',
-      '  -c, --clean          Clean build files before building',
-      '  -C, --clean-only     Clean auxiliary files and exit',
-      '  -m, --main           Print detected main LaTeX file and exit',
-      '  -d, --diff           Only replace target PDF if text changed',
-      '  -a, --all            Show all diagnostics across all tiers',
-      '  -e, --explain        Explain diagnostics on first occurrence',
-      '  -z, --zip            Create portable zip archive of paper',
-      '  -t, --verify         Verify zip portability in sandbox',
-      '  -W, --werror         Treat compilation warnings as errors',
-      '      --engine ENGINE  Compiler: xelatex, lualatex, pdflatex',
-      '      --trace          Print external subprocess commands and environment',
-      '      --arxiv          Prepare sanitized arXiv zip package',
-      '  -E, --examples       Show detailed usage examples',
-      '  -H, --help-all       Show all available options',
-      '  -h, --help           Show condensed help (this message)'
+      '  -f, --force          Force compilation run (bypasses build cache)',
+      '  -u, --single-pass    Single pass only (fast draft, skip bib/extra passes)',
+      '  -c, --clean          Clean temporary build files (junk/, .aux, .bbl)',
+      '  -e, --explain        Display plain-English explanations for diagnostics',
+      '      --engine ENGINE  Compiler engine: xelatex (default), lualatex, pdflatex',
+      '',
+      'Help & Discovery:',
+      '  -H, --help-all       Show all available options with full descriptions',
+      '  -E, --examples       Show common usage examples and workflows',
+      '  -h, --help           Show condensed help summary (this message)'
     ].join("\n")
   end
 

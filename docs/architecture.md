@@ -50,7 +50,7 @@ The build pipeline follows an orderly sequence of phases:
 
 ### Phase 5: Target Export & Diffing
 - Successfully built `.pdf`, `.bbl`, and `.synctex.gz` files are exported to the project directory.
-- When `-d` (`--diff`) is active, `pdftotext -layout` compares the newly generated PDF with the existing file. If text is unchanged, the target file is not overwritten, preventing unnecessary PDF viewer reloads.
+- When `--update-if-changed` is active, `pdftotext -layout` compares the newly generated PDF with the existing file. If text is unchanged, the target file is not overwritten, preventing unnecessary PDF viewer reloads.
 
 ---
 

@@ -199,7 +199,7 @@ module ArxivTestWorker
 
     def diff
       before = pdf_state
-      result = compile('--single-pass', '--diff')
+      result = compile('--single-pass', '--update-if-changed')
       require_success(result)
       assert(result[:passes] == 1, 'Diff test did not perform its forced compiler pass')
       assert(before == pdf_state, 'Text-identical forced build replaced the PDF')

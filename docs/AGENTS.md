@@ -81,8 +81,8 @@ Any modifications to compilation logic must honor the following invariants:
    - Detect tool automatically: Biber (via `.bcf` / `.run.xml`) or BibTeX (via `\bibdata` and `\citation` in `.aux`).
    - Root `.bbl` is only overwritten if the generated `junk/*.bbl` contains valid bibliography entries (`\bibitem` or `\entry`).
    - `.bbl.bak` is preserved during updates.
-3. **PDF Text Diffing (`-d` / `--diff`)**:
-   - When `--diff` is active and `pdftotext` is available, skip replacing the target PDF if the extracted text layout matches the existing PDF.
+3. **Target PDF Update Guard (`--update-if-changed`)**:
+   - When `--update-if-changed` is active and `pdftotext` is available, skip replacing the target PDF if the extracted text layout matches the existing PDF (prevents document viewers from reloading on non-visual edits).
 4. **Portable Paper Bundling (`-z` / `--zip`)**:
    - Gathers input dependencies from `.fls`, filtering out system TeX Live packages (`texmf-dist`).
    - Discovers companion figure source files (`.fig`, `.ipe`, `.isy`, `.svg`, `.asy`, `.gp`, `.gnuplot`, `.py`, `.R`) matching compiled figure stems and stripped view suffixes.

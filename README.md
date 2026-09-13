@@ -90,29 +90,25 @@ l -e        # Show plain-English explanations for errors and warnings
 
 ---
 
-## Common Options
+## Common CLI Options
 
-```text
-Usage: l [options] [document.tex] [-- extra_files...]
-```
-
-| Option | Description |
+| Flag | Description |
 | :--- | :--- |
 | *(none)* | Build the document (auto-detects main file if omitted). |
-| `--fast` | Accepted for compatibility; incremental rebuilds are automatic (see `-1` to force one). |
-| `-1`, `--force` | Force initial LaTeX run, continuing only if needed for convergence. |
+| `-f`, `--force` | Force initial LaTeX run, continuing only if needed for convergence. |
 | `-u`, `--single-pass` | Run exactly one LaTeX pass without BibTeX or extra passes. |
-| `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
 | `-c`, `--clean` | Remove temporary build files before compiling. |
+| `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
 | `-e`, `--explain` | Show plain-English explanation boxes for errors and warnings. |
 | `-a`, `--all` | Display all diagnostics, including suppressed minor warnings. |
-| `-d`, `--diff` | Only update the target PDF if the text content actually changed. |
+| `--update-if-changed` | Only update the target PDF if the text content actually changed. |
 | `-m`, `--main` | Print the detected main LaTeX file and exit. |
 | `--engine ENGINE` | Choose compiler: `xelatex` (default), `lualatex`, or `pdflatex`. |
 | `-z`, `--zip` | Create a self-contained portable zip archive of the paper. |
 | `--arxiv` | Prepare a sanitized, flattened zip package for arXiv submission. |
 | `--init-config` | Generate a local `.l.jsonc` configuration template. |
-| `-h`, `--help` | Show complete list of command-line options. |
+| `-h`, `--help` | Show condensed help summary of everyday options. |
+| `-H`, `--help-all` | Show complete list of command-line options with detailed explanations. |
 
 ---
 

@@ -28,14 +28,20 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout, 'Common Options:'
     assert_includes stdout, '--engine'
     assert_includes stdout, '-u, --single-pass'
-    assert_includes stdout, '-1, --force'
-    assert_includes stdout, '-m, --main'
-    assert_includes stdout, '-d, --diff'
-    assert_includes stdout, '-t, --verify'
-    assert_includes stdout, '-W, --werror'
+    assert_includes stdout, '-f, --force'
+    assert_includes stdout, '-c, --clean'
+    assert_includes stdout, '-e, --explain'
     assert_includes stdout, '-E, --examples'
     assert_includes stdout, '--help-all'
     assert_includes stdout, '-h, --help'
+
+    # Verify options demoted to -H are not in condensed help
+    refute_includes stdout, '-m, --main'
+    refute_includes stdout, '--update-if-changed'
+    refute_includes stdout, '-z, --zip'
+    refute_includes stdout, '-t, --verify'
+    refute_includes stdout, '-W, --werror'
+    refute_includes stdout, '--arxiv'
 
     # Verify shortcuts and no-ops are not present in condensed help output
     refute_includes stdout, '--lua'
@@ -52,6 +58,7 @@ class TestLatexItCLI < Minitest::Test
     refute_includes stdout, '--lualatex'
     refute_includes stdout, '--xelatex'
     refute_includes stdout, '--update-on-diff'
+    refute_includes stdout, '--diff'
     refute_includes stdout, '--test'
     refute_includes stdout, '--env-free'
     refute_includes stdout, '--envfree'
@@ -69,6 +76,7 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout, '--alert-hbox'
     assert_includes stdout, '--whatever-pt'
     assert_includes stdout, '--arxiv'
+    assert_includes stdout, '--update-if-changed'
 
     # Verify shortcuts and no-ops are not present in full help either
     refute_includes stdout, '--lua'
@@ -85,6 +93,7 @@ class TestLatexItCLI < Minitest::Test
     refute_includes stdout, '--lualatex'
     refute_includes stdout, '--xelatex'
     refute_includes stdout, '--update-on-diff'
+    refute_includes stdout, '--diff'
     refute_includes stdout, '--test'
     refute_includes stdout, '--env-free'
     refute_includes stdout, '--envfree'
@@ -94,7 +103,7 @@ class TestLatexItCLI < Minitest::Test
     stdout, status = Open3.capture2(BIN, '-E')
     assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
     assert_includes stdout, 'Detailed Examples & Common Workflows:'
-    assert_includes stdout, 'l -1'
+    assert_includes stdout, 'l -f'
     assert_includes stdout, 'l -u'
     assert_includes stdout, 'l -z'
     assert_includes stdout, 'l --arxiv'
@@ -115,7 +124,7 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_canonical_cli_flags_and_anti_alias
-    canonical_flags = %w[-u --single-pass -1 --force -m --main -d --diff -t --verify --no-env -W --werror --engine=xelatex --engine=lualatex --engine=pdflatex]
+    canonical_flags = %w[-u --single-pass -f --force -m --main --update-if-changed -t --verify --no-env -W --werror --engine=xelatex --engine=lualatex --engine=pdflatex]
     canonical_flags.each do |flag|
       _, stderr, status = Open3.capture3(BIN, flag, 'nonexistent_doc_test.tex')
       refute_match(/invalid option/i, stderr, "Canonical flag #{flag} should be a valid option")

@@ -104,7 +104,16 @@ module LaTeXDiagnostics
   end
 
   def format_diagnostic_line(line_str, message, base_color, width: 0, bright_sep: true)
-    return message if @options[:emacs]
+    if @options[:emacs]
+      return message if message =~ WARNING_LINE_PATTERN ||
+                        message =~ /^(?:Overfull|Underfull)\s+\\(?:hbox|vbox)/ ||
+                        message =~ /^.+:\d+:\s+/
+
+      str = line_str.to_s
+      return "LaTeX Warning: #{message.chomp('.')} on input line #{str}." unless str.empty?
+
+      return "LaTeX Warning: #{message}"
+    end
 
     str = line_str.to_s
     sep = Rainbow(': ').send(base_color)
@@ -139,7 +148,13 @@ module LaTeXDiagnostics
   end
 
   def format_error_block(err_block, line_no, width: 0, catalog: nil, repeat_count: 1)
-    return err_block.join("\n") if @options[:emacs]
+    if @options[:emacs]
+      lines = err_block.dup
+      if (idx = lines.rindex { |l| l =~ /^l\.\d+/ })
+        lines.insert(idx + 1, ' ')
+      end
+      return lines.join("\n")
+    end
 
     str = line_no.to_s
     indent = ' ' * (width.positive? ? width + 2 : 2)
@@ -642,8 +657,10 @@ module LaTeXDiagnostics
       current_header = header_key
     end
 
-    rendered = render_diagnostic_item(item, width: max_width).rstrip
+    rendered = render_diagnostic_item(item, width: max_width)
+    rendered = @options[:emacs] ? rendered.chomp : rendered.rstrip
     io.puts rendered unless rendered.empty?
+    io.puts '' if @options[:emacs]
 
     explain_diagnostic_item(item, io: io) if @options[:explain]
     current_header
@@ -1036,7 +1053,7 @@ module LaTeXDiagnostics
   end
 
   def throttle_errors(errors)
-    return [errors, nil] if (@options && @options[:all]) || errors.size <= 1
+    return [errors, nil] if (@options && (@options[:all] || @options[:emacs])) || errors.size <= 1
 
     groups = errors.group_by { |e| format_display_path(e[:file]) }
     first_file = primary_error_file(groups)
@@ -1107,6 +1124,11 @@ module LaTeXDiagnostics
     displayed_errors, cascade_info = throttle_errors(errors)
     _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)
     print_cascade_notice(cascade_info, io: io) if cascade_info
+    if @options[:emacs] || @options[:all]
+      raw_warns = extract_warnings(content, false)
+      alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
+      render_non_error_tiers(alert_items, regular_warns, whatever_items, io: io)
+    end
 
     io.puts Rainbow('===============================================================').red.bright
     io.puts "See #{loga} for full error details."
@@ -1123,11 +1145,12 @@ module LaTeXDiagnostics
     alerts_count = alert_items.size + brace_alerts_count
     warnings_count = regular_warns.size
     whatevers_count = whatever_items.size
+    suppressed = !@options[:emacs] && !@options[:all]
     print_summary_line(
       errors_count, alerts_count, warnings_count, whatevers_count,
-      suppressed_alerts: alerts_count > 0,
-      suppressed_warnings: warnings_count > 0,
-      suppressed_whatevers: whatevers_count > 0,
+      suppressed_alerts: suppressed && alerts_count > 0,
+      suppressed_warnings: suppressed && warnings_count > 0,
+      suppressed_whatevers: suppressed && whatevers_count > 0,
       io: io
     )
   end
@@ -1304,6 +1327,7 @@ module LaTeXDiagnostics
       displayed_errors, cascade_info = throttle_errors(prepared_errors)
       _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
       print_cascade_notice(cascade_info, io: $stdout) if cascade_info
+      render_non_error_tiers(alert_items, reg_warns, what_items) if @options[:emacs] || @options[:all]
       [prepared_errors.size, errors].max
     else
       render_non_error_tiers(alert_items, reg_warns, what_items)
@@ -1311,30 +1335,30 @@ module LaTeXDiagnostics
     end
   end
 
-  def render_non_error_tiers(alert_items, reg_warns, what_items)
+  def render_non_error_tiers(alert_items, reg_warns, what_items, io: $stdout)
     suppress_alerts = @options[:suppress_alerts] == true
     suppress_warnings = @options[:suppress_warnings] == true
     suppress_whatevers = @options[:suppress_whatevers] != false
 
-    print_diagnostics_body([], alert_items, tier_label: 'alerts') if !suppress_alerts && !alert_items.empty?
-    print_diagnostics_body(reg_warns, [], tier_label: 'warnings') if !suppress_warnings && !reg_warns.empty?
-    render_whatevers_tier(what_items) if !suppress_whatevers && !what_items.empty?
+    print_diagnostics_body([], alert_items, tier_label: 'alerts', io: io) if !suppress_alerts && !alert_items.empty?
+    print_diagnostics_body(reg_warns, [], tier_label: 'warnings', io: io) if !suppress_warnings && !reg_warns.empty?
+    render_whatevers_tier(what_items, io: io) if !suppress_whatevers && !what_items.empty?
   end
 
-  def render_whatevers_tier(what_items)
+  def render_whatevers_tier(what_items, io: $stdout)
     formatted = what_items.map do |wh|
       wh_copy = wh.dup
       wh_copy[:base_color] = :cyan
       wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan)
       wh_copy
     end
-    print_diagnostics_body(formatted, [], tier_label: 'whatevers')
+    print_diagnostics_body(formatted, [], tier_label: 'whatevers', io: io)
   end
 
   def summarize_and_check_werror(errors, alerts, warnings, whatevers)
-    suppressed_alt = (errors > 0) || (@options[:suppress_alerts] == true)
-    suppressed_wrn = (errors > 0) || (@options[:suppress_warnings] == true)
-    suppressed_wht = (errors > 0) || (@options[:suppress_whatevers] != false)
+    suppressed_alt = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_alerts] == true)
+    suppressed_wrn = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_warnings] == true)
+    suppressed_wht = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_whatevers] != false)
 
     print_summary_line(
       errors, alerts, warnings, whatevers,

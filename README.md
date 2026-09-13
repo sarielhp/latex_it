@@ -109,6 +109,7 @@ l -B        # Extract cited references into local .bib file
 | `-B`, `--bib-extract` | Extract cited bibliography entries into local `.bib` file (default: `<doc>.bib`). |
 | `--arxiv` | Prepare a sanitized, flattened zip package for arXiv submission. |
 | `--init-config` | Generate a local `.l.jsonc` configuration template. |
+| `--vim`, `--qf` | Format warnings/errors for Vim/Neovim quickfix integration (`:make`). |
 | `-h`, `--help` | Show condensed help summary of everyday options. |
 | `-H`, `--help-all` | Show complete list of command-line options with detailed explanations. |
 
@@ -133,6 +134,7 @@ The installer creates several convenient shortcuts based on the executable name:
 
 For technical details, configuration options, and advanced features, see:
 
+- **[docs/vim.md](docs/vim.md)**: Vi, Vim, and Neovim Quickfix integration (`:make`), errorformat, and compiler plugin.
 - **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
 - **[docs/troubleshooting_bibliography_errors.md](docs/troubleshooting_bibliography_errors.md)**: Diagnosing and solving cryptic `\printbibliography` crashes and pinpointing errors in `.bib` databases.
 - **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.

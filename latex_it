@@ -211,7 +211,8 @@ module LatexCLI
       auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
       junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
       bib_extract: false,
-      bib_extract_name: nil
+      bib_extract_name: nil,
+      vim: false
     }.merge(build_zip_options(cfg, extra_cli_files))
      .merge(build_arxiv_options(cfg))
   end
@@ -254,6 +255,8 @@ module LatexCLI
       when '-help' then '--help'
       when '-version' then '--version'
       when '--extract-bib' then '--bib-extract'
+      when '-vim' then '--vim'
+      when '--qf', '-qf' then '--vim'
       else arg
       end
     end
@@ -366,6 +369,7 @@ module LatexCLI
     opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') { |v| options[:lock] = v }
     opts.on('--no-env', 'Reset environment variables used by LaTeX/BibTeX/Biber') { options[:no_env] = true }
     opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') { options[:emacs] = true }
+    opts.on('--vim', '--qf', 'Format warnings/errors for Vim/Neovim quickfix integration (:make)') { options[:vim] = true }
     opts.on('--init-config', 'Create a local .l.jsonc configuration template in the current directory and exit') do
       LaTeXConfig.create_local_template!('.')
       exit 0
@@ -600,7 +604,7 @@ module LatexCLI
 
   def self.determine_color_enabled(options)
     return options[:color] unless options[:color].nil?
-    return false if options[:emacs]
+    return false if options[:emacs] || options[:vim]
     return false if ENV['NO_COLOR'] && !ENV['NO_COLOR'].empty?
 
     term = ENV['TERM'].to_s.strip

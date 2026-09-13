@@ -806,6 +806,12 @@ module LaTeXDiagnostics
   end
 
   def render_diagnostic_entry(item, max_width, current_header, tier_label = nil, header_counts = nil, io: $stdout)
+    if @options[:vim]
+      rendered = format_vim_diagnostic_item(item, tier_label)
+      io.puts rendered unless rendered.to_s.empty?
+      return current_header
+    end
+
     item_file = format_display_path(item[:file])
     lbl = tier_label_for(item, tier_label)
     header_key = @options[:emacs] ? item_file : [item_file, lbl]
@@ -829,6 +835,51 @@ module LaTeXDiagnostics
 
     explain_diagnostic_item(item, io: io) if @options[:explain]
     current_header
+  end
+
+  def format_vim_diagnostic_item(item, tier_label = nil)
+    disp_file = format_display_path(item[:file] || @filename)
+    lbl = tier_label_for(item, tier_label)
+
+    if item[:err_block]
+      format_vim_error_entry(item, disp_file)
+    else
+      format_vim_warning_entry(item, disp_file, lbl)
+    end
+  end
+
+  def format_vim_error_entry(item, disp_file)
+    root_line = item[:root_line] || item.dig(:catalog, :root_line)
+    root_col = item[:col] || item[:root_col] || item.dig(:catalog, :root_col)
+    active_line = (root_line && root_line.positive?) ? root_line : (item[:line] || 0)
+
+    raw_msg = item[:err_block]&.first.to_s.strip
+    msg = extract_clean_error_message(raw_msg)
+    if (hint = item.dig(:catalog, :hint))
+      msg += " (Hint: #{hint})"
+    end
+
+    loc_str = if active_line.positive?
+                root_col ? "#{active_line}:#{root_col}" : active_line.to_s
+              else
+                ''
+              end
+
+    loc_str.empty? ? "#{disp_file}: error: #{msg}" : "#{disp_file}:#{loc_str}: error: #{msg}"
+  end
+
+  def format_vim_warning_entry(item, disp_file, lbl)
+    line = (item[:line] && item[:line].to_i.positive?) ? item[:line].to_i : item[:line_str].to_s.strip
+    raw_text = item[:text].to_s.gsub(/\s+/, ' ').strip
+
+    type_name = case lbl
+                when 'alerts' then 'alert'
+                when 'whatevers' then 'note'
+                else 'warning'
+                end
+
+    line_str = line.to_s.empty? ? '' : "#{line}:"
+    "#{disp_file}:#{line_str} #{type_name}: #{raw_text}"
   end
 
   def tier_label_for(item, tier_label)
@@ -1159,36 +1210,49 @@ module LaTeXDiagnostics
 
   def print_summary_line(errors, alerts, warnings, whatevers,
                          suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false, io: nil)
+    return if @options && @options[:vim]
+
     target_io = io || ((@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout)
-
-    alerts_supp = tier_suppressed?(:alerts, suppressed_alerts)
-    warnings_supp = tier_suppressed?(:warnings, suppressed_warnings)
-    whatevers_supp = tier_suppressed?(:whatevers, suppressed_whatevers)
-
-    alerts_active = !alerts_supp
-    warnings_active = !warnings_supp
-    whatevers_active = !whatevers_supp
-
-    is_clean = errors.zero? &&
-               (!alerts_active || alerts.zero?) &&
-               (!warnings_active || warnings.zero?) &&
-               (!whatevers_active || whatevers.zero?)
+    active = active_tiers(suppressed_alerts, suppressed_warnings, suppressed_whatevers)
 
     target_io.puts ''
-    if is_clean
-      active_names = ['errors']
-      active_names << 'alerts' if alerts_active
-      active_names << 'warnings' if warnings_active
-      active_names << 'whatevers' if whatevers_active
-      target_io.puts format_clean_summary(active_names)
-      return
+    if summary_clean?(errors, alerts, warnings, whatevers, active)
+      target_io.puts format_clean_summary(active_tier_names(active))
+    else
+      print_nonzero_summary(target_io, errors, alerts, warnings, whatevers,
+                            suppressed_alerts, suppressed_warnings, suppressed_whatevers)
     end
+  end
 
+  def active_tiers(supp_alerts, supp_warns, supp_whats)
+    {
+      alerts: !tier_suppressed?(:alerts, supp_alerts),
+      warnings: !tier_suppressed?(:warnings, supp_warns),
+      whatevers: !tier_suppressed?(:whatevers, supp_whats)
+    }
+  end
+
+  def summary_clean?(errors, alerts, warnings, whatevers, active)
+    errors.zero? &&
+      (!active[:alerts] || alerts.zero?) &&
+      (!active[:warnings] || warnings.zero?) &&
+      (!active[:whatevers] || whatevers.zero?)
+  end
+
+  def active_tier_names(active)
+    names = ['errors']
+    names << 'alerts' if active[:alerts]
+    names << 'warnings' if active[:warnings]
+    names << 'whatevers' if active[:whatevers]
+    names
+  end
+
+  def print_nonzero_summary(target_io, errors, alerts, warnings, whatevers, supp_alt, supp_wrn, supp_wht)
     err_str = format_tier_count('Errors', errors, :red)
     alert_str = format_tier_count('Alerts', alerts, :red)
     warn_str = format_tier_count('Warnings', warnings, :yellow)
     what_str = format_tier_count('Whatevers', whatevers, :cyan)
-    tag = format_suppression_tag(alerts, warnings, whatevers, suppressed_alerts, suppressed_warnings, suppressed_whatevers)
+    tag = format_suppression_tag(alerts, warnings, whatevers, supp_alt, supp_wrn, supp_wht)
 
     target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}#{tag}"
   end
@@ -1218,7 +1282,7 @@ module LaTeXDiagnostics
   end
 
   def throttle_errors(errors)
-    return [errors, nil] if (@options && (@options[:all] || @options[:emacs])) || errors.size <= 1
+    return [errors, nil] if (@options && (@options[:all] || @options[:emacs] || @options[:vim])) || errors.size <= 1
 
     groups = errors.group_by { |e| format_display_path(e[:file]) }
     first_file = primary_error_file(groups)
@@ -1489,7 +1553,7 @@ module LaTeXDiagnostics
       displayed_errors, cascade_info = throttle_errors(prepared_errors)
       _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
       print_cascade_notice(cascade_info, io: $stdout) if cascade_info
-      render_non_error_tiers(alert_items, reg_warns, what_items) if @options[:emacs] || @options[:all]
+      render_non_error_tiers(alert_items, reg_warns, what_items) if @options[:emacs] || @options[:vim] || @options[:all]
       [prepared_errors.size, errors].max
     else
       render_non_error_tiers(alert_items, reg_warns, what_items)
@@ -1518,16 +1582,16 @@ module LaTeXDiagnostics
   end
 
   def summarize_and_check_werror(errors, alerts, warnings, whatevers)
-    suppressed_alt = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_alerts] == true)
-    suppressed_wrn = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_warnings] == true)
-    suppressed_wht = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_whatevers] != false)
+    suppressed_alt = (errors > 0 && !@options[:emacs] && !@options[:vim] && !@options[:all]) || (@options[:suppress_alerts] == true)
+    suppressed_wrn = (errors > 0 && !@options[:emacs] && !@options[:vim] && !@options[:all]) || (@options[:suppress_warnings] == true)
+    suppressed_wht = (errors > 0 && !@options[:emacs] && !@options[:vim] && !@options[:all]) || (@options[:suppress_whatevers] != false)
 
     print_summary_line(
       errors, alerts, warnings, whatevers,
       suppressed_alerts: suppressed_alt && alerts > 0,
       suppressed_warnings: suppressed_wrn && warnings > 0,
       suppressed_whatevers: suppressed_wht && whatevers > 0
-    )
+    ) unless @options[:vim]
 
     fail_on_diagnostics(errors, alerts, warnings)
   end

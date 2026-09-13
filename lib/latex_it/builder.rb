@@ -50,7 +50,7 @@ class LatexBuilder
   end
 
   def interactive_tty?
-    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:trace] && !@options[:score]
+    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:vim] && !@options[:trace] && !@options[:score]
   end
 
   def run!
@@ -148,7 +148,7 @@ class LatexBuilder
   # document that has warnings. Re-reporting from the cached log keeps the
   # cache fast and the flags honest.
   def diagnostics_requested?
-    @options[:all] || @options[:explain] || @options[:verbose] || @options[:emacs]
+    @options[:all] || @options[:explain] || @options[:verbose] || @options[:emacs] || @options[:vim]
   end
 
   def targets_up_to_date?
@@ -182,6 +182,8 @@ class LatexBuilder
   end
 
   def log_pass_start(engine, pass, first: false)
+    return if @options[:vim]
+
     if interactive_tty?
       LaTeXIndicator.start("Building #{@bfilename}.pdf (#{engine} pass #{pass})...")
     else
@@ -192,6 +194,8 @@ class LatexBuilder
   end
 
   def log_bib_start(tool, first: false)
+    return if @options[:vim]
+
     if interactive_tty?
       LaTeXIndicator.start("Running #{tool} on #{@bfilename}...")
     else
@@ -665,7 +669,7 @@ class LatexBuilder
       warn "\nLaTeX engine terminated by signal #{status.termsig} (fatal crash).\n"
     elsif st > 0
       LaTeXIndicator.stop(clear: true, enabled: interactive_tty?)
-      unless interactive_tty?
+      unless interactive_tty? || @options[:vim]
         puts ": #{format_compilation_failure(st)}"
         $stdout.flush
       end

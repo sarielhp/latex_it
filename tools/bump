@@ -10,6 +10,7 @@
 # 3. Increments version by +0.0.1 (patch by default, or --major / --minor).
 # 4. Updates lib/latex_it/version.rb and latex_it files.
 # 5. Commits the updated version, tags the release, and pushes to remote.
+# 6. Publishes GitHub release and installs updated binary to ~/bin via tools/install.
 # ==============================================================================
 
 require 'open3'
@@ -41,13 +42,14 @@ module VersionBumper
       puts "--> Bumping version (#{bump_type}): #{YELLOW}#{current_v}#{RESET} -> #{GREEN}#{BOLD}#{new_v}#{RESET}"
 
       if dry_run
-        puts "#{CYAN}[Dry Run] Would update lib/latex_it/version.rb, commit, tag v#{new_v}, and push.#{RESET}"
+        puts "#{CYAN}[Dry Run] Would update lib/latex_it/version.rb, commit, tag v#{new_v}, push, and install.#{RESET}"
         return
       end
 
       apply_version_update(new_v)
       git_commit_and_push!(new_v)
       publish_github_release!(new_v)
+      install_updated_binary!
     end
   end
 
@@ -183,6 +185,22 @@ module VersionBumper
       else
         puts "#{YELLOW}⚠️ Warning: gh release create failed:#{RESET}\n#{out}"
       end
+    end
+  end
+
+  def self.install_updated_binary!
+    install_script = File.join(REPO_ROOT, 'tools', 'install')
+    unless File.executable?(install_script)
+      puts "#{YELLOW}⚠️ Warning: #{install_script} not found or not executable; skipping install.#{RESET}"
+      return
+    end
+
+    puts "--> Installing updated binary to ~/bin..."
+    out, status = Open3.capture2e(install_script, '-v')
+    if status.success?
+      puts out
+    else
+      puts "#{RED}❌ Error running #{install_script}:#{RESET}\n#{out}"
     end
   end
 

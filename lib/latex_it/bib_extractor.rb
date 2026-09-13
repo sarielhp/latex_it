@@ -66,10 +66,10 @@ class LaTeXBibExtractor
 
   def is_biblatex?
     bcf_path = File.join('junk', "#{@bfilename}.bcf")
-    return false unless File.file?(bcf_path)
+    return false unless File.file?(bcf_path) && File.size(bcf_path).positive?
 
     content = LaTeXUtils.safe_read(bcf_path)
-    content.include?('<bcf:citekey>')
+    content.include?('<bcf:controlfile') || content.include?('<bcf:citekey')
   end
 
   def determine_target_file
@@ -112,11 +112,12 @@ class LaTeXBibExtractor
       return false
     end
 
+    env = build_bibinputs_env
     bcf_base = File.join('junk', @bfilename)
     cmd = ['biber', '--output-format=bibtex', '-O', stage_file, bcf_base]
-    out, stat = Open3.capture2e(*cmd)
+    out, stat = Open3.capture2e(env, *cmd)
 
-    unless stat.success? && File.file?(stage_file) && File.size(stage_file) > 0
+    unless stat.success? && File.file?(stage_file) && File.size(stage_file).positive?
       warn Rainbow("==> Error: Biber extraction failed:").red.bright
       warn out.strip unless out.strip.empty?
       return false
@@ -195,13 +196,30 @@ class LaTeXBibExtractor
   end
 
   def print_workflow_hint(target_name)
+    if is_biblatex?
+      print_biblatex_hint(target_name)
+    else
+      print_bibtex_hint(target_name)
+    end
+  end
+
+  def print_biblatex_hint(target_name)
+    bcf_path = File.join('junk', "#{@bfilename}.bcf")
+    return unless File.file?(bcf_path)
+
+    bcf_content = LaTeXUtils.safe_read(bcf_path)
+    return if bcf_content.include?(">#{target_name}<")
+
+    puts Rainbow("==> Note: Update #{@filename} to \\addbibresource{#{target_name}} to use this local file.").cyan
+  end
+
+  def print_bibtex_hint(target_name)
     aux_path = File.join('junk', "#{@bfilename}.aux")
     return unless File.file?(aux_path)
 
     aux_content = LaTeXUtils.safe_read(aux_path)
     bibdata = aux_content.scan(/\\bibdata\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.map(&:strip)
     target_base = File.basename(target_name, '.bib')
-
     return if bibdata.include?(target_base)
 
     puts Rainbow("==> Note: Update #{@filename} to \\bibliography{#{target_base}} to use this local file.").cyan

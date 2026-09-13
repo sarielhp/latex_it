@@ -197,4 +197,26 @@ class TestBibExtractor < Minitest::Test
     LatexCLI.normalize_bib_extract_args!(args)
     assert_equal ['--bib-extract', '--bib-name', 'foo.bib', 'paper.tex'], args
   end
+
+  def test_is_biblatex_detection_with_attributes
+    Dir.mktmpdir('bcf_detect_test') do |dir|
+      junk_dir = File.join(dir, 'junk')
+      FileUtils.mkdir_p(junk_dir)
+
+      bcf_content = <<~XML
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bcf:controlfile xmlns:bcf="https://sourceforge.net/projects/biblatex">
+          <bcf:citekey order="1" intorder="1">clrs-ia-01</bcf:citekey>
+        </bcf:controlfile>
+      XML
+      File.write(File.join(junk_dir, 'paper.bcf'), bcf_content)
+
+      dummy_builder = Struct.new(:filename, :bfilename, :bdir, :options).new('paper.tex', 'paper', dir, {})
+      extractor = LaTeXBibExtractor.new(dummy_builder)
+
+      Dir.chdir(dir) do
+        assert extractor.send(:is_biblatex?)
+      end
+    end
+  end
 end

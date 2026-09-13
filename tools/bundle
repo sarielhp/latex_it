@@ -34,6 +34,7 @@ module LatexBundler
     error_catalog.rb
     diagnostics.rb
     builder.rb
+    bib_extractor.rb
     packager.rb
     arxiv.rb
   ].freeze
@@ -85,7 +86,16 @@ module LatexBundler
     lines.join.strip
   end
 
+  def self.verify_all_modules_present!
+    actual_files = Dir.glob(File.join(LIB_DIR, '*.rb')).map { |p| File.basename(p) }
+    missing = actual_files - MODULE_ORDER
+    return if missing.empty?
+
+    raise "tools/bundle: lib/latex_it/ contains modules not in MODULE_ORDER: #{missing.join(', ')}"
+  end
+
   def self.bundle
+    verify_all_modules_present!
     version = current_version
     header = generate_header(version)
     modules_code = MODULE_ORDER.map do |mod_name|

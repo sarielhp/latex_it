@@ -976,9 +976,8 @@ class TestLatexItCLI < Minitest::Test
       plain = strip_ansi(out)
       refute_includes plain, '2.09996pt too wide'
       refute_includes plain, 'Token not allowed in a PDF string'
-      refute_includes plain, 'float specifier changed to'
-      assert_includes plain, 'Whatevers: 4'
-      assert_includes plain, '(Whatevers suppressed)'
+      assert_includes plain, '✔ No errors/alerts/warnings.'
+      refute_includes plain, '(Whatevers suppressed)'
 
       # With all: true, whatevers are displayed
       all_builder = LatexBuilder.new('main.tex', all: true, suppress_whatevers: false)
@@ -1073,9 +1072,8 @@ class TestLatexItCLI < Minitest::Test
         end
       end
       plain_custom = strip_ansi(out_custom)
-      assert_includes plain_custom, 'Warnings: 0'
-      assert_includes plain_custom, 'Whatevers: 1'
-      assert_includes plain_custom, '(Whatevers suppressed)'
+      assert_includes plain_custom, '✔ No errors/alerts/warnings.'
+      refute_includes plain_custom, '(Whatevers suppressed)'
     end
   end
 
@@ -1540,5 +1538,36 @@ class TestLatexItCLI < Minitest::Test
     plain = strip_ansi(io.string)
     assert_includes plain, 'Errors: 0, Alerts: 1, Warnings: 2, Whatevers: 3'
     refute_includes plain, 'suppressed'
+  end
+
+  def test_print_summary_line_clean_state
+    diag = TestDiagnosticsHelper.new('main.tex', {})
+
+    # 1. Default (whatevers suppressed by default): all non-suppressed zero
+    io = StringIO.new
+    diag.send(:print_summary_line, 0, 0, 0, 0, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, '✔ No errors/alerts/warnings.'
+
+    # 2. Suppressed whatevers are present (>0), but all non-suppressed are zero
+    io = StringIO.new
+    diag.send(:print_summary_line, 0, 0, 0, 5, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, '✔ No errors/alerts/warnings.'
+    refute_includes plain, 'whatevers'
+
+    # 3. With whatevers unsuppressed (e.g. -a / --all), all four zero
+    diag_all = TestDiagnosticsHelper.new('main.tex', suppress_whatevers: false)
+    io = StringIO.new
+    diag_all.send(:print_summary_line, 0, 0, 0, 0, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, '✔ No errors/alerts/warnings/whatevers.'
+
+    # 4. With warnings suppressed (-W), all non-suppressed zero
+    diag_nowarn = TestDiagnosticsHelper.new('main.tex', suppress_warnings: true)
+    io = StringIO.new
+    diag_nowarn.send(:print_summary_line, 0, 0, 3, 0, io: io)
+    plain = strip_ansi(io.string)
+    assert_includes plain, '✔ No errors/alerts.'
   end
 end

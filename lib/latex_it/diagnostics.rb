@@ -977,15 +977,56 @@ module LaTeXDiagnostics
 
   def print_summary_line(errors, alerts, warnings, whatevers,
                          suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false, io: nil)
+    target_io = io || ((@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout)
+
+    alerts_supp = tier_suppressed?(:alerts, suppressed_alerts)
+    warnings_supp = tier_suppressed?(:warnings, suppressed_warnings)
+    whatevers_supp = tier_suppressed?(:whatevers, suppressed_whatevers)
+
+    alerts_active = !alerts_supp
+    warnings_active = !warnings_supp
+    whatevers_active = !whatevers_supp
+
+    is_clean = errors.zero? &&
+               (!alerts_active || alerts.zero?) &&
+               (!warnings_active || warnings.zero?) &&
+               (!whatevers_active || whatevers.zero?)
+
+    target_io.puts ''
+    if is_clean
+      active_names = ['errors']
+      active_names << 'alerts' if alerts_active
+      active_names << 'warnings' if warnings_active
+      active_names << 'whatevers' if whatevers_active
+      target_io.puts format_clean_summary(active_names)
+      return
+    end
+
     err_str = format_tier_count('Errors', errors, :red)
     alert_str = format_tier_count('Alerts', alerts, :red)
     warn_str = format_tier_count('Warnings', warnings, :yellow)
     what_str = format_tier_count('Whatevers', whatevers, :cyan)
     tag = format_suppression_tag(alerts, warnings, whatevers, suppressed_alerts, suppressed_warnings, suppressed_whatevers)
 
-    target_io = io || ((@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout)
-    target_io.puts ''
     target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}#{tag}"
+  end
+
+  def format_clean_summary(active_names)
+    v_symbol = Rainbow('✔').green.bright
+    msg = Rainbow("No #{active_names.join('/')}.").green.bright
+    "#{v_symbol} #{msg}"
+  end
+
+  def tier_suppressed?(tier, explicit_suppressed = false)
+    return true if explicit_suppressed
+    return false unless @options
+
+    case tier
+    when :alerts then @options[:suppress_alerts] == true
+    when :warnings then @options[:suppress_warnings] == true
+    when :whatevers then @options[:suppress_whatevers] != false
+    else false
+    end
   end
 
   def primary_error_file(groups)
@@ -1265,8 +1306,6 @@ module LaTeXDiagnostics
       print_diagnostic_banner(counts) if total_diag > 0 || errors > 0 || alerts > 0
       errors = render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
     end
-
-    return unless errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
 
     summarize_and_check_werror(errors, alerts, warnings, whatevers)
   end

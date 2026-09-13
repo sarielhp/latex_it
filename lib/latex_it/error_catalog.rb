@@ -867,16 +867,65 @@ module LaTeXErrorCatalog
 
       token = extract_token(entry, match, err_block, file: file, line: line)
       hint = resolve_hint(entry[:hint], token)
+      root_line, root_col = extract_root_location(entry, token, hint, file, line)
       return {
         id: entry[:id],
         title: entry[:title],
         token: token,
         hint: hint,
+        root_line: root_line,
+        root_col: root_col,
         why: entry[:why],
         fix: entry[:fix],
         doc_slug: entry[:doc_slug]
       }
     end
+    nil
+  end
+
+  def self.extract_root_location(entry, token, hint, file, line)
+    if hint =~ /opened on line (\d+)(?:\s*\(col\s*(\d+)\))?/i
+      return [Regexp.last_match(1).to_i, Regexp.last_match(2) ? Regexp.last_match(2).to_i : nil]
+    end
+
+    if entry[:id] == :misplaced_alignment_tab
+      col = extract_misplaced_tab_col(file, line)
+      return [line, col] if col
+    elsif entry[:id] == :undefined_control_sequence && token
+      col = extract_token_col(file, line, token)
+      return [line, col] if col
+    end
+
+    [line, nil]
+  end
+
+  def self.extract_misplaced_tab_col(file, line)
+    source_file = find_source_file(file)
+    return nil unless source_file && line && line.to_i > 0
+
+    lines = File.readlines(source_file)
+    idx = line.to_i - 1
+    return nil if idx < 0 || idx >= lines.size
+
+    pos = lines[idx].index(/(?<!\\)&/)
+    pos ? pos + 1 : nil
+  rescue StandardError
+    nil
+  end
+
+  def self.extract_token_col(file, line, token)
+    return nil unless token && !token.empty?
+
+    source_file = find_source_file(file)
+    return nil unless source_file && line && line.to_i > 0
+
+    lines = File.readlines(source_file)
+    idx = line.to_i - 1
+    return nil if idx < 0 || idx >= lines.size
+
+    pos = lines[idx].index(token)
+    pos ? pos + 1 : nil
+  rescue StandardError
     nil
   end
 

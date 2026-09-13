@@ -41,6 +41,9 @@ require_relative 'lib/latex_it/arxiv'
 
 module LatexCLI
   def self.run(argv = ARGV, prog_name = File.basename($PROGRAM_NAME))
+    $stdout.sync = true
+    $stderr.sync = true
+    at_exit { puts '' unless $stdout.closed? rescue nil }
     LaTeXUtils.initial_pwd = Dir.pwd
     return if early_personality_dispatch(argv, prog_name)
 

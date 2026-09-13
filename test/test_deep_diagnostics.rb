@@ -177,7 +177,6 @@ class TestDeepDiagnostics < Minitest::Test
       end
 
       assert_empty out
-      assert_includes err, 'ERROR: LaTeX Compilation Failed!'
       assert_includes err, 'LaTeX Error: File `missing.sty` not found.'
       assert_includes err, 'Errors: 1'
     end
@@ -194,13 +193,12 @@ class TestDeepDiagnostics < Minitest::Test
       LOG
 
       custom_io = StringIO.new
-      builder = LatexBuilder.new('main.tex', {})
+      builder = LatexBuilder.new('main.tex', verbose: true)
       assert_raises(SystemExit) do
         builder.report_errors(log_file, io: custom_io)
       end
 
       content = custom_io.string
-      assert_includes content, 'ERROR: LaTeX Compilation Failed!'
       assert_includes content, 'LaTeX Error: File `missing.sty` not found.'
       assert_includes content, "See #{log_file} for full error details."
       assert_includes content, 'Errors: 1'

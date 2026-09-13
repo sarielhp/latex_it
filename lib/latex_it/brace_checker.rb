@@ -315,6 +315,8 @@ class LaTeXBraceChecker
       file: @path,
       line: line_no,
       col: col_no,
+      root_line: line_no,
+      root_col: col_no,
       line_str: line_no.to_s,
       text: err_block.join("\n"),
       err_block: err_block,

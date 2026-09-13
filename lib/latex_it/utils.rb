@@ -492,4 +492,93 @@ module LaTeXUtils
     end
     wrapped.join("\n")
   end
+
+  ProcessResultStatus = Struct.new(:exitstatus, :success, :termsig, :signaled) do
+    def success?
+      self[:success] == true
+    end
+
+    def signaled?
+      self[:signaled] == true
+    end
+  end
+
+  def self.shell_quote(str)
+    s = str.to_s
+    return s if s.match?(%r{\A[a-zA-Z0-9_.\-\/=:]+\z})
+
+    "'#{s.gsub("'", "'\\\\''")}'"
+  end
+
+  def self.format_trace_command(env, cmd_args, cwd = Dir.pwd)
+    overrides = []
+    tracked = %w[TEXINPUTS BIBINPUTS max_print_line]
+    tracked.each do |k|
+      overrides << "#{k}=#{shell_quote(env[k])}" if env[k] && env[k] != ENV[k]
+    end
+    (env.keys - ENV.keys).each do |k|
+      next if tracked.include?(k)
+
+      overrides << "#{k}=#{shell_quote(env[k])}"
+    end
+    (env.keys & ENV.keys).each do |k|
+      next if tracked.include?(k) || env[k] == ENV[k]
+
+      overrides << "#{k}=#{shell_quote(env[k])}"
+    end
+
+    cmd_str = cmd_args.map { |arg| shell_quote(arg.to_s) }.join(' ')
+    prefix = overrides.empty? ? '' : "#{overrides.join(' ')} "
+    "(cd #{shell_quote(cwd)} && #{prefix}#{cmd_str})"
+  end
+
+  def self.trace_command(env, cmd_args, cwd = Dir.pwd)
+    puts Rainbow("[trace] #{format_trace_command(env, cmd_args, cwd)}").cyan
+  end
+
+  def self.trace_status(status)
+    code = status&.exitstatus || (status&.respond_to?(:termsig) && status&.termsig ? 128 + status.termsig : 1)
+    status_str = "[trace] => exit status #{code}"
+    puts(code.zero? ? Rainbow(status_str).green : Rainbow(status_str).yellow)
+  end
+end
+
+class LaTeXIndicator
+  @thr = nil
+  @t0 = 0
+
+  def self.start(label, enabled: true)
+    return unless enabled
+
+    stop(clear: false, enabled: true)
+    @t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    print "\r\e[2K#{Rainbow('  ▸ ').cyan}#{label}"
+    $stdout.flush
+
+    @thr = Thread.new do
+      loop do
+        sleep 1.0
+        elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @t0).round
+        print "\r\e[2K#{Rainbow('  ▸ ').cyan}#{label} [#{elapsed}s]"
+        $stdout.flush
+      end
+    rescue StandardError
+      nil
+    end
+  end
+
+  def self.stop(clear: false, enabled: true)
+    return unless enabled
+
+    if @thr
+      @thr.kill rescue nil
+      @thr.join(0.1) rescue nil
+      @thr = nil
+    end
+
+    return unless clear
+
+    print "\r\e[2K"
+    $stdout.flush
+  end
 end

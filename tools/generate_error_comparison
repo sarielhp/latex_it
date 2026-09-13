@@ -38,32 +38,28 @@ LEFT_LINES = [
   { text: "(junk/paper.aux))", color: "#565f89" },
   { text: "Runaway argument?", color: "#ff9e64", bold: true },
   { text: "{that forgot the closing brace. \\par And here... \\ETC.", color: "#c0caf5" },
-  { text: "! File ended while scanning use of \\textbf .", color: "#f7768e", bold: true },
+  { text: "! File ended while scanning use of \\textbf .", color: "#ff6b6b", bold: true },
   { text: "<inserted text>", color: "#565f89" },
   { text: "                \\par", color: "#565f89" },
-  { text: "<*> .../paper.tex", color: "#f7768e" },
-  { text: "! Emergency stop.", color: "#f7768e", bold: true },
+  { text: "<*> .../paper.tex", color: "#ff6b6b" },
+  { text: "! Emergency stop.", color: "#ff6b6b", bold: true },
   { text: "Transcript written on junk/paper.log.", color: "#565f89" },
   { text: "Latexmk: Errors, so I did not complete making targets", color: "#ff9e64" },
-  { text: "Collected error summary: 'xelatex' return code 1", color: "#f7768e" }
+  { text: "Collected error summary: 'xelatex' return code 1", color: "#ff6b6b" }
 ].freeze
 
 # Right panel lines (latex_it)
 RIGHT_LINES = [
   { text: "$ l paper.tex", color: "#7dcfff", bold: true },
-  { text: "      xelatex (1)", color: "#565f89" },
-  { text: "==========================================================", color: "#f7768e", bold: true },
-  { text: " ERROR: LaTeX Compilation Failed!", color: "#f7768e", bold: true },
-  { text: "==========================================================", color: "#f7768e", bold: true },
+  { text: "      xelatex (1): Latex compilation failed! (Status: 1)", color: "#ff6b6b", bold: true },
   { text: "", color: "#c0caf5" },
-  { text: "── paper.tex (2 errors) ──────────────────────────────────", color: "#bb9af7", bold: true },
-  { text: "6: ! Unclosed open brace '{' (opened on line 6, col 34)", color: "#f7768e", bold: true },
-  { text: "   inside environment 'document' (ended at line 9)", color: "#f7768e" },
+  { text: "── paper.tex (2 errors) ──────────────────────────────────", color: "#ff6b6b", bold: true },
+  { text: "6: ! Unclosed open brace '{' (opened on line 6, col 34)", color: "#ff6b6b", bold: true },
+  { text: "   inside environment 'document' (ended at line 9)", color: "#ff6b6b" },
   { text: "   l.6 Here is an unclosed macro \\textbf{that forgot...", color: "#c0caf5", bold: true },
   { text: " : Runaway argument?", color: "#ff9e64", bold: true },
   { text: "   {that forgot the closing brace. \\par And here...", color: "#c0caf5" },
   { text: "   ▸ Hint: Unclosed brace across paragraph; insert '}'", color: "#9ece6a", bold: true },
-  { text: "==========================================================", color: "#f7768e", bold: true },
   { text: "See junk/err_xelatex_1 for full error details.", color: "#565f89" },
   { text: "", color: "#c0caf5" },
   { text: "Errors: 2, Alerts: 0, Warnings: 0, Whatevers: 0", color: "#7aa2f7" }
@@ -90,7 +86,7 @@ def render_svg(left_subset, right_subset, show_left_pill: true, show_right_pill:
     <g transform="translate(24, 24)" filter="url(#shadow)">
       <rect width="528" height="530" rx="10" fill="#1a1b26" stroke="#2f334d" stroke-width="1.5"/>
       <path d="M 0,10 A 10,10 0 0,1 10,0 L 518,0 A 10,10 0 0,1 528,10 L 528,40 L 0,40 Z" fill="#16161e"/>
-      <circle cx="20" cy="20" r="6" fill="#f7768e"/>
+      <circle cx="20" cy="20" r="6" fill="#ff6b6b"/>
       <circle cx="38" cy="20" r="6" fill="#e0af68"/>
       <circle cx="56" cy="20" r="6" fill="#414868"/>
       <text x="264" y="25" fill="#787c99" text-anchor="middle" class="title">latexmk (Standard TeX Log)</text>
@@ -104,8 +100,8 @@ def render_svg(left_subset, right_subset, show_left_pill: true, show_right_pill:
 
       #{if show_left_pill
           %(<g transform="translate(20, 478)">
-            <rect width="488" height="34" rx="6" fill="#2d1c24" stroke="#f7768e" stroke-width="1.2"/>
-            <text x="244" y="21" fill="#f7768e" text-anchor="middle" class="badge">❌ 50+ lines of noise — line of unclosed brace is unknown!</text>
+            <rect width="488" height="34" rx="6" fill="#2d1c24" stroke="#ff6b6b" stroke-width="1.2"/>
+            <text x="244" y="21" fill="#ff6b6b" text-anchor="middle" class="badge">❌ 50+ lines of noise — line of unclosed brace is unknown!</text>
           </g>)
         end}
     </g>
@@ -114,7 +110,7 @@ def render_svg(left_subset, right_subset, show_left_pill: true, show_right_pill:
     <g transform="translate(588, 24)" filter="url(#shadow)">
       <rect width="528" height="530" rx="10" fill="#1a1b26" stroke="#384a68" stroke-width="1.5"/>
       <path d="M 0,10 A 10,10 0 0,1 10,0 L 518,0 A 10,10 0 0,1 528,10 L 528,40 L 0,40 Z" fill="#16161e"/>
-      <circle cx="20" cy="20" r="6" fill="#f7768e"/>
+      <circle cx="20" cy="20" r="6" fill="#ff6b6b"/>
       <circle cx="38" cy="20" r="6" fill="#e0af68"/>
       <circle cx="56" cy="20" r="6" fill="#9ece6a"/>
       <text x="264" y="25" fill="#c0caf5" text-anchor="middle" class="title">latex_it (l)</text>

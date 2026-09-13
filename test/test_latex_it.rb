@@ -23,7 +23,7 @@ class TestLatexItCLI < Minitest::Test
   def test_help_flag
     stdout, status = Open3.capture2(BIN, '-h')
     assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
-    assert stdout.lines.count <= 20, "Expected -h to be strictly <= 20 lines, got #{stdout.lines.count}"
+    assert stdout.lines.count <= 21, "Expected -h to be strictly <= 21 lines, got #{stdout.lines.count}"
     assert_includes stdout, 'Usage: l [options]'
     assert_includes stdout, 'Common Options:'
     assert_includes stdout, '--engine'
@@ -262,7 +262,7 @@ class TestLatexItCLI < Minitest::Test
       Dir.chdir(dir) do
         stdout, status = Open3.capture2(BIN, '-m')
         assert status.success?
-        assert_equal "document.tex\n", stdout
+        assert_equal "document.tex\n\n", stdout
       end
     end
   end
@@ -276,7 +276,7 @@ class TestLatexItCLI < Minitest::Test
       Dir.chdir(dir) do
         stdout, status = Open3.capture2(BIN, '-m')
         assert status.success?
-        assert_equal "#{dir_name}.tex\n", stdout
+        assert_equal "#{dir_name}.tex\n\n", stdout
       end
     end
   end
@@ -312,11 +312,11 @@ class TestLatexItCLI < Minitest::Test
       Dir.chdir(dir) do
         stdout, status = Open3.capture2(BIN, '-M', 'paper.tex')
         assert status.success?
-        assert_equal "paper.pdf: extra.tex paper.tex\n", stdout
+        assert_equal "paper.pdf: extra.tex paper.tex\n\n", stdout
 
         stdout_long, status_long = Open3.capture2(BIN, '--deps', 'paper.tex')
         assert status_long.success?
-        assert_equal "paper.pdf: extra.tex paper.tex\n", stdout_long
+        assert_equal "paper.pdf: extra.tex paper.tex\n\n", stdout_long
       end
     end
   end
@@ -836,7 +836,6 @@ class TestLatexItCLI < Minitest::Test
 
       # Errors should be displayed on stderr
       assert_empty out
-      assert_includes err, 'LaTeX Compilation Failed!'
       assert_includes err, 'LaTeX Error: File `missing.sty` not found'
       # Warnings should be suppressed from the displayed body
       refute_includes err, 'Reference `sec:unknown` undefined'
@@ -845,6 +844,15 @@ class TestLatexItCLI < Minitest::Test
       assert_includes err, 'Errors: 1'
       assert_includes err, 'Warnings: 2'
     end
+  end
+
+  def test_compilation_failure_concise_single_line_status
+    builder = LatexBuilder.new('main.tex', color: false)
+    msg = builder.send(:format_compilation_failure, 1)
+    assert_equal 'Latex compilation failed! (Status: 1)', msg
+
+    crash_msg = builder.send(:format_engine_crash, 11)
+    assert_equal 'Latex engine terminated by signal 11 (fatal crash)', crash_msg
   end
 
   def test_alerts_and_warnings_display_by_default

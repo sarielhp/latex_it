@@ -21,9 +21,10 @@ module GalleryGenerator
   GALLERY_MD = File.join(DOCS_DIR, 'gallery.md')
 
   COLOR_MAP = {
-    '30' => '#565f89', '31' => '#f7768e', '32' => '#9ece6a',
+    '30' => '#565f89', '31' => '#ff6b6b', '32' => '#9ece6a',
     '33' => '#e0af68', '34' => '#7aa2f7', '35' => '#bb9af7',
-    '36' => '#7dcfff', '37' => '#c0caf5', '90' => '#565f89'
+    '36' => '#7dcfff', '37' => '#c0caf5', '90' => '#565f89',
+    '91' => '#ff6b6b'
   }.freeze
 
   SCENARIOS = [
@@ -218,7 +219,7 @@ module GalleryGenerator
     elsif l =~ /\A(?:<<< DELETED \d+ LINES? >>>|<deleted \d+ lines?>)/i
       return [{ text: l, color: '#e0af68', bold: true, font_size: '15.5px' }]
     elsif l =~ /\A(?:!|Collected error summary)/i
-      color = '#f7768e'
+      color = '#ff6b6b'
       bold = true
     elsif l =~ /\A(?:Latexmk:|Rule |Category |Rc files|Running |Changed files)/
       color = '#565f89'
@@ -267,7 +268,7 @@ module GalleryGenerator
     title_color = is_left ? '#787c99' : '#c0caf5'
     dot_color = is_left ? '#414868' : '#9ece6a'
     pill_bg = is_left ? '#2d1c24' : '#1c2d24'
-    pill_fg = is_left ? '#f7768e' : '#9ece6a'
+    pill_fg = is_left ? '#ff6b6b' : '#9ece6a'
 
     rendered_lines = lines.map.with_index do |line_toks, i|
       spans = line_toks.map do |t|
@@ -284,7 +285,7 @@ module GalleryGenerator
       <g transform="translate(#{x_offset}, 20)" filter="url(#shadow)">
         <rect width="#{panel_w}" height="#{panel_h}" rx="10" fill="#1a1b26" stroke="#{stroke_color}" stroke-width="1.5"/>
         <path d="M 0,10 A 10,10 0 0,1 10,0 L #{panel_w - 10},0 A 10,10 0 0,1 #{panel_w},10 L #{panel_w},40 L 0,40 Z" fill="#16161e"/>
-        <circle cx="20" cy="20" r="6" fill="#f7768e"/>
+        <circle cx="20" cy="20" r="6" fill="#ff6b6b"/>
         <circle cx="38" cy="20" r="6" fill="#e0af68"/>
         <circle cx="56" cy="20" r="6" fill="#{dot_color}"/>
         <text x="#{panel_w / 2}" y="25" fill="#{title_color}" text-anchor="middle" class="title">#{escape_xml(title)}</text>

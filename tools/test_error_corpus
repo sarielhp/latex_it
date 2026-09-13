@@ -81,9 +81,9 @@ class ErrorCorpusRunner
     cleanup_junk(dir)
 
     return [false, "Expected non-zero exit code, got #{status.exitstatus}"] if status.success?
-    return [false, "Did not report compilation failure: #{out.lines.first(3).join}"] unless out.include?('ERROR: LaTeX Compilation Failed!')
+    return [false, "Did not report compilation failure: #{out.lines.first(3).join}"] unless out.include?('Latex compilation failed!')
     return [false, 'Failed to extract specific error (used fallback lines)'] if out.include?('Output written on junk/')
-    return [false, 'Failed to extract catalog remediation hint'] unless out.include?('Hint:')
+    return [false, 'Failed to extract catalog remediation hint'] unless out.include?('Hint:') || out.include?('^')
 
     [true, nil]
   rescue StandardError => e

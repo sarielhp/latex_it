@@ -33,15 +33,7 @@ class LatexBuilder
 
   DEFAULT_PASS_TIMEOUT = 180
 
-  ProcessResultStatus = Struct.new(:exitstatus, :success, :termsig, :signaled) do
-    def success?
-      self[:success] == true
-    end
-
-    def signaled?
-      self[:signaled] == true
-    end
-  end
+  ProcessResultStatus = LaTeXUtils::ProcessResultStatus
 
   def initialize(target, options)
     @options = options
@@ -57,9 +49,15 @@ class LatexBuilder
     @explained_categories = {}
   end
 
+  def interactive_tty?
+    $stdout.tty? && !@options[:emacs] && !@options[:trace] && !@options[:score]
+  end
+
   def run!
     build_dir = File.expand_path(@bdir)
-    puts "      cd #{build_dir}" if !@options[:score] && build_dir != File.expand_path('.')
+    if !@options[:score] && build_dir != File.expand_path('.') && (!interactive_tty? || @options[:verbose])
+      puts "      cd #{build_dir}"
+    end
     Dir.chdir(build_dir) { run_in_current_directory! }
   end
 
@@ -113,10 +111,15 @@ class LatexBuilder
 
     unless run_convergence_loop
       sync_bbl_to_root if @options[:trace]
+      LaTeXIndicator.stop(clear: true, enabled: interactive_tty?)
       return false
     end
 
-    puts ''
+    if interactive_tty?
+      LaTeXIndicator.stop(clear: true)
+    else
+      puts ''
+    end
     finalize_build_outputs(total_t0)
     true
   end
@@ -178,10 +181,30 @@ class LatexBuilder
     end
   end
 
+  def log_pass_start(engine, pass, first: false)
+    if interactive_tty?
+      LaTeXIndicator.start("Building #{@bfilename}.pdf (#{engine} pass #{pass})...")
+    else
+      prefix = first ? '      ' : ', '
+      print "#{prefix}#{Rainbow(engine).bright} (#{pass})"
+      $stdout.flush
+    end
+  end
+
+  def log_bib_start(tool, first: false)
+    if interactive_tty?
+      LaTeXIndicator.start("Running #{tool} on #{@bfilename}...")
+    else
+      prefix = first ? '      ' : ', '
+      print "#{prefix}#{Rainbow(tool).bright}"
+      $stdout.flush
+    end
+  end
+
   def run_convergence_loop
     @cacheable_build = true
     if @options[:single_pass]
-      print "      #{Rainbow(@engine_name).bright}"
+      log_pass_start(@engine_name, 1, first: true)
       @cacheable_build = false
       return run_latex_pass('_1')
     end
@@ -191,7 +214,7 @@ class LatexBuilder
 
     bib_tool = detect_bib_tool
     if bib_tool && bib_files_newer_than_bbl?
-      print "      #{Rainbow(bib_tool).bright}"
+      log_bib_start(bib_tool, first: true)
       return false unless run_bib_pass(bib_tool)
 
       bib_ran = true
@@ -205,8 +228,7 @@ class LatexBuilder
     aux_before = compute_aux_hash
     loop do
       pass += 1
-      prefix = (pass == 1 && !bib_ran) ? '      ' : ', '
-      print "#{prefix}#{Rainbow(@engine_name).bright} (#{pass})"
+      log_pass_start(@engine_name, pass, first: pass == 1 && !bib_ran)
 
       return false unless run_latex_pass("_#{pass}")
 
@@ -220,7 +242,7 @@ class LatexBuilder
 
       bib_tool ||= detect_bib_tool(curr_aux_hash)
       if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux_hash)
-        print ", #{Rainbow(bib_tool).bright}"
+        log_bib_start(bib_tool, first: false)
         return false unless run_bib_pass(bib_tool)
 
         bib_ran = true
@@ -571,42 +593,19 @@ class LatexBuilder
   end
 
   def shell_quote(str)
-    s = str.to_s
-    return s if s.match?(%r{\A[a-zA-Z0-9_.\-\/=:]+\z})
-
-    "'#{s.gsub("'", "'\\\\''")}'"
+    LaTeXUtils.shell_quote(str)
   end
 
   def format_trace_command(env, cmd_args, cwd = Dir.pwd)
-    overrides = []
-    tracked = %w[TEXINPUTS BIBINPUTS max_print_line]
-    tracked.each do |k|
-      overrides << "#{k}=#{shell_quote(env[k])}" if env[k] && env[k] != ENV[k]
-    end
-    (env.keys - ENV.keys).each do |k|
-      next if tracked.include?(k)
-
-      overrides << "#{k}=#{shell_quote(env[k])}"
-    end
-    (env.keys & ENV.keys).each do |k|
-      next if tracked.include?(k) || env[k] == ENV[k]
-
-      overrides << "#{k}=#{shell_quote(env[k])}"
-    end
-
-    cmd_str = cmd_args.map { |arg| shell_quote(arg.to_s) }.join(' ')
-    prefix = overrides.empty? ? '' : "#{overrides.join(' ')} "
-    "(cd #{shell_quote(cwd)} && #{prefix}#{cmd_str})"
+    LaTeXUtils.format_trace_command(env, cmd_args, cwd)
   end
 
   def trace_command(env, cmd_args, cwd = Dir.pwd)
-    puts Rainbow("[trace] #{format_trace_command(env, cmd_args, cwd)}").cyan
+    LaTeXUtils.trace_command(env, cmd_args, cwd)
   end
 
   def trace_status(status)
-    code = status&.exitstatus || (status&.respond_to?(:termsig) && status&.termsig ? 128 + status.termsig : 1)
-    status_str = "[trace] => exit status #{code}"
-    puts(code.zero? ? Rainbow(status_str).green : Rainbow(status_str).yellow)
+    LaTeXUtils.trace_status(status)
   end
 
   def capture_pass_output(cmd_args)
@@ -660,12 +659,16 @@ class LatexBuilder
 
     stdout_stderr, status = capture_pass_output(cmd_args)
     st = status.exitstatus || (status.respond_to?(:termsig) && status.termsig ? 128 + status.termsig : 1)
-
     File.open(lgx, 'a') { |f| f.write(stdout_stderr) }
     if status.respond_to?(:signaled?) && status.signaled?
+      LaTeXIndicator.stop(clear: true, enabled: interactive_tty?)
       warn "\nLaTeX engine terminated by signal #{status.termsig} (fatal crash).\n"
     elsif st > 0
-      puts "\nLaTeX process exited with status: #{st}\n"
+      LaTeXIndicator.stop(clear: true, enabled: interactive_tty?)
+      unless interactive_tty?
+        puts ": #{format_compilation_failure(st)}"
+        $stdout.flush
+      end
     end
 
     handle_pass_errors(st, lgx)
@@ -715,6 +718,18 @@ class LatexBuilder
     else
       report_errors(lgx)
     end
+  end
+
+  def format_compilation_failure(status)
+    msg = 'Latex compilation failed!'
+    colored_msg = (@options && @options[:color] == false) ? msg : Rainbow(msg).red.bright
+    "#{colored_msg} (Status: #{status})"
+  end
+
+  def format_engine_crash(signal)
+    msg = 'Latex engine terminated by signal'
+    colored_msg = (@options && @options[:color] == false) ? msg : Rainbow(msg).red.bright
+    "#{colored_msg} #{signal} (fatal crash)"
   end
 
   def detect_bib_tool(aux_contents = nil)

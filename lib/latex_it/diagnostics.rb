@@ -147,31 +147,202 @@ module LaTeXDiagnostics
     str.gsub('[latex_it]', tag)
   end
 
-  def format_error_block(err_block, line_no, width: 0, catalog: nil, repeat_count: 1)
-    if @options[:emacs]
-      lines = err_block.dup
-      if (idx = lines.rindex { |l| l =~ /^l\.\d+/ })
-        lines.insert(idx + 1, ' ')
-      end
-      return lines.join("\n")
-    end
+  def format_error_block(err_block, line_no, width: 0, catalog: nil, repeat_count: 1, item: nil)
+    return format_emacs_error_block(err_block) if @options[:emacs]
 
-    str = line_no.to_s
     indent = ' ' * (width.positive? ? width + 2 : 2)
+    file_path = item&.[](:file) || @filename
+    root_line = item&.[](:root_line) || catalog&.[](:root_line)
+    root_col = item&.[](:col) || item&.[](:root_col) || catalog&.[](:root_col)
 
-    lines = err_block.map.with_index do |l, idx|
-      colored = highlight_line_numbers(l, :red, bright: true)
-      colored = highlight_latex_it_tag(colored, :red)
-      if idx == 0
-        format_first_error_line(l, colored, line_no, str, width)
-      else
-        "#{indent}#{colored}"
-      end
+    header = format_error_header(err_block.first, file_path, line_no, root_line, root_col, width)
+    lines = [header]
+
+    active_line = (root_line && root_line.positive?) ? root_line : line_no
+    source_frame = format_source_frame(file_path, active_line, root_col, item, catalog)
+    if source_frame
+      lines.concat(source_frame)
+    else
+      append_error_hint(lines, catalog, indent)
     end
 
     append_repeat_note(lines, repeat_count, line_no, indent) if repeat_count > 1
-    append_error_hint(lines, catalog, indent)
+
+    if @options[:verbose]
+      append_verbose_error_context(lines, err_block, indent)
+    end
+
     lines.join("\n")
+  end
+
+  def format_emacs_error_block(err_block)
+    lines = err_block.dup
+    if (idx = lines.rindex { |l| l =~ /^l\.\d+/ })
+      lines.insert(idx + 1, ' ')
+    end
+    lines.join("\n")
+  end
+
+  def format_error_header(first_raw_line, file_path, line_no, root_line, root_col, width)
+    first_clean = first_raw_line.to_s.strip
+    msg = extract_clean_error_message(first_clean)
+    active_line = (root_line && root_line.positive?) ? root_line : line_no
+    reported_line = (root_line && root_line.positive? && root_line != line_no) ? line_no : nil
+
+    disp_file = format_display_path(file_path)
+
+    header_text = if active_line && active_line.positive?
+                    col_str = root_col ? ":#{root_col}" : ''
+                    rep_str = reported_line ? " (reported on line #{reported_line})" : ''
+                    "#{disp_file}:#{active_line}#{col_str}: #{msg}#{rep_str}"
+                  else
+                    "#{disp_file}: #{msg}"
+                  end
+
+    colored = highlight_line_numbers(header_text, :red, bright: true)
+    highlight_latex_it_tag(colored, :red)
+  end
+
+  def extract_clean_error_message(line)
+    return Regexp.last_match(1).strip if line =~ /^!\s*\[latex_it\]\s*(.*)/
+    return Regexp.last_match(1).strip if line =~ /^.+?:\d+:\s*(.*)/
+    return Regexp.last_match(1).strip if line =~ /^!\s*(.*)/
+
+    line
+  end
+
+  def read_source_line(file_path, line_no)
+    real_file = LaTeXErrorCatalog.find_source_file(file_path) || file_path
+    return nil unless real_file && File.file?(real_file)
+
+    lines = File.readlines(real_file)
+    idx = line_no - 1
+    return nil if idx < 0 || idx >= lines.size
+
+    lines[idx].to_s.chomp
+  rescue StandardError
+    nil
+  end
+
+  def locate_token_column(source_line, col_no, token, catalog)
+    cat_id = catalog&.[](:id)
+    clean_token = (token && !token.to_s.match?(/\s/)) ? token.to_s : nil
+
+    if col_no && col_no.positive?
+      len = if %i[missing_dollar misplaced_alignment_tab extra_closing_brace].include?(cat_id)
+              1
+            elsif clean_token
+              clean_token.length
+            else
+              1
+            end
+      [col_no - 1, len]
+    elsif clean_token && (idx = source_line.index(clean_token))
+      [idx, clean_token.length]
+    elsif cat_id == :misplaced_alignment_tab && (idx = source_line.index(/(?<!\\)&/))
+      [idx, 1]
+    elsif cat_id == :missing_dollar && (idx = source_line.index(/(?<!\\)\$/))
+      [idx, 1]
+    else
+      [nil, 1]
+    end
+  end
+
+  def window_source_line(source_line, col_pos)
+    return [source_line, col_pos] if source_line.length <= 70
+
+    if col_pos
+      start_char = [col_pos - 25, 0].max
+      prefix = start_char.positive? ? '...' : ''
+      sub = source_line[start_char, 65] || ''
+      suffix = (start_char + 65 < source_line.length) ? '...' : ''
+      adj_col = col_pos - start_char + prefix.length
+      ["#{prefix}#{sub}#{suffix}", adj_col]
+    else
+      ["#{source_line[0, 67]}...", nil]
+    end
+  end
+
+  def render_source_code_line(line_no, display_line)
+    gutter_num = line_no.to_s.rjust(3)
+    num_colored = (@options && @options[:color] == false) ? gutter_num : Rainbow(gutter_num).cyan
+    gutter_bar = (@options && @options[:color] == false) ? '|' : Rainbow('|').cyan
+    "  #{num_colored} #{gutter_bar} #{display_line}"
+  end
+
+  def render_gutter_hint(gutter_num_len, catalog)
+    return nil unless catalog && catalog[:hint]
+
+    hint_text = "Hint: #{catalog[:hint]}"
+    hint_colored = (@options && @options[:color] == false) ? hint_text : Rainbow(hint_text).cyan
+    arrow = (@options && @options[:color] == false) ? '▸' : Rainbow('▸').cyan.bright
+    "  #{' ' * (gutter_num_len + 2)}#{arrow} #{hint_colored}"
+  end
+
+  def format_source_frame(file_path, line_no, col_no, item, catalog)
+    return nil unless line_no && line_no.positive?
+
+    source_line = read_source_line(file_path, line_no)
+    return nil unless source_line && !source_line.strip.empty?
+
+    token = item&.[](:token) || catalog&.[](:token)
+    col_pos, token_len = locate_token_column(source_line, col_no, token, catalog)
+    display_line, adjusted_col = window_source_line(source_line, col_pos)
+
+    lines = [render_source_code_line(line_no, display_line)]
+    g_len = [line_no.to_s.length, 3].max
+
+    if adjusted_col
+      pointer_line = render_pointer_line(g_len, adjusted_col, token_len, catalog, root_col: col_no)
+      lines << pointer_line if pointer_line
+    elsif (hint_line = render_gutter_hint(g_len, catalog))
+      lines << hint_line
+    end
+    lines
+  end
+
+  def render_pointer_line(gutter_num_len, col_pos, token_len, catalog, root_col: nil)
+    caret_len = [token_len || 1, 1].max
+    caret = '^' * caret_len
+    caret_colored = (@options && @options[:color] == false) ? caret : Rainbow(caret).red.bright
+
+    hint_msg = inline_hint_text(catalog, root_col)
+    hint_colored = if hint_msg
+                     (@options && @options[:color] == false) ? " #{hint_msg}" : Rainbow(" #{hint_msg}").cyan
+                   else
+                     ''
+                   end
+
+    indent = ' ' * 2
+    gutter_pad = ' ' * gutter_num_len
+    gutter_bar = (@options && @options[:color] == false) ? '|' : Rainbow('|').cyan
+    col_pad = ' ' * [col_pos, 0].max
+
+    "#{indent}#{gutter_pad} #{gutter_bar} #{col_pad}#{caret_colored}#{hint_colored}"
+  end
+
+  def inline_hint_text(catalog, root_col)
+    return nil unless catalog
+
+    case catalog[:id]
+    when :missing_dollar
+      root_col ? "math mode opened here; insert closing '$'" : "insert closing '$'"
+    else
+      catalog[:hint]
+    end
+  end
+
+  def append_verbose_error_context(lines, err_block, indent)
+    raw_lines = err_block[1..] || []
+    return if raw_lines.empty?
+
+    tag = (@options && @options[:color] == false) ? '[TeX context]' : Rainbow('[TeX context]').yellow.faint
+    lines << "#{indent}#{tag}"
+    raw_lines.each do |l|
+      next if l.strip.empty?
+
+      lines << "#{indent}  #{highlight_line_numbers(l, :red)}"
+    end
   end
 
   def append_repeat_note(lines, repeat_count, line_no, indent)
@@ -190,19 +361,8 @@ module LaTeXDiagnostics
     lines << "#{indent}#{arrow} #{hint_colored}"
   end
 
-  def format_first_error_line(l, colored, line_no, str, width)
-    if line_no.positive? && !l.match?(/:#{line_no}:|^\s*#{line_no}:/)
-      padding = ' ' * [width - str.length, 0].max
-      "#{padding}#{colorize_line_num(str, :red)}#{Rainbow(': ').red.bright}#{colored}"
-    elsif width.positive? && !l.match?(/:#{line_no}:|^\s*#{line_no}:/)
-      "#{' ' * width}#{Rainbow(': ').red.bright}#{colored}"
-    else
-      colored
-    end
-  end
-
   def render_diagnostic_item(item, width: 0)
-    return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog], repeat_count: item[:repeat_count] || 1) if item[:err_block]
+    return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog], repeat_count: item[:repeat_count] || 1, item: item) if item[:err_block]
 
     base_color = item[:base_color] || :yellow
     out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width)
@@ -471,16 +631,21 @@ module LaTeXDiagnostics
     line_no = extract_error_line(err_text)
     file_name = err_file || current_log_file(file_stack)
     classification = LaTeXErrorCatalog.classify(err_text, err_block, file: file_name, line: line_no)
-    formatted = format_error_block(err_block, line_no, catalog: classification)
     cat_id = classification ? classification[:id] : :generic
-    token = extract_argument_token(err_block)
+    token = extract_argument_token(err_block) || classification&.[](:token)
+    token = nil if token.to_s.match?(/\s/)
+    root_l = classification ? classification[:root_line] : nil
+    root_c = classification ? classification[:root_col] : nil
+
     item = {
       file: file_name, line: line_no, line_str: (line_no > 0 ? line_no.to_s : ''),
-      text: err_text, err_block: err_block, base_color: :red, formatted: formatted, index: next_idx,
+      root_line: root_l, root_col: root_c,
+      text: err_text, err_block: err_block, base_color: :red, index: next_idx,
       catalog: classification, catalog_id: cat_id,
       source: :compiler, synthetic: false,
       bib_entry: bib_entry, token: token
     }
+    item[:formatted] = format_error_block(err_block, line_no, catalog: classification, item: item)
     [item, next_idx]
   end
 
@@ -532,16 +697,13 @@ module LaTeXDiagnostics
     lines << (field_text ? "l.#{line_no} #{field_text}" : "l.#{line_no}")
 
     hint = token ? "Offending token '#{token}' found on this line." : "Entry typeset here when compilation failed."
-    formatted = format_error_block(lines, line_no, catalog: { hint: hint })
-
-    {
+    item = {
       file: file_name,
       line: line_no,
       line_str: line_no.to_s,
       text: lines.join("\n"),
       err_block: lines,
       base_color: :red,
-      formatted: formatted,
       index: (parent_err[:index] || 0) + 1,
       catalog: { hint: hint },
       source: :latex_it,
@@ -550,6 +712,8 @@ module LaTeXDiagnostics
       citekey: citekey,
       token: token
     }
+    item[:formatted] = format_error_block(lines, line_no, catalog: { hint: hint }, item: item)
+    item
   end
 
   def decluster_errors(errors)
@@ -568,7 +732,8 @@ module LaTeXDiagnostics
         item[:repeat_count] = group.size
         item[:formatted] = format_error_block(
           first[:err_block], first[:line] || 0,
-          catalog: first[:catalog], repeat_count: group.size
+          catalog: first[:catalog], repeat_count: group.size,
+          item: first
         )
         if @options[:emacs]
           item[:err_block] = first[:err_block] + ["  (Repeated #{group.size} times on line #{first[:line]})"]
@@ -1109,10 +1274,6 @@ module LaTeXDiagnostics
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
 
-    io.puts Rainbow("\n===============================================================").red.bright
-    io.puts Rainbow(' ERROR: LaTeX Compilation Failed!').red.bright
-    io.puts Rainbow('===============================================================').red.bright
-
     compiler_errors = extract_errors(content)
     brace_errors = if compiler_errors.empty? || compiler_indicates_brace_error?(content)
                      check_source_braces
@@ -1130,8 +1291,9 @@ module LaTeXDiagnostics
       render_non_error_tiers(alert_items, regular_warns, whatever_items, io: io)
     end
 
-    io.puts Rainbow('===============================================================').red.bright
-    io.puts "See #{loga} for full error details."
+    if @options[:verbose] || fallback.any? || errors.empty?
+      io.puts "See #{loga} for full error details."
+    end
     report_error_summary(content, raw, brace_errors, errors.size, io: io)
     exit 1
   end

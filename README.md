@@ -68,7 +68,8 @@ Common everyday commands:
 lw          # Fast incremental rebuild (reuses cached state)
 l -1        # Force a rebuild even if files haven't changed
 l -C        # Clean auxiliary and temporary files
-l -e        # Show plain-English explanations for errors and warnings
+l -x        # Show plain-English explanations for errors and warnings
+l -B        # Extract cited references into local .bib file
 ```
 
 ---
@@ -105,6 +106,7 @@ l -e        # Show plain-English explanations for errors and warnings
 | `-m`, `--main` | Print the detected main LaTeX file and exit. |
 | `-e`, `--engine ENGINE` | Choose compiler: `x` (`xelatex`, default), `l` (`lualatex`), or `p` (`pdflatex`). |
 | `-z`, `--zip` | Create a self-contained portable zip archive of the paper. |
+| `-B`, `--bib-extract` | Extract cited bibliography entries into local `.bib` file (default: `<doc>.bib`). |
 | `--arxiv` | Prepare a sanitized, flattened zip package for arXiv submission. |
 | `--init-config` | Generate a local `.l.jsonc` configuration template. |
 | `-h`, `--help` | Show condensed help summary of everyday options. |

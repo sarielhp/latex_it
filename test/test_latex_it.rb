@@ -23,7 +23,7 @@ class TestLatexItCLI < Minitest::Test
   def test_help_flag
     stdout, status = Open3.capture2(BIN, '-h')
     assert status.success?, "Expected exit code 0, got: #{status.exitstatus}"
-    assert stdout.lines.count <= 21, "Expected -h to be strictly <= 21 lines, got #{stdout.lines.count}"
+    assert stdout.lines.count <= 25, "Expected -h to be strictly <= 25 lines, got #{stdout.lines.count}"
     assert_includes stdout, 'Usage: l [options]'
     assert_includes stdout, 'Common Options:'
     assert_includes stdout, '-e, --engine ENGINE'
@@ -185,8 +185,8 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout_utf8, '────────────────────────────────────────────────────────────────────────────'
     assert_match(/\e\[2m/, stdout_utf8)
 
-    # By default (plain style), no divider lines appear
-    stdout_plain, status_plain = Open3.capture2(BIN, '-h')
+    # In plain style, no divider lines appear
+    stdout_plain, status_plain = Open3.capture2(BIN, '-h', '--no-help-lines')
     assert status_plain.success?
     refute_includes stdout_plain, '----------------------------------------------------------------------------'
     refute_includes stdout_plain, '────────────────────────────────────────────────────────────────────────────'

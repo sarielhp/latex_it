@@ -39,6 +39,7 @@ require_relative 'lib/latex_it/diagnostics'
 require_relative 'lib/latex_it/builder'
 require_relative 'lib/latex_it/packager'
 require_relative 'lib/latex_it/arxiv'
+require_relative 'lib/latex_it/bib_extractor'
 
 module LatexCLI
   def self.run(argv = ARGV, prog_name = File.basename($PROGRAM_NAME))
@@ -208,7 +209,9 @@ module LatexCLI
       exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
       bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
       auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
-      junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS
+      junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
+      bib_extract: false,
+      bib_extract_name: nil
     }.merge(build_zip_options(cfg, extra_cli_files))
      .merge(build_arxiv_options(cfg))
   end
@@ -240,6 +243,7 @@ module LatexCLI
 
   def self.normalize_argv!(argv)
     argv.delete('--fast')
+    normalize_bib_extract_args!(argv)
     argv.map! do |arg|
       case arg
       when '-Werror' then '--werror'
@@ -249,7 +253,30 @@ module LatexCLI
       when '--lua', '-lualatex' then '--engine=lualatex'
       when '-help' then '--help'
       when '-version' then '--version'
+      when '--extract-bib' then '--bib-extract'
       else arg
+      end
+    end
+  end
+
+  def self.normalize_bib_extract_args!(argv)
+    i = 0
+    while i < argv.size
+      arg = argv[i]
+      if arg =~ /^--(?:bib-extract|extract-bib)=(.+)$/
+        val = Regexp.last_match(1)
+        argv[i] = '--bib-extract'
+        argv.insert(i + 1, '--bib-name', val)
+        i += 2
+      elsif (arg == '-B' || arg == '--bib-extract' || arg == '--extract-bib') &&
+            i + 1 < argv.size && argv[i + 1].end_with?('.bib')
+        val = argv[i + 1]
+        argv[i] = '--bib-extract'
+        argv[i + 1] = '--bib-name'
+        argv.insert(i + 2, val)
+        i += 3
+      else
+        i += 1
       end
     end
   end
@@ -318,10 +345,15 @@ module LatexCLI
 
   def self.add_compilation_options_bundle(opts, options)
     opts.separator ''
-    opts.separator '  Paper Bundling & Portability:'
+    opts.separator '  Paper Bundling, Bibliography & Portability:'
     opts.on('-z', '--zip', 'Create a self-contained portable zip archive of paper, styles, and figures') { options[:zip] = true }
     opts.on('-t', '--verify', 'Verify self-contained portability by testing compilation in /tmp sandbox') { options[:verify] = true; options[:zip] = true }
     opts.on('--zip-name NAME', 'Specify custom output filename for generated zip archive') { |v| options[:zip] = true; options[:zip_name] = v }
+    opts.on('-B', '--bib-extract', 'Extract cited bibliography entries into local .bib file (default: <doc>.bib)') { options[:bib_extract] = true }
+    opts.on('--bib-name NAME', 'Specify custom output filename for extracted bibliography') do |v|
+      options[:bib_extract] = true
+      options[:bib_extract_name] = v
+    end
     opts.on('--[no-]inject-styles', 'Enable or disable isolating harvested styles into styles/ and injecting \input@path') { |v| options[:inject_styles] = v }
   end
 
@@ -375,6 +407,7 @@ module LatexCLI
       '  -u, --single-pass    Single pass only (fast draft, skip bib/extra passes)',
       '  -c, --clean          Clean temporary build files (junk/, .aux, .bbl)',
       '  -x, --explain        Display plain-English explanations for diagnostics',
+      '  -B, --bib-extract    Extract cited bib entries into local .bib file',
       '  -e, --engine ENGINE  Compiler engine: x (xelatex), l (lualatex), p (pdflatex)',
       '',
       'Help & Discovery:',
@@ -602,10 +635,17 @@ module LatexCLI
         process_meta_target(target, options)
       elsif options[:arxiv]
         process_arxiv_target(target, options)
+      elsif options[:bib_extract]
+        process_bib_extract_target(target, options)
       else
         process_standard_target(target, options)
       end
     end
+  end
+
+  def self.process_bib_extract_target(target, options)
+    builder = LatexBuilder.new(target, options)
+    exit 1 unless LaTeXBibExtractor.extract!(builder, options[:bib_extract_name])
   end
 
   # Every other target handler reaches a Dir.chdir into the document's

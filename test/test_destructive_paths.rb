@@ -102,6 +102,27 @@ class TestDestructivePaths < Minitest::Test
     end
   end
 
+  def test_clean_directory_prints_relative_path_to_pwd
+    Dir.mktmpdir('latex_it_clean_rel_test') do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'notes', '40_vc'))
+      out, status = Open3.capture2e(BIN, '-C', 'notes/40_vc', chdir: dir)
+      assert status.success?
+      assert_includes out, 'Cleaning LaTeX auxiliary files in notes/40_vc...'
+      refute_includes out, dir
+
+      out_curr, status_curr = Open3.capture2e(BIN, '-C', '.', chdir: File.join(dir, 'notes', '40_vc'))
+      assert status_curr.success?
+      assert_includes out_curr, 'Cleaning LaTeX auxiliary files in ....'
+      refute_includes out_curr, dir
+
+      File.write(File.join(dir, 'notes', '40_vc', 'paper.tex'), "\\documentclass{article}\\begin{document}Hi\\end{document}\n")
+      out_build, status_build = Open3.capture2e(BIN, '-c', '-1', 'notes/40_vc/paper.tex', chdir: dir)
+      assert status_build.success?
+      assert_includes out_build, 'Cleaning LaTeX auxiliary files in notes/40_vc...'
+      refute_includes out_build.lines.grep(/Cleaning LaTeX/).join, dir
+    end
+  end
+
   def test_help_wins_over_clean_only
     Dir.mktmpdir('latex_it_help_test') do |dir|
       File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n")

@@ -20,6 +20,7 @@ require 'fileutils'
 require 'json'
 require 'open3'
 require 'optparse'
+require 'pathname'
 require 'shellwords'
 require 'tmpdir'
 
@@ -40,6 +41,7 @@ require_relative 'lib/latex_it/arxiv'
 
 module LatexCLI
   def self.run(argv = ARGV, prog_name = File.basename($PROGRAM_NAME))
+    LaTeXUtils.initial_pwd = Dir.pwd
     return if early_personality_dispatch(argv, prog_name)
 
     extra_cli_files = extract_extra_cli_files(argv)

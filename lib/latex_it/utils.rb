@@ -9,8 +9,14 @@
 
 require 'fileutils'
 require 'io/console'
+require 'pathname'
 
 module LaTeXUtils
+  class << self
+    attr_accessor :initial_pwd
+  end
+
+  @initial_pwd = Dir.pwd
   # `figs/bak` is deliberately absent: the packager treats it as a user-owned
   # backup directory to exclude from bundles, so cleaning must not delete it.
   JUNK_BUILD_DIRS = %w[junk styles/junk figs/junk refs/junk].freeze
@@ -273,11 +279,22 @@ module LaTeXUtils
     exit 1
   end
 
+  def self.relative_path_to_pwd(dir, base = (initial_pwd || Dir.pwd))
+    target_abs = File.expand_path(dir)
+    base_abs   = File.expand_path(base)
+    rel = Pathname.new(target_abs).relative_path_from(Pathname.new(base_abs)).to_s
+    rel = '.' if rel.empty?
+    rel
+  rescue ArgumentError
+    dir.to_s
+  end
+
   def self.clean_directory(dir = '.', verbose = true)
     target_dir = File.expand_path(dir)
     return unless File.directory?(target_dir)
 
-    puts "Cleaning LaTeX auxiliary files in #{target_dir}..." if verbose
+    rel_path = relative_path_to_pwd(target_dir)
+    puts "Cleaning LaTeX auxiliary files in #{rel_path}..." if verbose
 
     Dir.chdir(target_dir) do
       JUNK_BUILD_DIRS.each { |d| FileUtils.rm_rf(d) if File.exist?(d) }

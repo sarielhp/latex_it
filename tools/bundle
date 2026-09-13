@@ -45,6 +45,7 @@ module LatexBundler
     json
     open3
     optparse
+    pathname
     rbconfig
     shellwords
     tmpdir

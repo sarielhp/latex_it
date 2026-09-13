@@ -98,6 +98,15 @@ Any modifications to compilation logic must honor the following invariants:
 
 ## 4. Development Workflow & Automated Tooling
 
+> [!IMPORTANT]
+> **User Command Convention — "Make <something>"**:
+> An instruction from the user saying `"Make <something>"` (or `"make <something>"`) is shorthand to run `./tools/<something>`. For example:
+> - `"Make install"` or `"make install"` ➔ `./tools/install -v`
+> - `"Make bump"` or `"make bump"` ➔ `./tools/bump`
+> - `"Make gate"` or `"make gate"` ➔ `./tools/gate --medium`
+> - `"Make audit"` or `"make audit"` ➔ `./tools/gate_audit_code`
+> There is no Makefile in this repository; do not create one.
+
 Always execute quality workflows through the provided scripts:
 
 ### 1. `tools/gate` (Tiered Quality Gate)

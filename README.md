@@ -135,6 +135,8 @@ The installer creates several convenient shortcuts based on the executable name:
 For technical details, configuration options, and advanced features, see:
 
 - **[docs/vim.md](docs/vim.md)**: Vi, Vim, and Neovim Quickfix integration (`:make`), errorformat, and compiler plugin.
+- **[docs/emacs.md](docs/emacs.md)**: GNU Emacs and AUCTeX error jumping, compilation buffer, and elisp configuration.
+- **[docs/vscode.md](docs/vscode.md)**: Visual Studio Code native tasks (`Ctrl+Shift+B`), problem matcher, and LaTeX Workshop setup.
 - **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
 - **[docs/troubleshooting_bibliography_errors.md](docs/troubleshooting_bibliography_errors.md)**: Diagnosing and solving cryptic `\printbibliography` crashes and pinpointing errors in `.bib` databases.
 - **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.

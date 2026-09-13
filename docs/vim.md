@@ -83,3 +83,16 @@ let g:vimtex_compiler_generic = {
       \ }
 let g:vimtex_build_dir = 'junk'
 ```
+
+---
+
+## Classic Vi & POSIX vi
+
+In traditional `vi` or `nvi` where Quickfix lists are not present, simply run:
+
+```vim
+:!l
+```
+
+`latex_it` executes directly in a subshell, outputting its clean diagnostic summary before returning to the editor buffer.
+

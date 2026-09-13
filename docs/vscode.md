@@ -1,0 +1,98 @@
+# VS Code Integration with latex_it
+
+`latex_it` integrates with Visual Studio Code in two ways:
+1. **Native VS Code Tasks** (zero extensions required).
+2. **LaTeX Workshop Extension** (the full IDE LaTeX setup).
+
+---
+
+## Workflow 1: Native VS Code Tasks (Zero Extensions)
+
+You can build documents using VS Code's standard task runner without installing any LaTeX extension.
+
+Create `.vscode/tasks.json` in your project root:
+
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build LaTeX (latex_it)",
+      "type": "shell",
+      "command": "l",
+      "args": ["--qf"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": {
+        "owner": "latex",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^([^:]+):(\\d+)(?::(\\d+))?:\\s+(error|warning|alert|note):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    }
+  ]
+}
+```
+
+### Key Shortcuts:
+* `Ctrl+Shift+B` (or `Cmd+Shift+B` on macOS): Trigger compilation.
+* `Ctrl+Shift+M` (or `Cmd+Shift+M`): Open the **Problems** panel.
+* `F8` / `Shift+F8`: Jump directly to the next or previous problem in the editor.
+
+---
+
+## Workflow 2: LaTeX Workshop Extension
+
+If you use the popular [LaTeX Workshop](https://marketplace.visualstudio.com/items?itemName=James-Yu.latex-workshop) extension, configure `latex_it` as a custom compiler tool and recipe in `.vscode/settings.json` (or your global User Settings):
+
+```json
+{
+  "latex-workshop.latex.tools": [
+    {
+      "name": "latex_it",
+      "command": "l",
+      "args": ["%DOC%"],
+      "env": {}
+    }
+  ],
+  "latex-workshop.latex.recipes": [
+    {
+      "name": "latex_it",
+      "tools": ["latex_it"]
+    }
+  ],
+  "latex-workshop.latex.recipe.default": "latex_it",
+  "latex-workshop.latex.outDir": "%DIR%/junk"
+}
+```
+
+### Why set `outDir` to `junk`?
+`latex_it` isolates temporary build artifacts (`.log`, `.aux`, `.fls`) in `junk/`. Telling LaTeX Workshop that `"latex-workshop.latex.outDir": "%DIR%/junk"` ensures its internal log parser can find `junk/<doc>.log` and correctly populate VS Code's diagnostic view.
+
+---
+
+## SyncTeX (Forward & Reverse Search)
+
+`latex_it` compiles documents with `-synctex=1` by default and automatically exports `<doc>.synctex.gz` (and `<doc>.pdf`) to the project root directory, while also preserving copies in `junk/`.
+
+### In LaTeX Workshop (Internal Viewer):
+* **Forward Search** (editor $\rightarrow$ PDF): `Ctrl+Alt+J` (macOS: `Cmd+Option+J`) jumps to the corresponding line in the PDF viewer.
+* **Reverse Search** (PDF $\rightarrow$ editor): `Ctrl+Click` (macOS: `Cmd+Click`) anywhere in the PDF jumps back to the exact source line in VS Code.
+
+### In External Viewers:
+Because the `.pdf` and `.synctex.gz` files live side-by-side in your project root, external PDF viewers with SyncTeX support work out of the box:
+* **Linux**: Zathura, Evince, Okular
+* **macOS**: Skim
+* **Windows**: SumatraPDF

@@ -73,12 +73,12 @@ Standard tools like `latexmk` treat these as clean builds because the compiler d
 
 ---
 
-## 2. Explanation Mode (`-e` / `--explain`)
+## 2. Explanation Mode (`-x` / `--explain`)
 
-Pass `-e` or `--explain` to print a boxed, plain-English explanation on the first occurrence of each diagnostic type:
+Pass `-x` or `--explain` to print a boxed, plain-English explanation on the first occurrence of each diagnostic type:
 
 ```bash
-l -e paper.tex
+l -x paper.tex
 ```
 
 Example explanation box:

@@ -99,11 +99,11 @@ l -e        # Show plain-English explanations for errors and warnings
 | `-u`, `--single-pass` | Run exactly one LaTeX pass without BibTeX or extra passes. |
 | `-c`, `--clean` | Remove temporary build files before compiling. |
 | `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
-| `-e`, `--explain` | Show plain-English explanation boxes for errors and warnings. |
+| `-x`, `--explain` | Show plain-English explanation boxes for errors and warnings. |
 | `-a`, `--all` | Display all diagnostics, including suppressed minor warnings. |
 | `--update-if-changed` | Only update the target PDF if the text content actually changed. |
 | `-m`, `--main` | Print the detected main LaTeX file and exit. |
-| `--engine ENGINE` | Choose compiler: `xelatex` (default), `lualatex`, or `pdflatex`. |
+| `-e`, `--engine ENGINE` | Choose compiler: `x` (`xelatex`, default), `l` (`lualatex`), or `p` (`pdflatex`). |
 | `-z`, `--zip` | Create a self-contained portable zip archive of the paper. |
 | `--arxiv` | Prepare a sanitized, flattened zip package for arXiv submission. |
 | `--init-config` | Generate a local `.l.jsonc` configuration template. |

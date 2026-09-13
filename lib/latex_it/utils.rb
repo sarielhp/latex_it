@@ -75,11 +75,11 @@ module LaTeXUtils
     first_token = eng.split.first || ''
     base = File.basename(first_token, '.*')
     case base
-    when 'lua', 'lualatex', 'luatex'
+    when 'l', 'lua', 'lualatex', 'luatex'
       'lualatex'
-    when 'xe', 'xelatex', 'xetex'
+    when 'x', 'xe', 'xelatex', 'xetex'
       'xelatex'
-    when 'pdf', 'pdflatex', 'pdftex'
+    when 'p', 'pdf', 'pdflatex', 'pdftex'
       'pdflatex'
     when *KNOWN_ENGINES
       base
@@ -325,12 +325,12 @@ module LaTeXUtils
     lines << '     l                              Incremental by default; skips passes when nothing changed'
     lines << ''
     lines << '  2. Compiler Engines:'
-    lines << '     l --engine=lualatex paper.tex  Compile using LuaLaTeX'
+    lines << '     l -e l paper.tex               Compile using LuaLaTeX (short: -e l, -e p, -e x)'
     lines << '     l --engine=pdflatex paper.tex  Compile using pdfLaTeX'
     lines << '     l --engine=xelatex paper.tex   Explicitly compile using XeLaTeX (default)'
     lines << ''
     lines << '  3. Diagnostics & Error Handling:'
-    lines << '     l -e                           Display plain-English diagnostic explanations & fixes'
+    lines << '     l -x                           Display plain-English diagnostic explanations & fixes'
     lines << '     l -a                           Show all diagnostics (including suppressed Whatevers)'
     lines << '     l -c                           Clean build artifacts (junk/, .aux, .bbl) before building'
     lines << '     l -C                           Clean directory artifacts and exit without building'

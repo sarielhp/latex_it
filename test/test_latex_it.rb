@@ -26,11 +26,11 @@ class TestLatexItCLI < Minitest::Test
     assert stdout.lines.count <= 21, "Expected -h to be strictly <= 21 lines, got #{stdout.lines.count}"
     assert_includes stdout, 'Usage: l [options]'
     assert_includes stdout, 'Common Options:'
-    assert_includes stdout, '--engine'
+    assert_includes stdout, '-e, --engine ENGINE'
     assert_includes stdout, '-u, --single-pass'
     assert_includes stdout, '-f, --force'
     assert_includes stdout, '-c, --clean'
-    assert_includes stdout, '-e, --explain'
+    assert_includes stdout, '-x, --explain'
     assert_includes stdout, '-E, --examples'
     assert_includes stdout, '--help-all'
     assert_includes stdout, '-h, --help'
@@ -70,7 +70,8 @@ class TestLatexItCLI < Minitest::Test
     assert_includes stdout, 'Compilation Options:'
     assert_includes stdout, 'arXiv Preparation Options:'
     assert_includes stdout, 'General Options:'
-    assert_includes stdout, '--engine ENGINE'
+    assert_includes stdout, '-e, --engine ENGINE'
+    assert_includes stdout, '-x, --explain'
     assert_includes stdout, '--deps'
     assert_includes stdout, '--no-env'
     assert_includes stdout, '--alert-hbox'
@@ -124,17 +125,23 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_canonical_cli_flags_and_anti_alias
-    canonical_flags = %w[-u --single-pass -f --force -m --main --update-if-changed -t --verify --no-env -W --werror --engine=xelatex --engine=lualatex --engine=pdflatex]
-    canonical_flags.each do |flag|
-      _, stderr, status = Open3.capture3(BIN, flag, 'nonexistent_doc_test.tex')
-      refute_match(/invalid option/i, stderr, "Canonical flag #{flag} should be a valid option")
-      refute_match(/ambiguous option/i, stderr, "Canonical flag #{flag} should not be ambiguous")
-      assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless %w[-m --main].include?(flag)
+    canonical_flags = [
+      %w[-u], %w[--single-pass], %w[-f], %w[--force], %w[-m], %w[--main],
+      %w[-x], %w[--explain], %w[--update-if-changed], %w[-t], %w[--verify],
+      %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
+      %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex]
+    ]
+    canonical_flags.each do |flag_args|
+      flag_str = flag_args.join(' ')
+      _, stderr, _status = Open3.capture3(BIN, *flag_args, 'nonexistent_doc_test.tex')
+      refute_match(/invalid option/i, stderr, "Canonical flag #{flag_str} should be a valid option")
+      refute_match(/ambiguous option/i, stderr, "Canonical flag #{flag_str} should not be ambiguous")
+      assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless flag_args.include?('-m') || flag_args.include?('--main')
     end
 
     hidden_aliases = %w[--lua --xe --pdflatex --fast]
     hidden_aliases.each do |alias_flag|
-      _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
+      _, stderr, _status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
       refute_match(/invalid option/i, stderr, "Hidden alias #{alias_flag} should be accepted")
       refute_match(/ambiguous option/i, stderr, "Hidden alias #{alias_flag} should not be ambiguous")
       assert_includes stderr, "File 'nonexistent_doc_test.tex' not found"
@@ -146,6 +153,23 @@ class TestLatexItCLI < Minitest::Test
       assert_match(/invalid option/i, stderr, "Removed alias #{alias_flag} should be rejected")
       refute status.success?
     end
+  end
+
+  def test_help_colorization
+    stdout_color, status_color = Open3.capture2(BIN, '-h', '--color')
+    assert status_color.success?
+    assert_match(/(?:\e\[[0-9;]+m)+Usage:/, stdout_color)
+    assert_match(/(?:\e\[[0-9;]+m)+-f\e\[0m/, stdout_color)
+    assert_match(/(?:\e\[[0-9;]+m)+-e\e\[0m, (?:\e\[[0-9;]+m)+--engine\e\[0m (?:\e\[[0-9;]+m)+ENGINE\e\[0m/, stdout_color)
+
+    stdout_nocolor, status_nocolor = Open3.capture2(BIN, '-h', '--no-color')
+    assert status_nocolor.success?
+    refute_includes stdout_nocolor, "\e["
+
+    stdout_all_color, status_all_color = Open3.capture2(BIN, '-H', '--color')
+    assert status_all_color.success?
+    assert_match(/(?:\e\[[0-9;]+m)+Pass Control & Compilation:\e\[0m/, stdout_all_color)
+    assert_match(/(?:\e\[[0-9;]+m)+-e\e\[0m, (?:\e\[[0-9;]+m)+--engine\e\[0m (?:\e\[[0-9;]+m)+ENGINE\e\[0m/, stdout_all_color)
   end
 
   def test_difference_between_u_and_1_passes
@@ -184,6 +208,9 @@ class TestLatexItCLI < Minitest::Test
   def test_pdflatex_is_supported_engine
     assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdflatex')
     assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdftex')
+    assert_equal 'pdflatex', LaTeXUtils.normalize_engine('p')
+    assert_equal 'lualatex', LaTeXUtils.normalize_engine('l')
+    assert_equal 'xelatex', LaTeXUtils.normalize_engine('x')
   end
 
   def test_inputenc_source_selects_pdflatex

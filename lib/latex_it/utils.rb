@@ -545,17 +545,29 @@ end
 
 class LaTeXIndicator
   @thr = nil
-  @t0 = 0
+  @t0 = nil
+  @active = false
 
-  def self.start(label, enabled: true)
+  def self.start(label, enabled: true, delay: 0.2)
     return unless enabled
 
     stop(clear: false, enabled: true)
-    @t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    print "\r\e[2K#{Rainbow('  ▸ ').cyan}#{label}"
-    $stdout.flush
+    already_active = @active
+    @t0 ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    if already_active
+      print "\r\e[2K#{Rainbow('  ▸ ').cyan}#{label}"
+      $stdout.flush
+    end
 
     @thr = Thread.new do
+      unless already_active
+        sleep delay
+        @active = true
+        print "\r\e[2K#{Rainbow('  ▸ ').cyan}#{label}"
+        $stdout.flush
+      end
+
       loop do
         sleep 1.0
         elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @t0).round
@@ -572,13 +584,15 @@ class LaTeXIndicator
 
     if @thr
       @thr.kill rescue nil
-      @thr.join(0.1) rescue nil
+      @thr.join(0.05) rescue nil
       @thr = nil
     end
 
-    return unless clear
-
-    print "\r\e[2K"
-    $stdout.flush
+    if clear
+      print "\r\e[2K" if @active
+      $stdout.flush
+      @active = false
+      @t0 = nil
+    end
   end
 end

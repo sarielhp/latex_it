@@ -1379,6 +1379,25 @@ class TestLatexItCLI < Minitest::Test
     assert_includes trace_log, 'exit status 0'
   end
 
+  def test_indicator_suppressed_for_fast_actions
+    out, = capture_io do
+      LaTeXIndicator.start('Fast action...', enabled: true, delay: 0.2)
+      sleep 0.05
+      LaTeXIndicator.stop(clear: true, enabled: true)
+    end
+    assert_empty out
+  end
+
+  def test_indicator_renders_for_slow_actions
+    out, = capture_io do
+      LaTeXIndicator.start('Slow action...', enabled: true, delay: 0.05)
+      sleep 0.12
+      LaTeXIndicator.stop(clear: true, enabled: true)
+    end
+    assert_includes out, 'Slow action...'
+    assert_includes out, "\e[2K"
+  end
+
   def test_sync_bbl_before_compile_trace_only
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do

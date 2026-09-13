@@ -109,6 +109,7 @@ l -B        # Extract cited references into local .bib file
 | `-B`, `--bib-extract` | Extract cited bibliography entries into local `.bib` file (default: `<doc>.bib`). |
 | `--arxiv` | Prepare a sanitized, flattened zip package for arXiv submission. |
 | `--init-config` | Generate a local `.l.jsonc` configuration template. |
+| `--init-vscode` | Generate `.vscode/tasks.json` and `settings.json` for VS Code integration. |
 | `--vim`, `--qf` | Format warnings/errors for Vim/Neovim quickfix integration (`:make`). |
 | `-h`, `--help` | Show condensed help summary of everyday options. |
 | `-H`, `--help-all` | Show complete list of command-line options with detailed explanations. |

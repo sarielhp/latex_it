@@ -124,4 +124,83 @@ class TestLaTeXConfigAndConventions < Minitest::Test
       end
     end
   end
+
+  def test_create_vscode_template_from_scratch
+    Dir.mktmpdir('latex_it_vscode_test') do |dir|
+      tasks_path, settings_path = LaTeXConfig.create_vscode_template!(dir)
+
+      assert File.file?(tasks_path)
+      assert File.file?(settings_path)
+
+      tasks_data = JSON.parse(File.read(tasks_path))
+      assert_equal '2.0.0', tasks_data['version']
+      tasks = tasks_data['tasks']
+      assert_equal 1, tasks.length
+      task = tasks.first
+      assert_equal 'Build LaTeX (latex_it)', task['label']
+      assert_equal 'l', task['command']
+      assert_equal ['--qf'], task['args']
+      assert_equal true, task.dig('group', 'isDefault')
+      assert_equal 'latex', task.dig('problemMatcher', 'owner')
+
+      settings_data = JSON.parse(File.read(settings_path))
+      assert_equal 'latex_it', settings_data['latex-workshop.latex.recipe.default']
+      assert_equal '%DIR%/junk', settings_data['latex-workshop.latex.outDir']
+      assert settings_data['latex-workshop.latex.tools'].any? { |t| t['name'] == 'latex_it' }
+      assert settings_data['latex-workshop.latex.recipes'].any? { |r| r['name'] == 'latex_it' }
+    end
+  end
+
+  def test_create_vscode_template_preserves_existing_configurations
+    Dir.mktmpdir('latex_it_vscode_merge_test') do |dir|
+      vscode_dir = File.join(dir, '.vscode')
+      FileUtils.mkdir_p(vscode_dir)
+
+      existing_tasks = {
+        'version' => '2.0.0',
+        'tasks' => [
+          { 'label' => 'Custom Test', 'type' => 'shell', 'command' => 'make test' }
+        ]
+      }
+      File.write(File.join(vscode_dir, 'tasks.json'), JSON.pretty_generate(existing_tasks))
+
+      existing_settings = {
+        'editor.tabSize' => 2,
+        'latex-workshop.latex.tools' => [
+          { 'name' => 'pdflatex', 'command' => 'pdflatex' }
+        ]
+      }
+      File.write(File.join(vscode_dir, 'settings.json'), JSON.pretty_generate(existing_settings))
+
+      LaTeXConfig.create_vscode_template!(dir)
+
+      merged_tasks = JSON.parse(File.read(File.join(vscode_dir, 'tasks.json')))
+      labels = merged_tasks['tasks'].map { |t| t['label'] }
+      assert_includes labels, 'Custom Test'
+      assert_includes labels, 'Build LaTeX (latex_it)'
+      assert_equal 2, merged_tasks['tasks'].length
+
+      merged_settings = JSON.parse(File.read(File.join(vscode_dir, 'settings.json')))
+      assert_equal 2, merged_settings['editor.tabSize']
+      tool_names = merged_settings['latex-workshop.latex.tools'].map { |t| t['name'] }
+      assert_includes tool_names, 'pdflatex'
+      assert_includes tool_names, 'latex_it'
+
+      # Idempotency: re-running should not duplicate
+      LaTeXConfig.create_vscode_template!(dir)
+      reloaded_tasks = JSON.parse(File.read(File.join(vscode_dir, 'tasks.json')))
+      assert_equal 2, reloaded_tasks['tasks'].length
+    end
+  end
+
+  def test_cli_init_vscode_flag
+    Dir.mktmpdir('latex_it_cli_vscode') do |dir|
+      bin = File.expand_path('../latex_it', __dir__)
+      out, status = Open3.capture2(bin, '--init-vscode', chdir: dir)
+      assert_equal 0, status.exitstatus
+      assert_includes out, 'Configured VS Code workspace'
+      assert File.file?(File.join(dir, '.vscode', 'tasks.json'))
+      assert File.file?(File.join(dir, '.vscode', 'settings.json'))
+    end
+  end
 end

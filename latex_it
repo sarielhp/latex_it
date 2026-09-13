@@ -374,6 +374,10 @@ module LatexCLI
       LaTeXConfig.create_local_template!('.')
       exit 0
     end
+    opts.on('--init-vscode', 'Create VS Code tasks.json and settings.json in .vscode/ and exit') do
+      LaTeXConfig.create_vscode_template!('.')
+      exit 0
+    end
     opts.on('--show-config', 'Show active configuration sources and resolved settings and exit') { options[:show_config] = true }
   end
 

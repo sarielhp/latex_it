@@ -6,6 +6,21 @@
 
 ---
 
+## Instant Automated Setup (`l --init-vscode`)
+
+Run the following command inside your LaTeX project root:
+
+```bash
+l --init-vscode
+```
+
+`latex_it` automatically creates or updates the `.vscode/` configuration files:
+* **`.vscode/tasks.json`**: Sets up `Build LaTeX (latex_it)` with `l --qf` as the default build task (`Ctrl+Shift+B` / `Cmd+Shift+B`) and matches error/warning/alert/note messages into the **Problems** panel.
+* **`.vscode/settings.json`**: Configures LaTeX Workshop tools, recipes, and sets `outDir: "%DIR%/junk"` so diagnostics and previewers synchronize cleanly.
+* **Non-destructive & Idempotent**: If `.vscode/tasks.json` or `.vscode/settings.json` already exist, your other tasks and settings are preserved.
+
+---
+
 ## Workflow 1: Native VS Code Tasks (Zero Extensions)
 
 You can build documents using VS Code's standard task runner without installing any LaTeX extension.

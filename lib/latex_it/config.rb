@@ -173,6 +173,92 @@ module LaTeXConfig
     puts "Created local configuration file: #{local_path}"
   end
 
+  VSCODE_TASK_LABEL = 'Build LaTeX (latex_it)'
+  VSCODE_TOOL_NAME = 'latex_it'
+
+  def self.default_vscode_task
+    {
+      'label' => VSCODE_TASK_LABEL,
+      'type' => 'shell',
+      'command' => 'l',
+      'args' => ['--qf'],
+      'group' => {
+        'kind' => 'build',
+        'isDefault' => true
+      },
+      'presentation' => {
+        'reveal' => 'silent',
+        'panel' => 'shared'
+      },
+      'problemMatcher' => {
+        'owner' => 'latex',
+        'fileLocation' => ['relative', '${workspaceFolder}'],
+        'pattern' => {
+          'regexp' => '^([^:]+):(\\d+)(?::(\\d+))?:\\s+(error|warning|alert|note):\\s+(.*)$',
+          'file' => 1,
+          'line' => 2,
+          'column' => 3,
+          'severity' => 4,
+          'message' => 5
+        }
+      }
+    }
+  end
+
+  def self.write_vscode_tasks!(vscode_dir)
+    tasks_file = File.join(vscode_dir, 'tasks.json')
+    data = File.file?(tasks_file) ? parse_jsonc(File.read(tasks_file)) : {}
+    data = {} unless data.is_a?(Hash)
+    data['version'] ||= '2.0.0'
+    raw_tasks = data['tasks'].is_a?(Array) ? data['tasks'] : []
+    tasks = raw_tasks.reject { |t| t.is_a?(Hash) && t['label'] == VSCODE_TASK_LABEL }
+    tasks << default_vscode_task
+    data['tasks'] = tasks
+    File.write(tasks_file, "#{JSON.pretty_generate(data)}\n")
+    tasks_file
+  end
+
+  def self.merge_vscode_tool(tools)
+    filtered = tools.reject { |t| t.is_a?(Hash) && t['name'] == VSCODE_TOOL_NAME }
+    filtered << { 'name' => VSCODE_TOOL_NAME, 'command' => 'l', 'args' => ['%DOC%'], 'env' => {} }
+  end
+
+  def self.merge_vscode_recipe(recipes)
+    filtered = recipes.reject { |r| r.is_a?(Hash) && r['name'] == VSCODE_TOOL_NAME }
+    filtered << { 'name' => VSCODE_TOOL_NAME, 'tools' => [VSCODE_TOOL_NAME] }
+  end
+
+  def self.write_vscode_settings!(vscode_dir)
+    settings_file = File.join(vscode_dir, 'settings.json')
+    data = File.file?(settings_file) ? parse_jsonc(File.read(settings_file)) : {}
+    data = {} unless data.is_a?(Hash)
+
+    raw_tools = data['latex-workshop.latex.tools'].is_a?(Array) ? data['latex-workshop.latex.tools'] : []
+    data['latex-workshop.latex.tools'] = merge_vscode_tool(raw_tools)
+
+    raw_recipes = data['latex-workshop.latex.recipes'].is_a?(Array) ? data['latex-workshop.latex.recipes'] : []
+    data['latex-workshop.latex.recipes'] = merge_vscode_recipe(raw_recipes)
+
+    data['latex-workshop.latex.recipe.default'] = VSCODE_TOOL_NAME
+    data['latex-workshop.latex.outDir'] = '%DIR%/junk'
+
+    File.write(settings_file, "#{JSON.pretty_generate(data)}\n")
+    settings_file
+  end
+
+  def self.create_vscode_template!(dir = '.')
+    vscode_dir = File.join(dir, '.vscode')
+    FileUtils.mkdir_p(vscode_dir)
+
+    tasks_path = write_vscode_tasks!(vscode_dir)
+    settings_path = write_vscode_settings!(vscode_dir)
+
+    puts "Configured VS Code workspace in #{vscode_dir}:"
+    puts "  - #{tasks_path} (Default build task: Ctrl+Shift+B / Cmd+Shift+B)"
+    puts "  - #{settings_path} (LaTeX Workshop tool, recipe, and outDir)"
+    [tasks_path, settings_path]
+  end
+
   def self.save_global_theme!(new_theme, config_file = GLOBAL_CONFIG_FILE)
     ensure_global_config_exists! if config_file == GLOBAL_CONFIG_FILE
     return false unless File.exist?(config_file)

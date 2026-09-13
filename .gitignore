@@ -62,7 +62,9 @@ reviews/logs/
 
 # Local tooling shim and example corpus
 tools/rtk
-/examples/
+/examples/*
+!/examples/gallery/
+!/examples/gallaery
 /AGENTS.md
 arxiv_*.zip
 arxiv_*_meta.txt

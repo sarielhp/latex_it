@@ -1183,16 +1183,6 @@ module LaTeXDiagnostics
     [undef_cite, undef_ref, mult_def]
   end
 
-  def print_diagnostic_banner(counts)
-    puts ''
-    overfull_s = counts[:overfull] > 0 ? Rainbow("Overfull: #{counts[:overfull]}").magenta : "Overfull: #{counts[:overfull]}"
-    underfull_s = counts[:underfull] > 0 ? Rainbow("Underfull: #{counts[:underfull]}").cyan : "Underfull: #{counts[:underfull]}"
-    bib_s = counts[:cbib] > 0 ? Rainbow("Bibtex warns/errors: #{counts[:cbib]}").yellow.bright : "Bibtex warns/errors: #{counts[:cbib]}"
-    cite_s = counts[:undef_cite] > 0 ? Rainbow("Undef cite: #{counts[:undef_cite]}").red.bright : "Undef cite: #{counts[:undef_cite]}"
-    refs_s = counts[:undef_ref] > 0 ? Rainbow("Undef refs: #{counts[:undef_ref]}").red.bright : "Undef refs: #{counts[:undef_ref]}"
-    mult_s = counts[:mult_def] > 0 ? Rainbow("Lab multi-def: #{counts[:mult_def]}").red.bright : "Lab multi-def: #{counts[:mult_def]}"
-    puts "#{overfull_s} | #{underfull_s} | #{bib_s} | #{cite_s} | #{refs_s} | #{mult_s}"
-  end
 
   def append_bib_diagnostics!(warn_items, err_items)
     return unless @biberr && File.exist?(@biberr)
@@ -1293,17 +1283,15 @@ module LaTeXDiagnostics
     alert_items, reg_warns, what_items = partition_diagnostics(clean_content, raw_warns)
     errors = count_latex_errors(new_content, 0) + counts[:biberr]
 
-    display_analyzed_diagnostics(counts, err_items, alert_items, reg_warns, what_items, errors)
+    display_analyzed_diagnostics(err_items, alert_items, reg_warns, what_items, errors)
   end
 
-  def display_analyzed_diagnostics(counts, err_items, alert_items, reg_warns, what_items, errors)
-    total_diag = counts[:cbib] + counts[:undef_cite] + counts[:undef_ref] + counts[:mult_def] + counts[:overfull] + counts[:underfull]
+  def display_analyzed_diagnostics(err_items, alert_items, reg_warns, what_items, errors)
     alerts = alert_items.sum { |i| i[:count] || 1 }
     warnings = reg_warns.sum { |i| i[:count] || 1 }
     whatevers = what_items.sum { |i| i[:count] || 1 }
 
-    if total_diag > 0 || errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
-      print_diagnostic_banner(counts) if total_diag > 0 || errors > 0 || alerts > 0
+    if errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
       errors = render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
     end
 

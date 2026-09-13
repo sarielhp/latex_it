@@ -184,6 +184,9 @@ module LatexCLI
       lock: cfg.key?('lock') ? (cfg['lock'] == true) : true,
       score: false,
       color: cfg['color'],
+      theme: cfg['theme'],
+      theme_arg: nil,
+      list_themes: false,
       no_env: is_env_free,
       verbose: false,
       trace: cfg['trace'] == true,
@@ -289,6 +292,8 @@ module LatexCLI
       exit 0
     end
     opts.on('--[no-]color', 'Enable or disable colored terminal output (default: auto)') { |v| options[:color] = v }
+    opts.on('--theme THEME', 'Set diagnostic color theme (e.g. blush, catppuccin, or "+1" to cycle)') { |v| options[:theme_arg] = v }
+    opts.on('--list-themes', 'List available diagnostic color themes with previews and exit') { options[:list_themes] = true }
     opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') { |v| options[:lock] = v }
     opts.on('-s', '--score', 'Suppress stdout and output error/warning count from the last LaTeX run') { options[:score] = true }
     opts.on('--no-env', 'Reset environment variables used by LaTeX/BibTeX/Biber') { options[:no_env] = true }
@@ -348,6 +353,14 @@ module LatexCLI
   end
 
   def self.handle_help_and_examples(parser, options, prog_name, argv = [])
+    if options[:list_themes]
+      base_theme = ENV['LATEX_IT_THEME'] || ENV['L_THEME'] || ENV['COLOR_THEME'] ||
+                   ENV['BASE16_THEME'] || options[:theme] || LatexColor::DEFAULT_THEME
+      LatexColor.active_theme = base_theme
+      puts LatexColor.format_theme_list
+      exit 0
+    end
+
     # Help is checked first so that it wins over every action, destructive ones
     # included: `l -C -h` used to clean the directory and exit 0 without ever
     # printing the usage the user asked for.
@@ -386,7 +399,25 @@ module LatexCLI
     Rainbow.enabled = false if options[:emacs] && options[:color].nil?
     Rainbow.enabled = options[:color] unless options[:color].nil?
 
+    apply_theme_configuration(options)
     LaTeXUtils.reset_latex_environment! if options[:no_env]
+  end
+
+  def self.apply_theme_configuration(options)
+    base_theme = ENV['LATEX_IT_THEME'] || ENV['L_THEME'] || ENV['COLOR_THEME'] ||
+                 ENV['BASE16_THEME'] || options[:theme] || LatexColor::DEFAULT_THEME
+
+    if options[:theme_arg] =~ /^[+-]\d+$/
+      step = options[:theme_arg].to_i
+      new_theme = LatexColor.cycle_theme(base_theme, step)
+      LaTeXConfig.save_global_theme!(new_theme)
+      LatexColor.active_theme = new_theme
+      puts Rainbow(" -- Cycled theme to: #{new_theme} (#{LatexColor.theme_description(new_theme)})").cyan unless options[:score]
+    elsif options[:theme_arg]
+      LatexColor.active_theme = options[:theme_arg]
+    else
+      LatexColor.active_theme = base_theme
+    end
   end
 
   def self.execute_targets(argv, options)

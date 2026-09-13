@@ -131,3 +131,40 @@ When compiling large documents in editor setups that trigger builds on save, mul
 
 - **Default**: Enabled. A second process waits for the active build to complete.
 - **Disabling**: Use `--no-lock` if you need to run concurrent builds intentionally.
+
+---
+
+## 6. Diagnostic Color Themes
+
+`latex_it` formats error headers, carets, source line numbers, and tier summaries using 24-bit TrueColor themes.
+
+### Theme Resolution Hierarchy
+1. **CLI flag**: `l --theme=<theme>`
+2. **Environment variable**: `LATEX_IT_THEME` or `L_THEME` (fallback: `COLOR_THEME`, `BASE16_THEME`)
+3. **Local/Global config**: `"theme": "blush"` in `.l.jsonc` or `~/.config/latex_it/config.jsonc`
+4. **Built-in default**: `"blush"`
+
+### Built-in Presets
+| Theme | Error Hex | Description |
+| :--- | :--- | :--- |
+| **`blush`** *(default)* | `#ffcccc` | Soft pastel blush with high luminance on dark backgrounds |
+| **`catppuccin`** | `#f38ba8` | Warm soothing pastel crimson (Catppuccin Mocha) |
+| **`tokyo-night`** | `#f7768e` | Modern cyberpunk strawberry-rose pastel |
+| **`dracula`** | `#ff5555` | Vibrant high-contrast coral red |
+| **`nord`** | `#bf616a` | Calm arctic muted brick red |
+| **`ansi`** | ANSI 91 | Classic terminal 16-color ANSI bright red |
+
+### Commands
+* **Cycle to next theme**:
+  ```bash
+  l --theme +1
+  ```
+  Advances to the next theme in the cycle and persists the choice to your global `config.jsonc`.
+* **List available themes**:
+  ```bash
+  l --list-themes
+  ```
+* **Use custom hex**:
+  ```bash
+  l --theme="#ff8888"
+  ```

@@ -51,6 +51,9 @@ module LaTeXConfig
       // Terminal color output: true (force), false (disable), or null (auto-detect)
       "color": null,
 
+      // Diagnostic color theme: "blush" (default), "catppuccin", "tokyo-night", "dracula", "nord", "ansi"
+      "theme": "blush",
+
       // Lockfile concurrency protection
       "lock": true,
 
@@ -165,6 +168,25 @@ module LaTeXConfig
 
     File.write(local_path, DEFAULT_CONFIG_TEMPLATE)
     puts "Created local configuration file: #{local_path}"
+  end
+
+  def self.save_global_theme!(new_theme, config_file = GLOBAL_CONFIG_FILE)
+    ensure_global_config_exists! if config_file == GLOBAL_CONFIG_FILE
+    return false unless File.exist?(config_file)
+
+    content = File.read(config_file)
+    updated = if content =~ /"theme"\s*:\s*"[^"]*"/
+                content.sub(/"theme"\s*:\s*"[^"]*"/, "\"theme\": \"#{new_theme}\"")
+              elsif content =~ /(["']?color["']?\s*:\s*[^,\n]+,)/
+                content.sub(/(["']?color["']?\s*:\s*[^,\n]+,)/, "\\1\n\n  // Diagnostic color theme: \"blush\" (default), \"catppuccin\", \"tokyo-night\", \"dracula\", \"nord\", \"ansi\"\n  \"theme\": \"#{new_theme}\",")
+              else
+                content.sub(/\}\s*\z/, "  \"theme\": \"#{new_theme}\"\n}\n")
+              end
+    File.write(config_file, updated)
+    true
+  rescue StandardError => e
+    warn " -- Warning: Could not persist theme to #{config_file}: #{e.message}"
+    false
   end
 
   def self.skip_comment(content, i, len)

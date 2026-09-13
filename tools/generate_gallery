@@ -303,7 +303,7 @@ module GalleryGenerator
     left_lines = build_display_lines(left_raw, is_ansi: false)
     right_lines = build_display_lines(right_raw, is_ansi: true)
 
-    max_count = [left_lines.size, right_lines.size, 16].max
+    max_count = [left_lines.size, right_lines.size].max
     line_h = 20
     panel_h = (max_count * line_h) + 20 + 46 + 48
     total_w = 1240
@@ -332,19 +332,18 @@ module GalleryGenerator
     SVG
   end
 
-  def self.truncate_latexmk(lines)
-    cleaned = lines.reject { |l| l =~ /\Acp: cannot stat/ || l =~ /\ARunning 'cp / }
-    return cleaned if cleaned.size <= 18
+  def self.truncate_latexmk(lines, target_count)
+    cleaned = lines.reject { |l| l =~ /\Acp: cannot stat/ || l =~ /\ARunning 'cp / || l =~ /\A-+\z/ }
+    cleaned.pop while cleaned.last&.strip&.empty?
+    return cleaned if cleaned.size <= target_count
 
     cmd_line = cleaned.first
     rest = cleaned[1..]
     err_idx = rest.index { |l| l =~ /\A!\s+/ || l =~ /\ARunaway argument\?/ || l =~ /\ALaTeX Error:/i }
+    summary_idx = rest.rindex { |l| l =~ /Collected error summary/ }
 
-    if err_idx
-      truncate_latexmk_error(cmd_line, rest, err_idx)
-    else
-      truncate_latexmk_success(cmd_line, rest)
-    end
+    start_idx, end_idx = initial_window_bounds(rest, target_count, err_idx, summary_idx)
+    fit_window_to_target(cmd_line, rest, start_idx, end_idx, target_count, err_idx, summary_idx)
   end
 
   def self.format_deleted(count)
@@ -352,33 +351,49 @@ module GalleryGenerator
     "<<< DELETED #{count} #{unit} >>>"
   end
 
-  def self.truncate_latexmk_error(cmd_line, rest, err_idx)
-    pre_start = [err_idx - 1, 0].max
-    post_end = [err_idx + 6, rest.size - 1].min
+  def self.initial_window_bounds(rest, target_count, err_idx, summary_idx)
+    needed = [target_count - 2, 4].max
+    if err_idx
+      end_idx = summary_idx ? [summary_idx + 2, rest.size - 1].min : (rest.size - 1)
+      start_idx = end_idx - needed + 1
+      if start_idx > [err_idx - 1, 0].max
+        start_idx = [err_idx - 1, 0].max
+        end_idx = [start_idx + needed - 1, rest.size - 1].min
+      elsif start_idx < 0
+        start_idx = 0
+        end_idx = [needed - 1, rest.size - 1].min
+      end
+    else
+      end_idx = rest.size - 1
+      start_idx = [end_idx - needed + 1, 0].max
+    end
+    [start_idx, end_idx]
+  end
 
-    res = [cmd_line]
-    res << format_deleted(pre_start) if pre_start > 3
-    res.concat(rest[pre_start..post_end])
+  def self.fit_window_to_target(cmd_line, rest, start_idx, end_idx, target_count, err_idx, summary_idx)
+    slice = rest[start_idx..end_idx]
+    res = assemble_truncated(cmd_line, start_idx, slice)
+    disp = build_display_lines(res, is_ansi: false)
 
-    summary_idx = rest.rindex { |l| l =~ /Collected error summary/ }
-    if summary_idx && summary_idx > post_end
-      skipped = summary_idx - post_end - 1
-      res << format_deleted(skipped) if skipped > 2
-      res.concat(rest[summary_idx..[summary_idx + 3, rest.size - 1].min])
-    elsif rest.size - (post_end + 1) > 3
-      res << format_deleted(rest.size - (post_end + 1))
+    while disp.size > target_count && slice.size > 4
+      if start_idx < (err_idx ? err_idx - 1 : rest.size)
+        start_idx += 1
+      elsif end_idx > (summary_idx ? summary_idx + 1 : 0)
+        end_idx -= 1
+      else
+        break
+      end
+      slice = rest[start_idx..end_idx]
+      res = assemble_truncated(cmd_line, start_idx, slice)
+      disp = build_display_lines(res, is_ansi: false)
     end
     res
   end
 
-  def self.truncate_latexmk_success(cmd_line, rest)
-    tail = rest.select { |l| l =~ /LaTeX Warning:|Output written|All targets/i }
-    tail = rest.last(4) if tail.empty?
-    skipped = rest.size - tail.size
-
+  def self.assemble_truncated(cmd_line, skipped, slice)
     res = [cmd_line]
-    res << format_deleted(skipped) if skipped > 3
-    res.concat(tail)
+    res << format_deleted(skipped) if skipped > 0
+    res.concat(slice)
     res
   end
 
@@ -393,9 +408,11 @@ module GalleryGenerator
       out_mk, _ = Open3.capture2e('latexmk', '-xelatex', '-halt-on-error', 'paper.tex', chdir: dir)
       out_l, _ = Open3.capture2e({ 'CLICOLOR_FORCE' => '1' }, LATEX_IT, '--no-lock', '-1', 'paper.tex', chdir: dir)
 
-      left_raw = ['$ latexmk -xelatex paper.tex'] + out_mk.lines.map(&:chomp)
-      left_truncated = truncate_latexmk(left_raw)
       right_raw = ['$ l paper.tex'] + out_l.lines.map(&:chomp)
+      right_display = build_display_lines(right_raw, is_ansi: true)
+
+      left_raw = ['$ latexmk -xelatex paper.tex'] + out_mk.lines.map(&:chomp)
+      left_truncated = truncate_latexmk(left_raw, right_display.size)
       [left_truncated, right_raw]
     end
   end

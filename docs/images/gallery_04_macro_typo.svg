@@ -19,20 +19,38 @@
   <text x="288" y="25" fill="#787c99" text-anchor="middle" class="title">Standard Tool: latexmk</text>
   <g transform="translate(18, 62)" class="code">
     <text x="0" y="0"><tspan fill="#7dcfff" font-weight="bold">$ latexmk -xelatex paper.tex</tspan></text>
-        <text x="0" y="20"><tspan fill="#e0af68" font-weight="bold" font-size="15.5px">&lt;&lt;&lt; DELETED 27 LINES &gt;&gt;&gt;</tspan></text>
-        <text x="0" y="40"><tspan fill="#c0caf5">(junk/paper.aux)</tspan></text>
-        <text x="0" y="60"><tspan fill="#f7768e" font-weight="bold">! Undefined control sequence.</tspan></text>
-        <text x="0" y="80"><tspan fill="#c0caf5">l.3 \includegrahics</tspan></text>
-        <text x="0" y="100"><tspan fill="#c0caf5">                   {my_figure.png}</tspan></text>
-        <text x="0" y="120"><tspan fill="#c0caf5">No pages of output.</tspan></text>
-        <text x="0" y="140"><tspan fill="#c0caf5">Transcript written on junk/paper.log.</tspan></text>
-        <text x="0" y="160"><tspan fill="#565f89">Latexmk: Getting log file 'junk/paper.log'</tspan></text>
-        <text x="0" y="180"><tspan fill="#565f89">Latexmk: Examining 'junk/paper.fls'</tspan></text>
-        <text x="0" y="200"><tspan fill="#e0af68" font-weight="bold" font-size="15.5px">&lt;&lt;&lt; DELETED 4 LINES &gt;&gt;&gt;</tspan></text>
-        <text x="0" y="220"><tspan fill="#f7768e" font-weight="bold">Collected error summary (may duplicate other messages):</tspan></text>
-        <text x="0" y="240"><tspan fill="#c0caf5">  xelatex: Command for 'xelatex' gave return code 1</tspan></text>
-        <text x="0" y="260"><tspan fill="#c0caf5">      Refer to 'junk/paper.log' and/or above output for details</tspan></text>
-        <text x="0" y="280"><tspan fill="#c0caf5"></tspan></text>
+        <text x="0" y="20"><tspan fill="#e0af68" font-weight="bold" font-size="15.5px">&lt;&lt;&lt; DELETED 10 LINES &gt;&gt;&gt;</tspan></text>
+        <text x="0" y="40"><tspan fill="#c0caf5"></tspan></text>
+        <text x="0" y="60"><tspan fill="#c0caf5">Run number 1 of rule 'xelatex'</tspan></text>
+        <text x="0" y="80"><tspan fill="#565f89">Running 'xelatex -no-pdf -halt-on-error -recorder</tspan></text>
+        <text x="0" y="100"><tspan fill="#565f89">    </tspan><tspan fill="#565f89">-output-directory=&quot;junk&quot;  &quot;paper.tex&quot;'</tspan></text>
+        <text x="0" y="120"><tspan fill="#c0caf5">This is XeTeX, Version 3.141592653-2.6-0.999998 (TeX Live</tspan></text>
+        <text x="0" y="140"><tspan fill="#c0caf5">    </tspan><tspan fill="#c0caf5">2026/Debian) (preloaded format=xelatex)</tspan></text>
+        <text x="0" y="160"><tspan fill="#c0caf5"> restricted \write18 enabled.</tspan></text>
+        <text x="0" y="180"><tspan fill="#c0caf5">entering extended mode</tspan></text>
+        <text x="0" y="200"><tspan fill="#c0caf5">(./paper.tex</tspan></text>
+        <text x="0" y="220"><tspan fill="#c0caf5">LaTeX2e &lt;2026-06-01&gt;</tspan></text>
+        <text x="0" y="240"><tspan fill="#c0caf5">L3 programming layer &lt;2026-06-18&gt;</tspan></text>
+        <text x="0" y="260"><tspan fill="#c0caf5">(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls</tspan></text>
+        <text x="0" y="280"><tspan fill="#c0caf5">Document Class: article 2025/01/22 v1.4n Standard LaTeX document</tspan></text>
+        <text x="0" y="300"><tspan fill="#c0caf5">    </tspan><tspan fill="#c0caf5">class</tspan></text>
+        <text x="0" y="320"><tspan fill="#c0caf5">(/usr/share/texlive/texmf-dist/tex/latex/base/size10.clo))</tspan></text>
+        <text x="0" y="340"><tspan fill="#c0caf5">(/usr/share/texlive/texmf-dist/tex/latex/l3backend/l3backend-xetex.def)</tspan></text>
+        <text x="0" y="360"><tspan fill="#c0caf5">(junk/paper.aux)</tspan></text>
+        <text x="0" y="380"><tspan fill="#f7768e" font-weight="bold">! Undefined control sequence.</tspan></text>
+        <text x="0" y="400"><tspan fill="#c0caf5">l.3 \includegrahics</tspan></text>
+        <text x="0" y="420"><tspan fill="#c0caf5">                   {my_figure.png}</tspan></text>
+        <text x="0" y="440"><tspan fill="#c0caf5">No pages of output.</tspan></text>
+        <text x="0" y="460"><tspan fill="#c0caf5">Transcript written on junk/paper.log.</tspan></text>
+        <text x="0" y="480"><tspan fill="#565f89">Latexmk: Getting log file 'junk/paper.log'</tspan></text>
+        <text x="0" y="500"><tspan fill="#565f89">Latexmk: Examining 'junk/paper.fls'</tspan></text>
+        <text x="0" y="520"><tspan fill="#565f89">Latexmk: Examining 'junk/paper.log'</tspan></text>
+        <text x="0" y="540"><tspan fill="#565f89">Latexmk: Log file says no output from latex</tspan></text>
+        <text x="0" y="560"><tspan fill="#565f89">Latexmk: For rule 'xelatex', no output was made</tspan></text>
+        <text x="0" y="580"><tspan fill="#565f89">Latexmk: Errors, so I did not complete making targets</tspan></text>
+        <text x="0" y="600"><tspan fill="#f7768e" font-weight="bold">Collected error summary (may duplicate other messages):</tspan></text>
+        <text x="0" y="620"><tspan fill="#c0caf5">  xelatex: Command for 'xelatex' gave return code 1</tspan></text>
+        <text x="0" y="640"><tspan fill="#c0caf5">      Refer to 'junk/paper.log' and/or above output for details</tspan></text>
   </g>
   <g transform="translate(18, 732)">
     <rect width="540" height="32" rx="6" fill="#2d1c24" stroke="#f7768e" stroke-width="1.2"/>

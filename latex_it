@@ -17,6 +17,7 @@
 
 require 'digest'
 require 'fileutils'
+require 'io/console'
 require 'json'
 require 'open3'
 require 'optparse'
@@ -187,6 +188,7 @@ module LatexCLI
       theme: cfg['theme'],
       theme_arg: nil,
       list_themes: false,
+      show_config: false,
       no_env: is_env_free,
       verbose: false,
       trace: cfg['trace'] == true,
@@ -241,7 +243,7 @@ module LatexCLI
   end
 
   def self.build_option_parser(options)
-    OptionParser.new do |opts|
+    OptionParser.new(nil, 24, '  ') do |opts|
       opts.banner = 'Usage: l [options] [document.tex]'
       opts.separator ''
       opts.separator 'Compilation Options:'
@@ -318,46 +320,103 @@ module LatexCLI
   def self.add_general_options(opts, options)
     opts.separator ''
     opts.separator 'General Options:'
-    opts.on('-V', '--version', 'Show version') do
+    opts.on('-V', '--version', 'Show version and exit') do
       puts "l #{LatexIt::VERSION}"
       exit 0
     end
+    opts.on('--show-config', 'Show active configuration sources and resolved settings and exit') { options[:show_config] = true }
     opts.on('-E', '--examples', 'Show detailed usage examples and common workflows') { options[:show_examples] = true }
-    opts.on('-h', '--help', 'Show condensed help (see --help-all for full list)') { options[:show_help] = true }
-    opts.on('--help-all', 'Show all available options') { options[:show_help_all] = true }
+    opts.on('-h', '--help', 'Show condensed help summary (see -H for all options)') { options[:show_help] = true }
+    opts.on('-H', '--help-all', 'Show all available options') { options[:show_help_all] = true }
   end
 
-  def self.condensed_help(prog_name = 'l')
+  def self.condensed_help(_prog_name = 'l')
     [
       'Usage: l [options] [document.tex]',
       '',
       'Common Options:',
-      '    -u, --single-pass                Single pass only (no bib/extra passes)',
-      '    -1, --force                      Force initial LaTeX compilation run',
-      '    -c, --clean                      Clean build files before building',
-      '    -C, --clean-only                 Clean auxiliary files and exit',
-      '    -m, --main                       Print detected main LaTeX file and exit',
-      '    -d, --diff                       Only replace target PDF if text changed',
-      '    -a, --all                        Show all diagnostics across all tiers',
-      '    -e, --explain                    Explain diagnostics on first occurrence',
-      '    -z, --zip                        Create portable zip archive of paper',
-      '    -t, --verify                     Verify zip portability in sandbox',
-      '    -W, --werror                     Treat compilation warnings as errors',
-      '        --engine ENGINE              Compiler: xelatex, lualatex, pdflatex',
-      '        --trace                      Print external subprocess commands and environment',
-      '        --arxiv                      Prepare sanitized arXiv zip package',
-      '    -E, --examples                   Show detailed usage examples',
-      '        --help-all                   Show all available options',
-      '    -h, --help                       Show condensed help (this message)'
+      '  -1, --force          Force initial LaTeX compilation run',
+      '  -u, --single-pass    Single pass only (no bib/extra passes)',
+      '  -c, --clean          Clean build files before building',
+      '  -C, --clean-only     Clean auxiliary files and exit',
+      '  -m, --main           Print detected main LaTeX file and exit',
+      '  -d, --diff           Only replace target PDF if text changed',
+      '  -a, --all            Show all diagnostics across all tiers',
+      '  -e, --explain        Explain diagnostics on first occurrence',
+      '  -z, --zip            Create portable zip archive of paper',
+      '  -t, --verify         Verify zip portability in sandbox',
+      '  -W, --werror         Treat compilation warnings as errors',
+      '      --engine ENGINE  Compiler: xelatex, lualatex, pdflatex',
+      '      --trace          Print external subprocess commands and environment',
+      '      --arxiv          Prepare sanitized arXiv zip package',
+      '  -E, --examples       Show detailed usage examples',
+      '  -H, --help-all       Show all available options',
+      '  -h, --help           Show condensed help (this message)'
     ].join("\n")
+  end
+
+  def self.terminal_columns
+    cols = ENV['COLUMNS']&.to_i
+    cols = (cols && cols > 0) ? cols : (IO.console&.winsize&.last rescue nil)
+    cols = 80 if cols.nil? || cols <= 0
+    cols.clamp(40, 120)
+  end
+
+  def self.wrap_words(words, width)
+    lines = []
+    curr = []
+    len = 0
+    words.each do |w|
+      if curr.empty?
+        curr << w
+        len = w.length
+      elsif len + 1 + w.length <= width
+        curr << w
+        len += 1 + w.length
+      else
+        lines << curr.join(' ')
+        curr = [w]
+        len = w.length
+      end
+    end
+    lines << curr.join(' ') unless curr.empty?
+    lines
+  end
+
+  def self.wrap_help_line(line, width)
+    return [line] if line.length <= width
+
+    if (m = line.match(/^(\s{2,}\S.*?\s{2,})(\S.*)$/))
+      leader = m[1]
+      desc = m[2]
+      avail = width - leader.length
+      if avail >= 16
+        desc_lines = wrap_words(desc.split, avail)
+        indent = ' ' * leader.length
+        return [leader + desc_lines[0]] + desc_lines[1..].map { |l| indent + l }
+      end
+    end
+
+    indent = line[/^\s*/] || ''
+    avail = [width - indent.length, 20].max
+    wrap_words(line.strip.split, avail).map { |l| indent + l }
+  end
+
+  def self.wrap_help(text, width = terminal_columns)
+    text.to_s.lines.map(&:chomp).flat_map { |line| wrap_help_line(line, width) }.join("\n")
   end
 
   def self.handle_help_and_examples(parser, options, prog_name, argv = [])
     if options[:list_themes]
       base_theme = ENV['LATEX_IT_THEME'] || ENV['L_THEME'] || ENV['COLOR_THEME'] ||
-                   ENV['BASE16_THEME'] || options[:theme] || LatexColor::DEFAULT_THEME
+                   ENV['BASE16_THEME'] || options[:theme] || LatexColor.default_theme
       LatexColor.active_theme = base_theme
       puts LatexColor.format_theme_list
+      exit 0
+    end
+
+    if options[:show_config]
+      puts LaTeXConfig.format_active_config
       exit 0
     end
 
@@ -375,37 +434,52 @@ module LatexCLI
     end
   end
 
-  def self.print_help_or_examples(parser, options, prog_name)
+  def self.help_output_text(parser, options, prog_name)
     if options[:show_help_all] && options[:show_examples]
-      puts parser
-      puts "\n#{LaTeXUtils.detailed_examples}"
+      "#{parser}\n\n#{LaTeXUtils.detailed_examples}"
     elsif options[:show_help_all]
-      puts parser
-      puts "\nFor detailed usage examples and common workflows, run: #{prog_name} -E"
+      "#{parser}\n\nFor detailed usage examples and common workflows, run: #{prog_name} -E"
     elsif options[:show_help] && options[:show_examples]
-      puts condensed_help(prog_name)
-      puts "\n#{LaTeXUtils.detailed_examples}"
+      "#{condensed_help(prog_name)}\n\n#{LaTeXUtils.detailed_examples}"
     elsif options[:show_examples]
-      puts LaTeXUtils.detailed_examples(parser.banner)
+      LaTeXUtils.detailed_examples(parser.banner)
     elsif options[:show_help]
-      puts condensed_help(prog_name)
-    else
-      return
+      condensed_help(prog_name)
     end
+  end
+
+  def self.print_help_or_examples(parser, options, prog_name)
+    output = help_output_text(parser, options, prog_name)
+    return unless output
+
+    puts wrap_help(output)
     exit 0
   end
 
   def self.configure_environment(options)
-    Rainbow.enabled = false if options[:emacs] && options[:color].nil?
-    Rainbow.enabled = options[:color] unless options[:color].nil?
+    options[:color] = determine_color_enabled(options)
+    Rainbow.enabled = options[:color]
 
     apply_theme_configuration(options)
     LaTeXUtils.reset_latex_environment! if options[:no_env]
   end
 
+  def self.determine_color_enabled(options)
+    return options[:color] unless options[:color].nil?
+    return false if options[:emacs]
+    return false if ENV['NO_COLOR'] && !ENV['NO_COLOR'].empty?
+
+    term = ENV['TERM'].to_s.strip
+    return false if term == 'dumb' || term == 'unknown' || term.empty?
+    return false if ENV['INSIDE_EMACS'] && (ENV['INSIDE_EMACS'].include?('compile') || ENV['INSIDE_EMACS'].include?('comint'))
+    return false unless $stdout.tty?
+
+    true
+  end
+
   def self.apply_theme_configuration(options)
     base_theme = ENV['LATEX_IT_THEME'] || ENV['L_THEME'] || ENV['COLOR_THEME'] ||
-                 ENV['BASE16_THEME'] || options[:theme] || LatexColor::DEFAULT_THEME
+                 ENV['BASE16_THEME'] || options[:theme] || LatexColor.default_theme
 
     if options[:theme_arg] =~ /^[+-]\d+$/
       step = options[:theme_arg].to_i

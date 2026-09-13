@@ -315,4 +315,30 @@ module LaTeXConfig
     end
     merged
   end
+
+  def self.active_config_info(dir = '.')
+    local_found = LOCAL_CONFIG_CANDIDATES.find { |c| File.file?(File.join(dir, c)) }
+    local_path = local_found ? File.join(dir, local_found) : nil
+
+    {
+      global_file: GLOBAL_CONFIG_FILE,
+      global_exists: File.file?(GLOBAL_CONFIG_FILE),
+      local_file: local_path,
+      merged_config: load_merged_config(dir)
+    }
+  end
+
+  def self.format_active_config(dir = '.')
+    info = active_config_info(dir)
+    lines = [
+      '# =========================================================================',
+      '# Active latex_it Configuration',
+      '# =========================================================================',
+      format('# Global file: %s (%s)', info[:global_file], info[:global_exists] ? 'loaded' : 'not found'),
+      format('#  Local file: %s', info[:local_file] ? "#{info[:local_file]} (loaded)" : 'none'),
+      '',
+      JSON.pretty_generate(info[:merged_config])
+    ]
+    lines.join("\n")
+  end
 end

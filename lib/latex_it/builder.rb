@@ -50,7 +50,7 @@ class LatexBuilder
   end
 
   def interactive_tty?
-    $stdout.tty? && !@options[:emacs] && !@options[:trace] && !@options[:score]
+    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:trace] && !@options[:score]
   end
 
   def run!
@@ -1058,7 +1058,7 @@ class LatexBuilder
     end
     return false unless txt_src == txt_dst
 
-    puts "\n  \e[37;45m PDF text content unchanged (skipped target overwrite) \e[0m"
+    puts "\n  #{Rainbow(' PDF text content unchanged (skipped target overwrite) ').color(:white).bg(:magenta)}"
     true
   end
 

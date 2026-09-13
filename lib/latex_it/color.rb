@@ -58,16 +58,71 @@ module LatexColor
     }
   }.freeze
 
+  ANSI_16_PALETTE = {
+    30 => [0, 0, 0],
+    31 => [205, 0, 0],
+    32 => [0, 205, 0],
+    33 => [205, 205, 0],
+    34 => [0, 0, 238],
+    35 => [205, 0, 205],
+    36 => [0, 205, 205],
+    37 => [229, 229, 229],
+    90 => [127, 127, 127],
+    91 => [255, 0, 0],
+    92 => [0, 255, 0],
+    93 => [255, 255, 0],
+    94 => [92, 92, 255],
+    95 => [255, 0, 255],
+    96 => [0, 255, 255],
+    97 => [255, 255, 255]
+  }.freeze
+
   ORDERED_THEMES = %w[blush catppuccin tokyo-night dracula nord ansi].freeze
   DEFAULT_THEME = 'blush'
 
-  @active_theme = DEFAULT_THEME
+  @active_theme = nil
 
   class << self
-    attr_reader :active_theme
+    def active_theme
+      @active_theme || default_theme
+    end
 
     def active_theme=(theme_name)
       @active_theme = normalize_theme(theme_name)
+    end
+
+    def true_color_supported?(env = ENV)
+      colorterm = env['COLORTERM'].to_s.downcase
+      return true if %w[truecolor 24bit].include?(colorterm)
+
+      term = env['TERM'].to_s.downcase
+      return true if term.include?('direct')
+
+      return true if env['KITTY_PID'] || env['WT_SESSION'] || env['VSCODE_PID'] || env['ITERM_SESSION_ID']
+
+      false
+    end
+
+    def color_256_supported?(env = ENV)
+      term = env['TERM'].to_s.downcase
+      term.include?('256color') || term.include?('256')
+    end
+
+    def default_theme(env = ENV)
+      true_color_supported?(env) ? 'blush' : 'ansi'
+    end
+
+    def rgb_to_ansi16(r, g, b, ground = :foreground)
+      best_code = 37
+      min_dist = Float::INFINITY
+      ANSI_16_PALETTE.each do |code, (pr, pg, pb)|
+        dist = ((r - pr)**2) + ((g - pg)**2) + ((b - pb)**2)
+        if dist < min_dist
+          min_dist = dist
+          best_code = code
+        end
+      end
+      ground == :background ? (best_code + 10) : best_code
     end
 
     def custom_hex?(str)
@@ -84,11 +139,12 @@ module LatexColor
     end
 
     def theme_colors
-      if custom_hex?(@active_theme)
-        hex = @active_theme.start_with?('#') ? @active_theme : "##{@active_theme}"
+      curr = active_theme
+      if custom_hex?(curr)
+        hex = curr.start_with?('#') ? curr : "##{curr}"
         return { red: hex }
       end
-      THEMES[@active_theme] || THEMES[DEFAULT_THEME]
+      THEMES[curr] || THEMES[DEFAULT_THEME]
     end
 
     def theme_description(name)
@@ -105,11 +161,12 @@ module LatexColor
 
     def format_theme_list
       lines = ["Available diagnostic color themes:\n"]
+      curr = active_theme
       ORDERED_THEMES.each do |key|
         meta = THEMES[key]
-        marker = (key == @active_theme) ? '* ' : '  '
+        marker = (key == curr) ? '* ' : '  '
         swatch = meta[:red] ? " (#{meta[:red]})" : ''
-        current_tag = (key == @active_theme) ? '  [current]' : ''
+        current_tag = (key == curr) ? '  [current]' : ''
         lines << format('%s%-12s - %-32s%s%s', marker, key, meta[:desc], swatch, current_tag)
       end
       lines << "\nCycle through themes with: l --theme +1"
@@ -121,16 +178,26 @@ end
 begin
   require 'rainbow'
 
-  # Enable TrueColor 24-bit output for Rainbow RGB colors
+  # Enable TrueColor 24-bit output when supported, fallback to 256 or ANSI 16
   class Rainbow::Color::RGB < Rainbow::Color::Indexed
     def codes
-      [ground == :foreground ? 38 : 48, 2, r, g, b]
+      if LatexColor.true_color_supported?
+        [ground == :foreground ? 38 : 48, 2, r, g, b]
+      elsif LatexColor.color_256_supported?
+        super + [5, code_from_rgb]
+      else
+        [LatexColor.rgb_to_ansi16(r, g, b, ground)]
+      end
     end
   end
 
   module RainbowThemeOverride
     def build(ground, values)
       if values.size == 1 && values.first.is_a?(Symbol)
+        if !LatexColor.true_color_supported? && !LatexColor.color_256_supported?
+          return super
+        end
+
         colors = LatexColor.theme_colors
         hex = colors[values.first]
         return Rainbow::Color::RGB.new(ground, *parse_hex_color(hex)) if hex

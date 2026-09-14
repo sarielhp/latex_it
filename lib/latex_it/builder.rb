@@ -594,6 +594,7 @@ class LatexBuilder
     pgid = Process.getpgid(pid) rescue nil
     Process.kill('-KILL', pgid) if pgid rescue nil
     Process.kill('KILL', pid) rescue nil
+    Process.waitpid(pid, Process::WNOHANG) rescue nil
   end
 
   def shell_quote(str)

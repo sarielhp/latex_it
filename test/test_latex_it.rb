@@ -1653,4 +1653,44 @@ class TestLatexItCLI < Minitest::Test
     plain = strip_ansi(io.string)
     assert_includes plain, '✔ No errors/alerts.'
   end
+
+  def test_graceful_interrupt_handling
+    out_err = StringIO.new
+    orig_stderr = $stderr
+    $stderr = out_err
+    begin
+      exit_status = nil
+      begin
+        LatexCLI.handle_interrupt(nil, Interrupt.new)
+      rescue SystemExit => e
+        exit_status = e.status
+      end
+
+      assert_equal 130, exit_status
+      output = out_err.string
+      assert_includes output, 'Build cancelled by user (Ctrl-C)'
+      refute_includes output, 'Traceback'
+      refute_includes output, 'from '
+    ensure
+      $stderr = orig_stderr
+    end
+  end
+
+  def test_subcommand_interrupt_signal_exits_130
+    Dir.mktmpdir('latex_it_sigint') do |dir|
+      tex = File.join(dir, 'slow.tex')
+      File.write(tex, "\\documentclass{article}\n\\begin{document}\n\\loop\\iftrue\\repeat\n\\end{document}\n")
+      cmd = [BIN, '-f', 'slow.tex']
+      Open3.popen2e(*cmd, chdir: dir) do |_stdin, stdout_err, wait_thr|
+        sleep 0.25
+        Process.kill('INT', wait_thr.pid) rescue nil
+        output = stdout_err.read
+        status = wait_thr.value
+        assert_equal 130, status.exitstatus
+        assert_includes output, 'Build cancelled by user (Ctrl-C)'
+        refute_includes output, 'Traceback'
+        refute_includes output, 'from /'
+      end
+    end
+  end
 end

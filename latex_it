@@ -45,21 +45,42 @@ module LatexCLI
   def self.run(argv = ARGV, prog_name = File.basename($PROGRAM_NAME))
     $stdout.sync = true
     $stderr.sync = true
-    at_exit { puts '' unless $stdout.closed? rescue nil }
+    at_exit { puts '' unless @interrupted || $stdout.closed? rescue nil }
     LaTeXUtils.initial_pwd = Dir.pwd
-    return if early_personality_dispatch(argv, prog_name)
 
-    extra_cli_files = extract_extra_cli_files(argv)
-    cfg = LaTeXConfig.load_merged_config
-    options = build_default_options(cfg, prog_name, extra_cli_files)
+    begin
+      return if early_personality_dispatch(argv, prog_name)
 
-    normalize_argv!(argv)
-    parser = build_option_parser(options)
-    parse_options!(parser, argv, prog_name)
-    handle_help_and_examples(parser, options, prog_name, argv)
+      extra_cli_files = extract_extra_cli_files(argv)
+      cfg = LaTeXConfig.load_merged_config
+      options = build_default_options(cfg, prog_name, extra_cli_files)
 
-    configure_environment(options)
-    execute_targets(argv, options)
+      normalize_argv!(argv)
+      parser = build_option_parser(options)
+      parse_options!(parser, argv, prog_name)
+      handle_help_and_examples(parser, options, prog_name, argv)
+
+      configure_environment(options)
+      execute_targets(argv, options)
+    rescue Interrupt, SignalException => e
+      handle_interrupt(options, e)
+    end
+  end
+
+  def self.handle_interrupt(options = nil, exception = nil)
+    @interrupted = true
+    LaTeXIndicator.stop(clear: true)
+    $stderr.print "\e[0m"
+    signo = exception&.respond_to?(:signo) ? exception.signo : 2
+    exit_code = 128 + (signo || 2)
+
+    if options && options[:vim]
+      $stderr.puts "\nBuild interrupted."
+    else
+      msg = signo == 15 ? '==> Build terminated by signal (SIGTERM).' : '==> Build cancelled by user (Ctrl-C).'
+      $stderr.puts "\n#{Rainbow(msg).yellow.bright}"
+    end
+    exit exit_code
   end
 
   # Every script under tools/ handles this; the binary end users actually run

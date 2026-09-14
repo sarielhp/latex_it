@@ -839,6 +839,68 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
+  def test_packager_zip_flat_mode
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      FileUtils.mkdir_p(File.join(dir, 'sections'))
+      FileUtils.mkdir_p(File.join(dir, 'figs'))
+
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n% author notes\n\\input{sections/intro.tex}\n\\begin{document}\nHello\n\\end{document}\n")
+      File.write(File.join(dir, 'sections', 'intro.tex'), "% section comment\n\\section{Intro}\nIntro text here\n")
+      File.write(File.join(dir, 'paper.pdf'), 'PDF-DUMMY')
+      File.write(File.join(dir, 'paper.bbl'), "\\begin{thebibliography}{1}\n\\bibitem{x}Ref\n\\end{thebibliography}\n")
+      File.write(File.join(dir, 'figs', 'plot.pdf'), 'PLOT-DUMMY')
+
+      fls_content = <<~FLS
+        INPUT /usr/share/texlive/texmf-dist/tex/latex/base/article.cls
+        INPUT ./paper.tex
+        INPUT ./sections/intro.tex
+        INPUT ./figs/plot.pdf
+      FLS
+      File.write(File.join(dir, 'junk', 'paper.fls'), fls_content)
+
+      builder = LatexBuilder.new('paper.tex', zip_flat: true)
+      packager = LatexPackager.new(builder)
+
+      Dir.chdir(dir) do
+        packager.package!
+        assert File.file?('paper.zip')
+
+        entries, = Open3.capture2('unzip', '-l', 'paper.zip')
+        assert_includes entries, 'paper.tex'
+        assert_includes entries, 'paper.pdf'
+        assert_includes entries, 'paper.bbl'
+        assert_includes entries, 'figs/plot.pdf'
+        refute_includes entries, 'sections/intro.tex'
+
+        Dir.mktmpdir do |unzip_dir|
+          Open3.capture2('unzip', '-q', File.join(dir, 'paper.zip'), '-d', unzip_dir)
+          tex_content = File.read(File.join(unzip_dir, 'paper.tex'))
+          assert_includes tex_content, 'Intro text here'
+          assert_includes tex_content, '% author notes'
+          assert_includes tex_content, '% section comment'
+          refute_includes tex_content, '\\input{sections/intro.tex}'
+        end
+      end
+    end
+  end
+
+  def test_cli_zip_flat_flag_parsing
+    options = LatexCLI.build_default_options({}, 'l', [])
+    parser = LatexCLI.build_option_parser(options)
+
+    parser.parse(['-Z'])
+    assert_equal true, options[:zip]
+    assert_equal true, options[:zip_flat]
+
+    options2 = LatexCLI.build_default_options({}, 'l', [])
+    parser2 = LatexCLI.build_option_parser(options2)
+
+    parser2.parse(['--zip-flat'])
+    assert_equal true, options2[:zip]
+    assert_equal true, options2[:zip_flat]
+  end
+
   def test_cli_zip_with_separator
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}Hi\\end{document}\n")

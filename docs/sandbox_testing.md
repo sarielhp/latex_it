@@ -29,14 +29,36 @@ l -z paper.tex -- notes.txt data/*.csv
 - **Default (`false`)**: Harvested styles are placed in the archive root for compatibility across journal submission portals.
 - **Opt-in (`--inject-styles`)**: Harvested styles are placed into a `styles/` subfolder, and `{% raw %}\def\input@path{{styles/}{./}}{% endraw %}` is added to the staged `.tex` file.
 
-### Portability Verification (`-t` / `--verify`)
-To confirm that an archive builds on another machine without ambient dependencies:
+### Creating a Flattened Archive (`-Z` / `--zip-flat`)
+Many journal submission systems (such as Springer Nature, IEEE Author Portal, or Elsevier Editorial Manager) require all LaTeX text to be in a single monolithic `.tex` file with no `\input` or `\include` subdirectories.
+
+`-Z` (or `--zip-flat`) automatically inlines all inputs into a single `<document>.tex` file, retains the compiled `.bbl`, bundles active figures and styles, and omits redundant subordinate `.tex` files:
 
 ```bash
-l -t paper.tex
+l -Z paper.tex
 ```
 
-This unpacks the archive into an isolated `/tmp` directory, runs `latex_it --no-env` (clearing `TEXINPUTS` and `TEXMFHOME`), and verifies that the rebuilt PDF text matches using `pdftotext -layout`.
+Like `-z`, you can combine `-Z` with `-t` to verify that the flattened archive builds cleanly in an isolated sandbox:
+
+```bash
+l -Z -t paper.tex
+```
+
+### Packaging Modes Comparison
+
+`latex_it` provides three distinct packaging modes for sharing, archival, and publication:
+
+| Feature | Standard Zip (`-z`) | Flat Zip (`-Z`) | arXiv Package (`--arxiv`) |
+| :--- | :--- | :--- | :--- |
+| **TeX Structure** | Multi-file tree preserved | **Inlined single `.tex` file** | Inlined single `.tex` file |
+| **Subordinate `.tex`** | Copied into archive | **Omitted** | Omitted |
+| **Comments (`%`)** | Preserved | **Preserved** | Stripped by default |
+| **Bibliography** | Copies `.bbl` and local `.bib` | Copies `.bbl` and local `.bib` | Copies `.bbl` (shields biblatex) |
+| **Figures & Styles** | Preserved | Preserved | Preserved |
+| **Figure Sources** | Companion sources bundled (`.fig`, `.ipe`, etc.) | Companion sources bundled | Strictly excluded (PDF/PNG only) |
+| **Metadata File** | None | None | Generates `arxiv_*_meta.txt` |
+| **Target Output** | `<doc>.zip` | `<doc>.zip` | `arxiv_<doc>.zip` |
+| **Primary Use Case** | Co-authors & general archival | Journal submission portals (IEEE, Springer, Elsevier) | Direct submission to arXiv.org |
 
 ---
 

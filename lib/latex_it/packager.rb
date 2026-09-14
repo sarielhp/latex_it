@@ -11,6 +11,7 @@ require 'fileutils'
 require 'open3'
 require 'rbconfig'
 require 'tmpdir'
+require_relative 'flattener'
 
 class LatexPackager
   attr_reader :builder, :filename, :bfilename, :bdir, :options
@@ -42,7 +43,8 @@ class LatexPackager
 
     return false unless stage_and_create_zip(zip_filename, deps, fig_sources)
 
-    puts Rainbow("==> Created portable zip: #{zip_filename}").green.bright
+    kind = @options[:zip_flat] ? 'flat ' : ''
+    puts Rainbow("==> Created portable #{kind}zip: #{zip_filename}").green.bright
 
     if @options[:verify] && !verify_archive!(zip_filename)
       FileUtils.rm_f(zip_filename)
@@ -166,9 +168,14 @@ class LatexPackager
 
   def stage_all_assets(stage_dir, deps, fig_sources)
     copy_target_outputs(stage_dir)
-    stage_main_tex(stage_dir, !deps[:styles].empty?)
 
-    deps[:tex_inputs].each { |f| copy_preserving_path(f, stage_dir) if File.file?(f) }
+    if @options[:zip_flat]
+      return false unless stage_flattened_main_tex(stage_dir, !deps[:styles].empty?)
+    else
+      stage_main_tex(stage_dir, !deps[:styles].empty?)
+      deps[:tex_inputs].each { |f| copy_preserving_path(f, stage_dir) if File.file?(f) }
+    end
+
     stage_styles(deps[:styles], stage_dir)
 
     discover_local_bib_files.each { |f| copy_preserving_path(f, stage_dir) if File.file?(f) }
@@ -176,6 +183,33 @@ class LatexPackager
 
     extra_files = Array(@options[:extra_files]).flat_map { |g| Dir.glob(g).empty? ? [g] : Dir.glob(g) }
     extra_files.uniq.each { |f| copy_preserving_path(f, stage_dir) if File.exist?(f) }
+    true
+  end
+
+  def stage_flattened_main_tex(stage_dir, has_styles = false)
+    dest_path = File.join(stage_dir, @filename)
+    FileUtils.mkdir_p(File.dirname(dest_path))
+
+    strip_comments = @options[:strip_comments] == true
+    content = begin
+      LaTeXFlattener.flatten(
+        @filename,
+        '.',
+        @options[:strip_host_patterns],
+        strip_comments: strip_comments
+      )
+    rescue StandardError => e
+      warn Rainbow("[FAIL] Could not flatten LaTeX source: #{e.message}").red.bright
+      return false
+    end
+
+    if @options[:inject_styles] && has_styles && !content.include?('input@path')
+      injection = "\\makeatletter\n\\def\\input@path{{styles/}{./}}\n\\makeatother\n"
+      content = inject_into_tex(content, injection)
+    end
+
+    File.write(dest_path, content)
+    true
   end
 
   def stage_and_create_zip(zip_filename, deps, fig_sources)
@@ -185,7 +219,7 @@ class LatexPackager
     end
 
     Dir.mktmpdir('latex_it_stage_') do |stage_dir|
-      stage_all_assets(stage_dir, deps, fig_sources)
+      return false unless stage_all_assets(stage_dir, deps, fig_sources)
 
       zip_abs = File.expand_path(zip_filename)
       FileUtils.rm_f(zip_abs)

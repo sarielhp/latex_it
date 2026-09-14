@@ -138,7 +138,7 @@ module LatexCLI
 
   # Flags that make `-- <files>` mean "extra files to bundle". Everywhere else
   # `--` keeps its POSIX meaning of "end of options".
-  PACKAGING_LONG_FLAGS = %w[--zip --verify --arxiv].freeze
+  PACKAGING_LONG_FLAGS = %w[--zip --zip-flat --verify --arxiv].freeze
 
   def self.packaging_requested?(argv)
     argv.any? do |arg|
@@ -146,7 +146,7 @@ module LatexCLI
       next true if arg.start_with?('--zip-name', '--arxiv-name')
       next false unless arg.start_with?('-') && !arg.start_with?('--')
 
-      arg[1..].chars.any? { |c| c == 'z' || c == 't' }
+      arg[1..].chars.any? { |c| c == 'z' || c == 'Z' || c == 't' }
     end
   end
 
@@ -241,6 +241,7 @@ module LatexCLI
   def self.build_zip_options(cfg, extra_cli_files)
     {
       zip: false,
+      zip_flat: cfg.dig('zip', 'flat') == true,
       verify: false,
       zip_name: nil,
       inject_styles: cfg.dig('zip', 'inject_styles') == true,
@@ -371,6 +372,10 @@ module LatexCLI
     opts.separator ''
     opts.separator '  Paper Bundling, Bibliography & Portability:'
     opts.on('-z', '--zip', 'Create a self-contained portable zip archive of paper, styles, and figures') { options[:zip] = true }
+    opts.on('-Z', '--zip-flat', 'Create a self-contained portable zip archive with inlined/flattened .tex') do
+      options[:zip] = true
+      options[:zip_flat] = true
+    end
     opts.on('-t', '--verify', 'Verify self-contained portability by testing compilation in /tmp sandbox') { options[:verify] = true; options[:zip] = true }
     opts.on('--zip-name NAME', 'Specify custom output filename for generated zip archive') { |v| options[:zip] = true; options[:zip_name] = v }
     opts.on('-B', '--bib-extract', 'Extract cited bibliography entries into local .bib file (default: <doc>.bib)') { options[:bib_extract] = true }

@@ -23,6 +23,9 @@ This creates:
 - `arxiv_<document>.zip`: Sanitized, flattened archive ready for arXiv upload.
 - `arxiv_<document>_meta.txt`: Formatted metadata (when `--meta` is used).
 
+> [!NOTE]
+> For preparing publisher/journal archives (IEEE, Springer, Elsevier) that require flat `.tex` files without stripping comments or applying arXiv-specific constraints, use `-Z` / `--zip-flat`. See [Packaging Modes Comparison](sandbox_testing.md#packaging-modes-comparison).
+
 ---
 
 ## 2. Packaging Pipeline (`--arxiv`)

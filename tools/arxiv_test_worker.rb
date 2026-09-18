@@ -115,7 +115,7 @@ module ArxivTestWorker
       @report[:status] = @report[:checks].all? { |c| c[:status] == 'PASS' } ? 'PASS' : 'FAIL'
       save
       @report[:status] == 'PASS' ? 0 : 1
-    rescue Exception => e
+    rescue Exception => e # ruby-audit: allow-rescue-exception (re-raises SignalException after recording report)
       @report[:status] = 'ERROR'
       @report[:completed] = true
       @report[:error] = "#{e.class}: #{e.message}"
@@ -341,7 +341,7 @@ module ArxivTestWorker
         end
         sleep 0.05
       end
-    rescue Exception
+    rescue Exception # ruby-audit: allow-rescue-exception (reaps child process before re-raising)
       reap(pid)
       raise
     end

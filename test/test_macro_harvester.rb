@@ -189,4 +189,50 @@ class TestMacroHarvester < Minitest::Test
       assert_equal "Did you mean '\\QuotePExt'?", hint_case
     end
   end
+
+  def test_harvest_discovers_macros_from_fls_recorder
+    Dir.mktmpdir('latex_it_harvest_test') do |dir|
+      main_file = File.join(dir, 'doc.tex')
+      File.write(main_file, "\\documentclass{article}\n\\begin{document}\n\\end{document}\n")
+
+      external_dir = File.join(dir, 'outside')
+      FileUtils.mkdir_p(external_dir)
+      external_sty = File.join(external_dir, 'remote.sty')
+      File.write(external_sty, "\\newcommand{\\RemoteFlsMacro}{val}\n")
+
+      # Create junk/doc.fls recording the external input
+      junk_dir = File.join(dir, 'junk')
+      FileUtils.mkdir_p(junk_dir)
+      fls_file = File.join(junk_dir, 'doc.fls')
+      File.write(fls_file, "PWD #{dir}\nINPUT #{main_file}\nINPUT #{external_sty}\n")
+
+      macros = LaTeXMacroHarvester.harvest(main_file)
+      assert_includes macros, 'RemoteFlsMacro'
+
+      hint = LaTeXErrorCatalog.suggest_command('\\RemoteFlsMcro', file: main_file)
+      assert_equal "Did you mean '\\RemoteFlsMacro'?", hint
+    end
+  end
+
+  def test_harvest_discovers_macros_from_symlinked_directory
+    Dir.mktmpdir('latex_it_harvest_test') do |dir|
+      shared_styles = File.join(dir, 'shared_styles')
+      FileUtils.mkdir_p(shared_styles)
+      File.write(File.join(shared_styles, 'macros.tex'), "\\newcommand{\\SymlinkedDirMacro}{val}\n")
+
+      proj_dir = File.join(dir, 'paper')
+      FileUtils.mkdir_p(proj_dir)
+      main_file = File.join(proj_dir, 'main.tex')
+      File.write(main_file, "\\documentclass{article}\n\\begin{document}\n\\end{document}\n")
+
+      # Symlink styles -> ../shared_styles
+      File.symlink(shared_styles, File.join(proj_dir, 'styles'))
+
+      macros = LaTeXMacroHarvester.harvest(main_file)
+      assert_includes macros, 'SymlinkedDirMacro'
+
+      hint = LaTeXErrorCatalog.suggest_command('\\SymlinkedDirMcro', file: main_file)
+      assert_equal "Did you mean '\\SymlinkedDirMacro'?", hint
+    end
+  end
 end

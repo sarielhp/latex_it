@@ -27,7 +27,7 @@ module LaTeXMacroHarvester
     root = determine_project_root(file_path)
     return [] unless root
 
-    @cache[root] ||= scan_project(root)
+    @cache[root] ||= scan_project(root, file_path)
   end
 
   def self.clear_cache!
@@ -87,19 +87,66 @@ module LaTeXMacroHarvester
     File.exist?(base) ? base : nil
   end
 
-  def self.scan_project(root)
-    files = collect_source_files(root)
+  def self.scan_project(root, file_path = nil)
+    files = collect_source_files(root, file_path)
     macros = []
     files.each { |f| scan_file_for_macros(f, macros) }
     macros.uniq
   end
 
-  def self.collect_source_files(root)
+  def self.collect_source_files(root, file_path = nil)
+    files = collect_fls_files(root, file_path)
     candidates = Dir.glob(File.join(root, '**', '*.{tex,sty,cls}'))
+    collect_symlink_dir_files(root, candidates)
+
     candidates.reject! do |path|
       excluded_dir?(path) || (File.file?(path) && File.size(path) > 1_000_000)
     end
-    candidates[0...200]
+    (files + candidates).uniq[0...200]
+  end
+
+  def self.collect_symlink_dir_files(root, candidates)
+    Dir.children(root).each do |child|
+      full = File.join(root, child)
+      if File.symlink?(full) && File.directory?(full) && !excluded_dir?(full)
+        candidates.concat(Dir.glob(File.join(full, '**', '*.{tex,sty,cls}')))
+      end
+    end
+  rescue StandardError
+    nil
+  end
+
+  def self.collect_fls_files(root, file_path = nil)
+    fls_candidates = []
+    if file_path && !file_path.to_s.strip.empty?
+      stem = File.basename(file_path.to_s.strip, '.*')
+      fls_candidates << File.join(root, 'junk', "#{stem}.fls")
+      fls_candidates << File.join(root, "#{stem}.fls")
+    end
+    fls_candidates.concat(Dir.glob(File.join(root, 'junk', '*.fls')))
+
+    files = []
+    fls_candidates.uniq.each do |fls|
+      extract_files_from_fls(fls, root, files)
+    end
+    files
+  end
+
+  def self.extract_files_from_fls(fls_path, root, files)
+    return unless File.file?(fls_path)
+
+    File.foreach(fls_path) do |line|
+      next unless line =~ /\AINPUT\s+(.+)$/
+
+      raw_path = Regexp.last_match(1).strip
+      next if raw_path =~ %r{/texmf-dist/|/texmf/}
+      next unless raw_path =~ /\.(?:tex|sty|cls)\z/
+
+      abs = File.expand_path(raw_path, root)
+      files << abs if File.file?(abs)
+    end
+  rescue StandardError
+    nil
   end
 
   def self.excluded_dir?(path)

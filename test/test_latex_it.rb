@@ -546,6 +546,19 @@ class TestLatexItCLI < Minitest::Test
     assert_includes formatted, cyan_bright_42
   end
 
+  def test_did_you_mean_rust_style_colorization
+    Rainbow.enabled = true
+    builder = LatexBuilder.new('sample.tex', emacs: false, color: true)
+
+    catalog = { id: :undefined_control_sequence, hint: "Did you mean '\\alpha'?" }
+    item = { file: 'sample.tex', token: '\\alpa' }
+    pointer = builder.send(:render_pointer_line, 3, 5, 5, catalog)
+
+    assert_includes pointer, Rainbow("Did you mean ").cyan.to_s
+    assert_includes pointer, Rainbow("'\\alpha'").green.bright.bold.to_s
+    assert_includes pointer, Rainbow('^^^^^').red.bright.bold.to_s
+  end
+
   def test_left_width_alignment
     Rainbow.enabled = false
     builder = LatexBuilder.new('sample.tex', emacs: false, color: false)

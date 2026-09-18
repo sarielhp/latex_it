@@ -263,20 +263,32 @@ module LaTeXDiagnostics
     end
   end
 
-  def render_source_code_line(line_no, display_line)
+  def render_source_code_line(line_no, display_line, col_pos = nil, token_len = nil)
     gutter_num = line_no.to_s.rjust(3)
     num_colored = (@options && @options[:color] == false) ? gutter_num : Rainbow(gutter_num).cyan
     gutter_bar = (@options && @options[:color] == false) ? '|' : Rainbow('|').cyan
-    "  #{num_colored} #{gutter_bar} #{display_line}"
+    code_text = highlight_error_token(display_line, col_pos, token_len)
+    "  #{num_colored} #{gutter_bar} #{code_text}"
+  end
+
+  def highlight_error_token(line, col_pos, token_len)
+    return line if @options && @options[:color] == false
+    return line unless col_pos && token_len && token_len.positive?
+    return line if col_pos < 0 || col_pos + token_len > line.length
+
+    prefix = line[0...col_pos]
+    target = line[col_pos, token_len]
+    suffix = line[(col_pos + token_len)..]
+    "#{prefix}#{Rainbow(target).red.bright.bold}#{suffix}"
   end
 
   def render_gutter_hint(gutter_num_len, catalog)
     return nil unless catalog && catalog[:hint]
 
-    hint_text = "Hint: #{catalog[:hint]}"
-    hint_colored = (@options && @options[:color] == false) ? hint_text : Rainbow(hint_text).cyan
+    hint_colored = colorize_inline_hint(catalog[:hint]).strip
     arrow = (@options && @options[:color] == false) ? '▸' : Rainbow('▸').cyan.bright
-    "  #{' ' * (gutter_num_len + 2)}#{arrow} #{hint_colored}"
+    label = (@options && @options[:color] == false) ? 'Hint: ' : Rainbow('Hint: ').cyan
+    "  #{' ' * (gutter_num_len + 2)}#{arrow} #{label}#{hint_colored}"
   end
 
   def format_source_frame(file_path, line_no, col_no, item, catalog)
@@ -289,7 +301,7 @@ module LaTeXDiagnostics
     col_pos, token_len = locate_token_column(source_line, col_no, token, catalog)
     display_line, adjusted_col = window_source_line(source_line, col_pos)
 
-    lines = [render_source_code_line(line_no, display_line)]
+    lines = [render_source_code_line(line_no, display_line, adjusted_col, token_len)]
     g_len = [line_no.to_s.length, 3].max
 
     if adjusted_col
@@ -304,14 +316,10 @@ module LaTeXDiagnostics
   def render_pointer_line(gutter_num_len, col_pos, token_len, catalog, root_col: nil)
     caret_len = [token_len || 1, 1].max
     caret = '^' * caret_len
-    caret_colored = (@options && @options[:color] == false) ? caret : Rainbow(caret).red.bright
+    caret_colored = (@options && @options[:color] == false) ? caret : Rainbow(caret).red.bright.bold
 
     hint_msg = inline_hint_text(catalog, root_col)
-    hint_colored = if hint_msg
-                     (@options && @options[:color] == false) ? " #{hint_msg}" : Rainbow(" #{hint_msg}").cyan
-                   else
-                     ''
-                   end
+    hint_colored = colorize_inline_hint(hint_msg)
 
     indent = ' ' * 2
     gutter_pad = ' ' * gutter_num_len
@@ -319,6 +327,24 @@ module LaTeXDiagnostics
     col_pad = ' ' * [col_pos, 0].max
 
     "#{indent}#{gutter_pad} #{gutter_bar} #{col_pad}#{caret_colored}#{hint_colored}"
+  end
+
+  def colorize_inline_hint(hint_msg)
+    return '' unless hint_msg
+    return " #{hint_msg}" if @options && @options[:color] == false
+
+    if hint_msg =~ /\ADid you mean '([^']+)'(.*)\z/
+      fix = Regexp.last_match(1)
+      suffix = Regexp.last_match(2)
+      " #{Rainbow('Did you mean ').cyan}#{Rainbow("'#{fix}'").green.bright.bold}#{Rainbow(suffix).cyan}"
+    elsif hint_msg =~ /\A(Undefined (?:command|environment|setup key|color|counter)) '([^']+)'(.*)\z/
+      prefix = Regexp.last_match(1)
+      bad = Regexp.last_match(2)
+      suffix = Regexp.last_match(3)
+      " #{Rainbow("#{prefix} ").cyan}#{Rainbow("'#{bad}'").red.bright.bold}#{Rainbow(suffix).cyan}"
+    else
+      Rainbow(" #{hint_msg}").cyan
+    end
   end
 
   def inline_hint_text(catalog, root_col)

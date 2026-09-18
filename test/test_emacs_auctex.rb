@@ -24,6 +24,23 @@ class TestEmacsAuctex < Minitest::Test
     refute_match(/\n \z/, plain_formatted)
   end
 
+  def test_error_block_includes_suggestion_in_emacs_mode
+    builder = LatexBuilder.new('main.tex', emacs: true)
+    err_block = [
+      './main.tex:15: Undefined control sequence.',
+      'l.15 \\QoutePExt'
+    ]
+    catalog = { hint: "Did you mean '\\QuotePExt'?" }
+    formatted = builder.send(:format_error_block, err_block, 15, catalog: catalog)
+    expected = "./main.tex:15: Undefined control sequence.\nl.15 \\QoutePExt\n \nDid you mean '\\QuotePExt'?"
+    assert_equal expected, formatted
+
+    # When item contains catalog
+    item_with_cat = { catalog: catalog }
+    formatted_item = builder.send(:format_error_block, err_block, 15, item: item_with_cat)
+    assert_equal expected, formatted_item
+  end
+
   def test_render_diagnostic_entry_emits_continuation_and_blank_line
     builder = LatexBuilder.new('main.tex', emacs: true)
     item = {
@@ -31,14 +48,16 @@ class TestEmacsAuctex < Minitest::Test
       line: 10,
       line_str: '10',
       text: './main.tex:10: Undefined control sequence.\nl.10 \\badcommand',
-      err_block: ['./main.tex:10: Undefined control sequence.', 'l.10 \\badcommand']
+      err_block: ['./main.tex:10: Undefined control sequence.', 'l.10 \\badcommand'],
+      catalog: { hint: "Did you mean '\\goodcommand'?" }
     }
     sio = StringIO.new
     builder.send(:render_diagnostic_entry, item, 2, nil, 'errors', io: sio)
     output = sio.string
 
     assert_includes output, "(main.tex\n"
-    assert_includes output, "l.10 \\badcommand\n \n\n"
+    assert_includes output, "l.10 \\badcommand\n \nDid you mean '\\goodcommand'?\n\n"
+    refute_match(/\e\[/, output) # strictly no ANSI escape codes in emacs mode
   end
 
   def test_custom_alerts_formatted_as_latex_warning_for_auctex
@@ -106,7 +125,7 @@ class TestEmacsAuctex < Minitest::Test
 
       builder = LatexBuilder.new(tex_file, emacs: true)
       errors = [
-        { file: tex_file, line: 10, line_str: '10', text: "#{tex_file}:10: Undefined control sequence.\nl.10 \\foo", err_block: ["#{tex_file}:10: Undefined control sequence.", 'l.10 \\foo'] },
+        { file: tex_file, line: 10, line_str: '10', text: "#{tex_file}:10: Undefined control sequence.\nl.10 \\foo", err_block: ["#{tex_file}:10: Undefined control sequence.", 'l.10 \\foo'], catalog: { hint: "Did you mean '\\food'?" } },
         { file: tex_file, line: 20, line_str: '20', text: "#{tex_file}:20: Undefined control sequence.\nl.20 \\bar", err_block: ["#{tex_file}:20: Undefined control sequence.", 'l.20 \\bar'] }
       ]
       warnings = [

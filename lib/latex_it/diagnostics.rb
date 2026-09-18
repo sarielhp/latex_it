@@ -148,7 +148,8 @@ module LaTeXDiagnostics
   end
 
   def format_error_block(err_block, line_no, width: 0, catalog: nil, repeat_count: 1, item: nil)
-    return format_emacs_error_block(err_block) if @options[:emacs]
+    cat = catalog || item&.[](:catalog)
+    return format_emacs_error_block(err_block, catalog: cat) if @options[:emacs]
 
     indent = ' ' * (width.positive? ? width + 2 : 2)
     file_path = item&.[](:file) || @filename
@@ -175,11 +176,12 @@ module LaTeXDiagnostics
     lines.join("\n")
   end
 
-  def format_emacs_error_block(err_block)
+  def format_emacs_error_block(err_block, catalog: nil)
     lines = err_block.dup
     if (idx = lines.rindex { |l| l =~ /^l\.\d+/ })
       lines.insert(idx + 1, ' ')
     end
+    lines << catalog[:hint] if catalog && catalog[:hint]
     lines.join("\n")
   end
 

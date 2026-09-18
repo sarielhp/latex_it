@@ -31,6 +31,7 @@ module LatexBundler
     flattener.rb
     meta_extractor.rb
     bib_locator.rb
+    macro_harvester.rb
     error_catalog.rb
     diagnostics.rb
     builder.rb

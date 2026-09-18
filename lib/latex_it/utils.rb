@@ -187,16 +187,23 @@ module LaTeXUtils
     return right.length if left.empty?
     return left.length if right.empty?
 
-    previous = (0..right.length).to_a
-    left.each_char.with_index(1) do |left_char, row|
-      current = [row]
-      right.each_char.with_index(1) do |right_char, col|
-        cost = left_char == right_char ? 0 : 1
-        current << [current[col - 1] + 1, previous[col] + 1, previous[col - 1] + cost].min
+    d = Array.new(left.length + 1) { Array.new(right.length + 1, 0) }
+    (0..left.length).each { |i| d[i][0] = i }
+    (0..right.length).each { |j| d[0][j] = j }
+
+    (1..left.length).each do |i|
+      (1..right.length).each do |j|
+        cost = left[i - 1] == right[j - 1] ? 0 : 1
+        d[i][j] = [d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost].min
+        d[i][j] = [d[i][j], d[i - 2][j - 2] + 1].min if transposition?(left, right, i, j)
       end
-      previous = current
     end
-    previous.last
+
+    d[left.length][right.length]
+  end
+
+  def self.transposition?(left, right, i, j)
+    i > 1 && j > 1 && left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1]
   end
 
   def self.safe_read(path)

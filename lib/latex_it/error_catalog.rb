@@ -7,6 +7,9 @@
 # token extraction, and actionable remediation hints.
 # ==============================================================================
 
+require_relative 'utils'
+require_relative 'macro_harvester'
+
 module LaTeXErrorCatalog
   PACKAGE_COMMANDS = {
     'toprule' => 'booktabs',
@@ -69,7 +72,7 @@ module LaTeXErrorCatalog
     frac sqrt left right over atop lim min max sup inf det exp log ln sin cos tan
   ].freeze
 
-  def self.suggest_command(raw_tok)
+  def self.suggest_command(raw_tok, file: nil)
     return 'Undefined command; check spelling or \\usepackage' if raw_tok.nil? || raw_tok.empty?
 
     cmd = raw_tok.to_s.strip.sub(/\A\\/, '')
@@ -78,29 +81,61 @@ module LaTeXErrorCatalog
     pkg = PACKAGE_COMMANDS[cmd]
     return "Command '\\#{cmd}' requires \\usepackage{#{pkg}}" if pkg
 
-    suggestion = find_closest_command(cmd)
+    project_macros = LaTeXMacroHarvester.harvest(file)
+    suggestion = find_closest_command(cmd, project_macros)
     if suggestion
-      sug_pkg = PACKAGE_COMMANDS[suggestion]
+      sug_pkg = project_macros.include?(suggestion) ? nil : PACKAGE_COMMANDS[suggestion]
       sug_pkg ? "Did you mean '\\#{suggestion}'? (requires \\usepackage{#{sug_pkg}})" : "Did you mean '\\#{suggestion}'?"
     else
       "Undefined command '\\#{cmd}'; check spelling or \\usepackage"
     end
   end
 
-  def self.find_closest_command(cmd)
+  def self.find_closest_command(cmd, project_macros = [])
     return nil if cmd.length < 3
 
-    max_dist = cmd.length <= 4 ? 1 : 2
-    candidates = (COMMON_COMMANDS + PACKAGE_COMMANDS.keys).uniq
+    ci_match = (project_macros + COMMON_COMMANDS + PACKAGE_COMMANDS.keys).find do |c|
+      c.casecmp(cmd).zero? && c != cmd
+    end
+    return ci_match if ci_match
+
+    max_dist = [cmd.length / 3, 1].max
+    candidates = (COMMON_COMMANDS + PACKAGE_COMMANDS.keys + project_macros).uniq
     candidates.select! { |c| (c.length - cmd.length).abs <= max_dist }
 
-    best = candidates.min_by do |c|
-      dist = LaTeXUtils.edit_distance(cmd, c)
-      [dist, c[0] == cmd[0] ? 0 : 1]
-    end
-    return nil unless best
+    scored = score_command_candidates(cmd, candidates, project_macros, max_dist)
+    return nil if scored.empty?
 
-    LaTeXUtils.edit_distance(cmd, best) <= max_dist ? best : nil
+    scored.sort_by! { |s| [s[:dist], s[:is_proj], s[:same_first]] }
+    best = scored[0]
+    return nil if ambiguous_match?(best, scored[1])
+
+    best[:cand]
+  end
+
+  def self.score_command_candidates(cmd, candidates, project_macros, max_dist)
+    scored = []
+    candidates.each do |c|
+      dist = LaTeXUtils.edit_distance(cmd, c)
+      next if dist > max_dist
+
+      is_proj = project_macros.include?(c) ? 0 : 1
+      same_first = c[0] == cmd[0] ? 0 : 1
+      scored << { cand: c, dist: dist, is_proj: is_proj, same_first: same_first }
+    end
+    scored
+  end
+
+  def self.ambiguous_match?(best, runner_up)
+    return false unless runner_up
+    return false if best[:is_proj].zero? && runner_up[:is_proj] == 1 && best[:dist] == runner_up[:dist]
+    return true if best[:dist] == runner_up[:dist]
+
+    if best[:dist] >= 2 && runner_up[:dist] < best[:dist] + 2
+      return true unless best[:is_proj].zero? && runner_up[:is_proj] == 1
+    end
+
+    false
   end
 
   # TeX breaks the l.N context line immediately after the offending token, so
@@ -371,7 +406,7 @@ module LaTeXErrorCatalog
       pattern: /Undefined control sequence/i,
       title: 'Undefined Control Sequence',
       token_extractor: UNDEFINED_CS_EXTRACTOR,
-      hint: ->(tok) { suggest_command(tok) },
+      hint: ->(tok, file = nil) { suggest_command(tok, file: file) },
       why: 'LaTeX does not recognize this macro or command name.',
       fix: 'Check for typos or include the package defining this macro in preamble.',
       doc_slug: '02_undefined_control_sequence'
@@ -866,7 +901,7 @@ module LaTeXErrorCatalog
       next unless match
 
       token = extract_token(entry, match, err_block, file: file, line: line)
-      hint = resolve_hint(entry[:hint], token)
+      hint = resolve_hint(entry[:hint], token, file: file)
       root_line, root_col = extract_root_location(entry, token, hint, file, line)
       return {
         id: entry[:id],
@@ -891,7 +926,9 @@ module LaTeXErrorCatalog
     if entry[:id] == :misplaced_alignment_tab
       col = extract_misplaced_tab_col(file, line)
       return [line, col] if col
-    elsif entry[:id] == :undefined_control_sequence && token
+    end
+
+    if entry[:id] == :undefined_control_sequence && token
       col = extract_token_col(file, line, token)
       return [line, col] if col
     end
@@ -940,12 +977,10 @@ module LaTeXErrorCatalog
     end
   end
 
-  def self.resolve_hint(hint, token)
-    if hint.respond_to?(:call)
-      hint.call(token)
-    else
-      hint.to_s
-    end
+  def self.resolve_hint(hint, token, file: nil)
+    return hint.to_s unless hint.respond_to?(:call)
+
+    hint.parameters.size > 1 ? hint.call(token, file) : hint.call(token)
   end
 
   WARNING_EXPLANATIONS = {

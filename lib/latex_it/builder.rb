@@ -33,6 +33,18 @@ class LatexBuilder
 
   DEFAULT_PASS_TIMEOUT = 180
 
+  BIB_RERUN_PATTERNS = [
+    /Please \(re\)run Biber/i, /No file .*\.bbl/i, /Citation .* undefined/i,
+    /There were undefined citations/i, /Package biblatex Warning: Please rerun/i,
+    /Package natbib Warning: Citation\(s\) may have changed/i
+  ].freeze
+
+  LATEX_RERUN_PATTERNS = [
+    /Label\(s\) may have changed/i, /Rerun to get/i, /Please rerun LaTeX/i,
+    /There were undefined references/i, /There were undefined citations/i,
+    /Package rerunfilecheck Warning: File .* has changed/i, /Package ocgx2 Warning: Rerun/i
+  ].freeze
+
   ProcessResultStatus = LaTeXUtils::ProcessResultStatus
 
   def initialize(target, options)
@@ -115,11 +127,7 @@ class LatexBuilder
       return false
     end
 
-    if interactive_tty?
-      LaTeXIndicator.stop(clear: true)
-    else
-      puts ''
-    end
+    interactive_tty? ? LaTeXIndicator.stop(clear: true) : puts('')
     finalize_build_outputs(total_t0)
     true
   end
@@ -207,45 +215,21 @@ class LatexBuilder
 
   def run_convergence_loop
     @cacheable_build = true
-    if @options[:single_pass]
-      log_pass_start(@engine_name, 1, first: true)
-      @cacheable_build = false
-      return run_latex_pass('_1')
-    end
-
     max_passes = @options[:passes]
-    bib_ran = false
-
-    bib_tool = detect_bib_tool
-    if bib_tool && bib_files_newer_than_bbl?
-      log_bib_start(bib_tool, first: true)
-      return false unless run_bib_pass(bib_tool)
-
-      bib_ran = true
-    end
-
-    run_pass_iterations(max_passes, bib_ran, bib_tool)
-  end
-
-  def run_pass_iterations(max_passes, bib_ran, bib_tool)
     pass = 0
+    bib_ran = false
     aux_before = compute_aux_hash
+
     loop do
       pass += 1
       log_pass_start(@engine_name, pass, first: pass == 1 && !bib_ran)
-
       return false unless run_latex_pass("_#{pass}")
+      break if @options[:single_pass]
 
-      curr_aux_hash = compute_aux_hash
-      rerun_needed = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux_hash)
-      aux_before = curr_aux_hash
-      if pass >= max_passes
-        @cacheable_build = false if rerun_needed
-        break
-      end
+      curr_aux = compute_aux_hash
+      bib_tool = detect_bib_tool(curr_aux)
 
-      bib_tool ||= detect_bib_tool(curr_aux_hash)
-      if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux_hash)
+      if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux)
         log_bib_start(bib_tool, first: false)
         return false unless run_bib_pass(bib_tool)
 
@@ -253,7 +237,14 @@ class LatexBuilder
         next
       end
 
-      break unless rerun_needed
+      rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux)
+      aux_before = curr_aux
+      if pass >= max_passes
+        @cacheable_build = false if rerun
+        break
+      end
+
+      break unless rerun
     end
     true
   end
@@ -492,13 +483,10 @@ class LatexBuilder
     @engine_name = resolve_engine
     LaTeXUtils.check_program(@engine_name)
 
-    @latex_flags = ['-interaction=nonstopmode', '-synctex=1', '-no-mktex=tfm', '-recorder', '-output-directory=junk', '-file-line-error']
-
+    @latex_flags = %w[-interaction=nonstopmode -synctex=1 -no-mktex=tfm -recorder -output-directory=junk -file-line-error]
     @pdferr = "junk/err_#{@engine_name}"
-    @biberrbase = 'err_bib'
-    @biberr = "junk/#{@biberrbase}"
-    @log = 'junk/log.txt'
-    @loga = 'junk/log.txt.1'
+    @biberr = 'junk/err_bib'
+    @log, @loga = 'junk/log.txt', 'junk/log.txt.1'
   end
 
   def resolve_engine
@@ -553,11 +541,8 @@ class LatexBuilder
     # reserves. A bare 'log.txt' was removed: this tool writes its transcript to
     # junk/log.txt, so a root log.txt can only be a file the user wrote, and
     # paper_cleanup runs on every build with no flag guarding it.
-    files = ["#{@bfilename}.ps", "#{@bfilename}.blg", "#{@bfilename}.dvi",
-             "#{@bfilename}.thm", "#{@bfilename}.aux", "#{@bfilename}.idx", "#{@bfilename}.log",
-             "#{@bfilename}.out", "#{@bfilename}.vtc", 'texput.log', 'missfont.log', 'mfput.log',
-             "#{@bfilename}.bcf", "#{@bfilename}.run.xml"]
-    files.each { |f| FileUtils.rm_f(f) }
+    exts = %w[.ps .blg .dvi .thm .aux .idx .log .out .vtc .bcf .run.xml]
+    (exts.map { |e| "#{@bfilename}#{e}" } + %w[texput.log missfont.log mfput.log]).each { |f| FileUtils.rm_f(f) }
 
     root_bbl = "#{@bfilename}.bbl"
     FileUtils.rm_f(root_bbl) if File.exist?(root_bbl) && !LaTeXUtils.bbl_has_entries?(root_bbl)
@@ -569,10 +554,10 @@ class LatexBuilder
     if File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
       FileUtils.mkdir_p('junk')
       if !File.exist?(junk_bbl) || File.mtime(root_bbl) > File.mtime(junk_bbl)
-        FileUtils.cp(root_bbl, junk_bbl)
+        FileUtils.cp(root_bbl, junk_bbl, preserve: true)
       end
     elsif @options[:trace] && File.exist?(junk_bbl) && !File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
-      FileUtils.cp(junk_bbl, root_bbl)
+      FileUtils.cp(junk_bbl, root_bbl, preserve: true)
     end
   end
 
@@ -597,21 +582,10 @@ class LatexBuilder
     Process.waitpid(pid, Process::WNOHANG) rescue nil
   end
 
-  def shell_quote(str)
-    LaTeXUtils.shell_quote(str)
-  end
-
-  def format_trace_command(env, cmd_args, cwd = Dir.pwd)
-    LaTeXUtils.format_trace_command(env, cmd_args, cwd)
-  end
-
-  def trace_command(env, cmd_args, cwd = Dir.pwd)
-    LaTeXUtils.trace_command(env, cmd_args, cwd)
-  end
-
-  def trace_status(status)
-    LaTeXUtils.trace_status(status)
-  end
+  def shell_quote(str) = LaTeXUtils.shell_quote(str)
+  def format_trace_command(env, cmd, cwd = Dir.pwd) = LaTeXUtils.format_trace_command(env, cmd, cwd)
+  def trace_command(env, cmd, cwd = Dir.pwd) = LaTeXUtils.trace_command(env, cmd, cwd)
+  def trace_status(status) = LaTeXUtils.trace_status(status)
 
   def capture_pass_output(cmd_args)
     timeout = (@options[:timeout] || ENV['LATEX_IT_TIMEOUT'] || DEFAULT_PASS_TIMEOUT).to_i
@@ -855,10 +829,7 @@ class LatexBuilder
   end
 
   def bibliography_source(junk_bbl, root_bbl)
-    return root_bbl if LaTeXUtils.bbl_has_entries?(root_bbl)
-    return junk_bbl if LaTeXUtils.bbl_has_entries?(junk_bbl)
-
-    nil
+    [root_bbl, junk_bbl].find { |f| LaTeXUtils.bbl_has_entries?(f) }
   end
 
   def preserve_bibliography_backup(previous, root_bbl)
@@ -967,14 +938,7 @@ class LatexBuilder
   end
 
   def bib_rerun_requested?(log_content)
-    return true if log_content =~ /Please \(re\)run Biber/i
-    return true if log_content =~ /No file .*\.bbl/i
-    return true if log_content =~ /Citation .* undefined/i
-    return true if log_content =~ /There were undefined citations/i
-    return true if log_content =~ /Package biblatex Warning: Please rerun/i
-    return true if log_content =~ /Package natbib Warning: Citation\(s\) may have changed/i
-
-    false
+    BIB_RERUN_PATTERNS.any? { |pat| log_content =~ pat }
   end
 
   def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
@@ -990,15 +954,7 @@ class LatexBuilder
   end
 
   def latex_rerun_requested?(log_content)
-    return true if log_content =~ /Label\(s\) may have changed/i
-    return true if log_content =~ /Rerun to get/i
-    return true if log_content =~ /Please rerun LaTeX/i
-    return true if log_content =~ /There were undefined references/i
-    return true if log_content =~ /There were undefined citations/i
-    return true if log_content =~ /Package rerunfilecheck Warning: File .* has changed/i
-    return true if log_content =~ /Package ocgx2 Warning: Rerun/i
-
-    false
+    LATEX_RERUN_PATTERNS.any? { |pat| log_content =~ pat }
   end
 
   def aux_has_cross_references?(aux_hash)
@@ -1077,10 +1033,10 @@ class LatexBuilder
 
   def atomic_copy(src, dst)
     tmp = "#{dst}.tmp.#{Process.pid}"
-    FileUtils.cp(src, tmp)
+    FileUtils.cp(src, tmp, preserve: true)
     File.rename(tmp, dst)
   rescue StandardError
-    FileUtils.cp(src, dst)
+    FileUtils.cp(src, dst, preserve: true)
   ensure
     FileUtils.rm_f(tmp) if tmp && File.exist?(tmp)
   end

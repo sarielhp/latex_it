@@ -225,6 +225,91 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
+  def test_force_with_bibtex_change_and_convergence
+    Dir.mktmpdir('force_bibtex') do |dir|
+      File.write(File.join(dir, 'paper.tex'), <<~'TEX')
+        \documentclass{article}
+        \begin{document}
+        Testing: \cite{item}.
+        \bibliographystyle{plain}
+        \bibliography{refs}
+        \end{document}
+      TEX
+      File.write(File.join(dir, 'refs.bib'), <<~'BIB')
+        @article{item, author = {Author A}, title = {Title A}, journal = {J}, year = {2020}}
+      BIB
+
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+      txt1, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
+      assert_includes txt1, 'Author A'
+
+      sleep 1.0
+      File.write(File.join(dir, 'refs.bib'), <<~'BIB')
+        @article{item, author = {Author B}, title = {Title B}, journal = {J}, year = {2026}}
+      BIB
+
+      out, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      txt2, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
+      assert_includes out, 'xelatex (1)'
+      assert_includes out, 'bibtex'
+      assert_includes txt2, 'Author B'
+    end
+  end
+
+  def test_force_on_converged_document_runs_single_pass
+    Dir.mktmpdir('force_converged') do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n")
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+
+      out, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      assert_includes out, 'xelatex (1)'
+      refute_includes out, 'xelatex (2)'
+    end
+  end
+
+  def test_force_with_biblatex_change_and_convergence
+    Dir.mktmpdir('force_biblatex') do |dir|
+      tex = "\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}\n\\begin{document}\n\\cite{k}\n\\printbibliography\n\\end{document}\n"
+      File.write(File.join(dir, 'paper.tex'), tex)
+      File.write(File.join(dir, 'refs.bib'), "@article{k, author = {Author A}, title = {T}, journal = {J}, year = {2020}}\n")
+
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+      txt1, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
+      assert_includes txt1, 'Author A'
+
+      sleep 1.0
+      File.write(File.join(dir, 'refs.bib'), "@article{k, author = {Author B}, title = {T}, journal = {J}, year = {2026}}\n")
+
+      out, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      txt2, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
+      assert_includes out, 'xelatex (1)'
+      assert_includes out, 'biber'
+      assert_includes txt2, 'Author B'
+    end
+  end
+
+  def test_simultaneous_tex_and_bib_change
+    Dir.mktmpdir('simultaneous_change') do |dir|
+      tex1 = "\\documentclass{article}\n\\begin{document}\n\\cite{k1}\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n"
+      bib1 = "@article{k1, author = {Author 1}, title = {T1}, journal = {J}, year = {2020}}\n"
+      File.write(File.join(dir, 'paper.tex'), tex1)
+      File.write(File.join(dir, 'refs.bib'), bib1)
+
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+
+      sleep 1.0
+      tex2 = "\\documentclass{article}\n\\begin{document}\n\\cite{k1}\n\\cite{k2}\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n"
+      bib2 = "@article{k1, author = {Author 1}, title = {T1}, journal = {J}, year = {2020}}\n@article{k2, author = {Author 2}, title = {T2}, journal = {J}, year = {2026}}\n"
+      File.write(File.join(dir, 'paper.tex'), tex2)
+      File.write(File.join(dir, 'refs.bib'), bib2)
+
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+      txt, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
+      assert_includes txt, 'Author 2'
+      refute_includes txt, '[?]'
+    end
+  end
+
   def test_pdflatex_is_supported_engine
     assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdflatex')
     assert_equal 'pdflatex', LaTeXUtils.normalize_engine('pdftex')

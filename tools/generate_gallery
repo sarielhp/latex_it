@@ -407,7 +407,7 @@ module GalleryGenerator
       end
 
       out_mk, _ = Open3.capture2e('latexmk', '-xelatex', '-halt-on-error', 'paper.tex', chdir: dir)
-      out_l, _ = Open3.capture2e({ 'CLICOLOR_FORCE' => '1' }, LATEX_IT, '--no-lock', '-1', 'paper.tex', chdir: dir)
+      out_l, _ = Open3.capture2e({ 'CLICOLOR_FORCE' => '1' }, LATEX_IT, '--no-lock', '-f', 'paper.tex', chdir: dir)
 
       right_raw = ['$ l paper.tex'] + out_l.lines.map(&:chomp)
       right_display = build_display_lines(right_raw, is_ansi: true)

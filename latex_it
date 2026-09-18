@@ -326,7 +326,7 @@ module LatexCLI
   def self.add_compilation_options_pass(opts, options)
     opts.separator ''
     opts.separator '  Pass Control & Compilation:'
-    opts.on('-f', '-1', '--force', 'Force an initial compilation run unconditionally (bypasses build cache)') { options[:force] = true }
+    opts.on('-f', '--force', 'Force an initial compilation run unconditionally (bypasses build cache)') { options[:force] = true }
     opts.on('-u', '--single-pass', 'Execute a single LaTeX pass only (no BibTeX/Biber or convergence passes)') do
       options[:single_pass] = true
       options[:passes] = 1

@@ -229,9 +229,14 @@ class LatexArxivPackager
     return unless real_src && (real_src == real_cwd || real_src.start_with?(real_cwd + File::SEPARATOR))
 
     expanded = File.expand_path(src)
-    return unless expanded.start_with?(cwd + File::SEPARATOR)
+    rel_path = if expanded.start_with?(cwd + File::SEPARATOR)
+                 expanded.sub(cwd + File::SEPARATOR, '')
+               elsif real_src.start_with?(real_cwd + File::SEPARATOR)
+                 real_src.sub(real_cwd + File::SEPARATOR, '')
+               else
+                 return
+               end
 
-    rel_path = expanded.sub(cwd + File::SEPARATOR, '')
     dest = File.join(dest_root, rel_path)
     FileUtils.mkdir_p(File.dirname(dest))
     FileUtils.cp(src, dest)

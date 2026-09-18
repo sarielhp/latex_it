@@ -80,6 +80,16 @@ module LaTeXMetaExtractor
     }
   end
 
+  def self.preceding_backslash_count(text, idx)
+    count = 0
+    k = idx - 1
+    while k >= 0 && text[k] == '\\'
+      count += 1
+      k -= 1
+    end
+    count
+  end
+
   def self.extract_balanced_braces(text, start_pos)
     return nil if start_pos.nil? || text[start_pos] != '{'
 
@@ -88,9 +98,9 @@ module LaTeXMetaExtractor
     len = text.length
     while i < len
       c = text[i]
-      if c == '{' && (i == 0 || text[i - 1] != '\\')
+      if c == '{' && preceding_backslash_count(text, i).even?
         depth += 1
-      elsif c == '}' && (i == 0 || text[i - 1] != '\\')
+      elsif c == '}' && preceding_backslash_count(text, i).even?
         depth -= 1
         return text[(start_pos + 1)...i] if depth == 0
       end

@@ -286,4 +286,31 @@ class TestArxivSupport < Minitest::Test
       end
     end
   end
+
+  def test_copy_preserving_path_with_symlink_cwd
+    Dir.mktmpdir('real_project') do |real_dir|
+      Dir.mktmpdir('symlink_parent') do |parent_dir|
+        sym_dir = File.join(parent_dir, 'sym_project')
+        File.symlink(real_dir, sym_dir)
+
+        fig_dir = File.join(real_dir, 'figures')
+        FileUtils.mkdir_p(fig_dir)
+        fig_path = File.join(fig_dir, 'chart.pdf')
+        File.write(fig_path, '%PDF-1.4 dummy')
+
+        stage_dir = File.join(real_dir, 'stage')
+        FileUtils.mkdir_p(stage_dir)
+
+        builder = LatexBuilder.new(File.join(sym_dir, 'paper.tex'), {})
+        packager = LatexArxivPackager.new(builder)
+
+        Dir.chdir(sym_dir) do
+          packager.send(:copy_preserving_path, fig_path, stage_dir)
+        end
+
+        assert File.file?(File.join(stage_dir, 'figures', 'chart.pdf')),
+               'copy_preserving_path dropped figure when executed from symlinked directory'
+      end
+    end
+  end
 end

@@ -116,7 +116,7 @@ class TestDestructivePaths < Minitest::Test
       refute_includes out_curr, dir
 
       File.write(File.join(dir, 'notes', '40_vc', 'paper.tex'), "\\documentclass{article}\\begin{document}Hi\\end{document}\n")
-      out_build, status_build = Open3.capture2e(BIN, '-c', '-1', 'notes/40_vc/paper.tex', chdir: dir)
+      out_build, status_build = Open3.capture2e(BIN, '-c', '-f', 'notes/40_vc/paper.tex', chdir: dir)
       assert status_build.success?
       assert_includes out_build, 'Cleaning LaTeX auxiliary files in notes/40_vc...'
       refute_includes out_build.lines.grep(/Cleaning LaTeX/).join, dir

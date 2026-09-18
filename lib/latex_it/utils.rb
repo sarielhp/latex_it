@@ -262,7 +262,7 @@ module LaTeXUtils
     return dir_match if candidates.include?(dir_match)
 
     with_doc = candidates.select do |f|
-      c = safe_read(File.join(dir, f))
+      c = strip_latex_comments(safe_read(File.join(dir, f)))
       c.include?('\begin{document}') || c.include?('\documentclass')
     end
     return with_doc.first if with_doc.size == 1

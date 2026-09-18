@@ -218,8 +218,8 @@ class TestLatexItCLI < Minitest::Test
       out_cached, _ = Open3.capture2e(BIN, 'paper.tex', chdir: dir)
       assert_includes out_cached, 'All targets (paper.pdf) are up-to-date.'
 
-      # When run with -1, it forces the first pass and rebuilds
-      out_force, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      # When run with -f, it forces the first pass and rebuilds
+      out_force, _ = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
       assert_includes out_force, 'xelatex (1)'
       refute_includes out_force, 'All targets (paper.pdf) are up-to-date.'
     end
@@ -248,7 +248,7 @@ class TestLatexItCLI < Minitest::Test
         @article{item, author = {Author B}, title = {Title B}, journal = {J}, year = {2026}}
       BIB
 
-      out, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      out, _ = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
       txt2, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
       assert_includes out, 'xelatex (1)'
       assert_includes out, 'bibtex'
@@ -261,7 +261,7 @@ class TestLatexItCLI < Minitest::Test
       File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n")
       Open3.capture2e(BIN, 'paper.tex', chdir: dir)
 
-      out, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      out, _ = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
       assert_includes out, 'xelatex (1)'
       refute_includes out, 'xelatex (2)'
     end
@@ -280,7 +280,7 @@ class TestLatexItCLI < Minitest::Test
       sleep 1.0
       File.write(File.join(dir, 'refs.bib'), "@article{k, author = {Author B}, title = {T}, journal = {J}, year = {2026}}\n")
 
-      out, _ = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      out, _ = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
       txt2, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
       assert_includes out, 'xelatex (1)'
       assert_includes out, 'biber'
@@ -307,6 +307,33 @@ class TestLatexItCLI < Minitest::Test
       txt, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
       assert_includes txt, 'Author 2'
       refute_includes txt, '[?]'
+    end
+  end
+
+  def test_force_option_is_f_and_minus_one_rejected
+    Dir.mktmpdir('force_option_test') do |dir|
+      File.write(File.join(dir, 'paper.tex'), "\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n")
+      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
+
+      # -f forces a rebuild
+      out_f, status_f = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
+      assert status_f.success?
+      assert_includes out_f, 'xelatex (1)'
+
+      # -1 must now be rejected as an invalid option
+      out_1, status_1 = Open3.capture2e(BIN, '-1', 'paper.tex', chdir: dir)
+      refute status_1.success?
+      assert_includes out_1, 'invalid option: -1'
+    end
+  end
+
+  def test_find_main_file_ignores_commented_documentclass
+    Dir.mktmpdir('commented_documentclass') do |dir|
+      File.write(File.join(dir, 'main.tex'), "\\documentclass{article}\n\\begin{document}\nReal doc\n\\end{document}\n")
+      File.write(File.join(dir, 'notes.tex'), "% \\documentclass{article}\n% \\begin{document}\nJust notes\n")
+
+      found = LaTeXUtils.find_main_latex_file(dir)
+      assert_equal 'main.tex', found
     end
   end
 

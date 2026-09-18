@@ -66,7 +66,7 @@ Common everyday commands:
 
 ```bash
 lw          # Fast incremental rebuild (reuses cached state)
-l -1        # Force a rebuild even if files haven't changed
+l -f        # Force a rebuild even if files haven't changed
 l -C        # Clean auxiliary and temporary files
 l -x        # Show plain-English explanations for errors and warnings
 l -B        # Extract cited references into local .bib file

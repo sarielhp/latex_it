@@ -54,7 +54,7 @@ This document provides architectural guidelines, core invariants, development wo
 - **Language Policy**:
   All scripts, tooling, and test runners must be written in idiomatic **Ruby** (`#!/usr/bin/env ruby`). Do not introduce Python, Bash, Sed, or Awk scripts.
 - **Canonical Interface & Anti-Alias Policy (Strict No Redundant Aliases)**:
-  Maintain a strictly minimal, clean CLI hierarchy without redundant aliases. Aliases blow up the command-line interface of a program. Every command-line option must have at most one canonical long name and optionally at most one single-letter shortcut (e.g. `-1, --force`, `-u, --single-pass`). Never add multiple single-letter shortcuts (e.g. `-u` and `-1` to the same command) or multiple long option names (e.g. `--single-pass` and `--one-pass`) to the same command. A single-letter shortcut is fine, but two single-letter shortcuts to the same command are strictly prohibited.
+  Maintain a strictly minimal, clean CLI hierarchy without redundant aliases. Aliases blow up the command-line interface of a program. Every command-line option must have at most one canonical long name and optionally at most one single-letter shortcut (e.g. `-f, --force`, `-u, --single-pass`). Never add multiple single-letter shortcuts (e.g. `-u` and `-1` to the same command) or multiple long option names (e.g. `--single-pass` and `--one-pass`) to the same command. A single-letter shortcut is fine, but two single-letter shortcuts to the same command are strictly prohibited.
 - **Isolated Build Output (`junk/`)**:
   All intermediate build artifacts must remain confined to `junk/`. Only final targets (`<file>.pdf`, `<file>.bbl`, `<file>.synctex.gz`) are exported to the project root. Cache state lives in `junk/.build_state.json`.
 - **Engine Support**:
@@ -74,7 +74,7 @@ Any modifications to compilation logic must honor the following invariants:
 
 1. **Intelligent Convergence Pass Model**:
    - **Default**: Tracks source dependencies via `-recorder` (`.fls`) and SHA256 build state. Exits in 0 passes if targets are up to date; runs 1 pass if citations/labels are stable; runs pre-primary BibTeX/Biber if `.bib` changed; and only executes extra passes (up to `-n`, default 3) when `.aux` changes or rerun is requested in logs.
-   - **Force Rebuild (`-1` / `--force`)**: Bypasses the initial up-to-date check and forces the first LaTeX pass, continuing with subsequent passes and BibTeX only if needed for convergence.
+   - **Force Rebuild (`-f` / `--force`)**: Bypasses the initial up-to-date check and forces the first LaTeX pass, continuing with subsequent passes and BibTeX only if needed for convergence.
    - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled (forces a single rebuild pass and exits immediately).
    - **`--fast` / `lw`**: Accepted for compatibility and currently no-ops. Incremental behaviour is provided unconditionally by `targets_up_to_date?`; either implement a distinct meaning for this flag or remove it.
 2. **Bibliography Safety**:

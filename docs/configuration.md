@@ -8,7 +8,7 @@
 
 Settings are resolved using the following order of precedence (highest to lowest):
 
-1. **Command-line flags** (e.g. `-e lualatex`, `-1`, `-x`)
+1. **Command-line flags** (e.g. `-e lualatex`, `-f`, `-x`)
 2. **Local project configuration** (`.l.jsonc` or `.latex_it.jsonc` in document root)
 3. **Global user configuration** (`~/.config/latex_it/config.jsonc`)
 4. **Built-in defaults**

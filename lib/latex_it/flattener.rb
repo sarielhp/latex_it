@@ -225,17 +225,31 @@ module LaTeXFlattener
     count
   end
 
+  URL_MACROS = %w[\\url{ \\nolinkurl{ \\path{ \\href{].freeze
+
+  def self.matching_url_macro(line, idx)
+    return nil unless preceding_backslash_count(line, idx).even?
+
+    URL_MACROS.find { |m| line[idx, m.length] == m }
+  end
+
   def self.inline_comment_index(line)
-    in_url = false
+    url_depth = 0
     i = 0
     len = line.length
     while i < len
       c = line[i]
-      if c == '\\' && (line[i, 5] == '\\url{' || line[i, 6] == '\\href{')
-        in_url = true
-      elsif in_url && c == '}'
-        in_url = false
-      elsif c == '%' && !in_url
+      if c == '\\' && (macro = matching_url_macro(line, i))
+        url_depth += 1
+        i += macro.length
+        next
+      elsif url_depth > 0
+        if c == '{'
+          url_depth += 1
+        elsif c == '}'
+          url_depth -= 1
+        end
+      elsif c == '%'
         return i if preceding_backslash_count(line, i).even?
       end
       i += 1

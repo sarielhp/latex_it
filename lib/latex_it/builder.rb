@@ -110,7 +110,7 @@ class LatexBuilder
     paper_cleanup
 
     if targets_up_to_date?
-      puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -1' to force rebuild)"
+      puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -f' to force rebuild)"
       analyze_output if diagnostics_requested?
       return true
     end
@@ -532,7 +532,7 @@ class LatexBuilder
   def paper_cleanup
     if File.exist?("#{@bfilename}.aux") && !File.exist?("junk/#{@bfilename}.aux")
       FileUtils.mkdir_p('junk')
-      FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux")
+      FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux", preserve: true)
     end
 
     sync_bbl_before_compile
@@ -793,7 +793,7 @@ class LatexBuilder
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     fnbbl = "junk/#{@bfilename}.bbl"
     root_bbl = "#{@bfilename}.bbl"
-    previous = bibliography_source(fnbbl, root_bbl)
+    previous = bibliography_source(root_bbl, fnbbl)
     preserve_bibliography_backup(previous, root_bbl)
     FileUtils.rm_f(fnbbl)
 
@@ -828,8 +828,8 @@ class LatexBuilder
     true
   end
 
-  def bibliography_source(junk_bbl, root_bbl)
-    [root_bbl, junk_bbl].find { |f| LaTeXUtils.bbl_has_entries?(f) }
+  def bibliography_source(primary, secondary)
+    [primary, secondary].find { |f| LaTeXUtils.bbl_has_entries?(f) }
   end
 
   def preserve_bibliography_backup(previous, root_bbl)

@@ -56,4 +56,13 @@ class TestAuthorNames < Minitest::Test
     names = names_for("\\author{Ren\\'e Descartes \\and Erd\\H{o}s P\\'al}")
     assert_equal ['Rene Descartes', 'Erdos Pal'], names
   end
+
+  def test_trailing_double_backslash_before_closing_brace
+    names = names_for("\\author{Alice \\\\\nBob \\\\}")
+    assert_equal ['Alice', 'Bob'], names
+
+    title = LaTeXMetaExtractor.extract_title("\\title{First Line \\\\\nSecond Line \\\\}")
+    assert_includes title, 'First Line'
+    assert_includes title, 'Second Line'
+  end
 end

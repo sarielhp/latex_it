@@ -203,4 +203,19 @@ class TestFlattener < Minitest::Test
     assert_nil LaTeXFlattener.inline_comment_index('no comments here')
     assert_equal 2, LaTeXFlattener.inline_comment_index('\\\\% double escaped')
   end
+
+  def test_inline_comment_index_handles_nolinkurl_and_path
+    assert_equal 51, LaTeXFlattener.inline_comment_index('\\nolinkurl{https://arxiv.org/abs/2601.12345%20foo} % comment')
+    assert_equal 26, LaTeXFlattener.inline_comment_index('\\path{/tmp/foo%20bar.txt} % outside')
+    assert_nil LaTeXFlattener.inline_comment_index('\\nolinkurl{http://site.com/foo%20bar}')
+    assert_nil LaTeXFlattener.inline_comment_index('\\path{/a/%20b}')
+  end
+
+  def test_strip_comments_preserves_all_url_macros
+    src = "\\nolinkurl{http://site.com/foo%20bar} % strip me\n\\path{/a/%20b} % strip me\n"
+    res = LaTeXFlattener.strip_comments(src)
+    assert_includes res, '\\nolinkurl{http://site.com/foo%20bar}'
+    assert_includes res, '\\path{/a/%20b}'
+    refute_includes res, 'strip me'
+  end
 end

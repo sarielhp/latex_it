@@ -39,7 +39,7 @@ module LaTeXCompileFormat
     if link
       loc_text = color ? Rainbow(raw_loc).cyan.bold.to_s : raw_loc
       abs_path = URI::DEFAULT_PARSER.escape(File.expand_path(file.to_s))
-      uri = "file://#{abs_path}##{active_line}"
+      uri = "file://#{abs_path}##{loc_str}"
       "\e]8;;#{uri}\e\\#{loc_text}\e]8;;\e\\"
     elsif color
       file_str = Rainbow(file.to_s).bold.to_s

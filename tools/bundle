@@ -33,6 +33,7 @@ module LatexBundler
     bib_locator.rb
     macro_harvester.rb
     error_catalog.rb
+    compile_format.rb
     diagnostics.rb
     builder.rb
     bib_extractor.rb

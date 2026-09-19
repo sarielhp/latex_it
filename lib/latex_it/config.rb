@@ -181,7 +181,7 @@ module LaTeXConfig
       'label' => VSCODE_TASK_LABEL,
       'type' => 'shell',
       'command' => 'l',
-      'args' => ['--qf'],
+      'args' => ['--compile'],
       'group' => {
         'kind' => 'build',
         'isDefault' => true

@@ -43,16 +43,30 @@ If you want AUCTeX to default to `latex_it` instead of `LaTeX`:
 
 ## Standard Emacs Compilation Mode (`M-x compile`)
 
-If you edit LaTeX in fundamental mode, standard `latex-mode`, or with general build tooling, you can compile via Emacs's universal compilation mode:
+For Emacs's built-in `compilation-mode` (`M-x compile`, `next-error` `C-x \``), use the `--compile` flag instead of `--emacs`. The `--compile` flag outputs diagnostics in strict GNU Coding Standards format (`file:line:col: severity: message`) in stream encounter order:
 
 ```elisp
 ;; In ~/.emacs or init.el:
 (add-hook 'latex-mode-hook
           (lambda ()
-            (setq-local compile-command "l --emacs")))
+            (setq-local compile-command "l --compile")))
+```
+
+### Colored Compilation Output
+By default, `latex_it` disables ANSI escape sequences under `INSIDE_EMACS=...compile` so line numbers match standard GNU compilation regexes cleanly. To enable color in `compilation-mode`:
+
+```elisp
+;; Enable ANSI colors in compilation buffers
+(add-hook 'compilation-filter-hook 'ansi-color-compilation-filter)
+
+;; In latex-mode-hook:
+(setq-local compile-command "l --compile --color")
 ```
 
 ### Usage:
-* `M-x compile`: Runs `l --emacs`.
-* `C-x \`` (`next-error`): Jumps to the next diagnostic line in your buffer.
+* `M-x compile`: Runs `l --compile`.
+* `C-x \`` (`next-error`): Jumps directly to the next diagnostic line.
 * `M-p` / `M-n`: Navigate previous and next errors in the compilation buffer.
+
+> [!NOTE]
+> `--compile` and `--emacs` represent different integration paradigms and cannot be combined. `--emacs` emits raw AUCTeX parenthesis file-tracking blocks (`TeX-command-list`), while `--compile` formats output for the GNU `compile` command (`M-x compile`). Passing both results in an exit status of 2.

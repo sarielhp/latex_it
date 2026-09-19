@@ -11,13 +11,13 @@ if exists(":CompilerSet") != 2
   command -nargs=* CompilerSet setlocal <args>
 endif
 
-CompilerSet makeprg=l\ --vim\ $*
+CompilerSet makeprg=l\ --compile\ $*
 
-" Universal errorformat matching latex_it --vim output:
-"   paper.tex:3:1: error: Undefined control sequence
-"   paper.tex:42: warning: LaTeX Warning: ...
-"   paper.tex:85: alert: LaTeX Warning: ...
-"   paper.tex:120: note: Overfull \hbox ...
+" Universal errorformat matching GNU standard compiler output from latex_it --compile:
+"   paper.tex:3:1: error: undefined control sequence \foo
+"   paper.tex:42: warning: reference `nonexistent' on page 1 undefined
+"   paper.tex:85: warning: [alert] label `foo' multiply defined
+"   paper.tex:120: note: overfull \hbox (1.5pt too wide) detected
 CompilerSet errorformat=
       \%f:%l:%c:\ %t%*[^:]:\ %m,
       \%f:%l:\ %t%*[^:]:\ %m,

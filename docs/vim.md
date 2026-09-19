@@ -1,6 +1,6 @@
 # Vim & Neovim Integration with latex_it
 
-`latex_it` provides first-class support for Vi, Vim, and Neovim through the `--vim` (or `--qf`) flag and the bundled Vim compiler plugin.
+`latex_it` provides first-class support for Vi, Vim, and Neovim through the standard `--compile` flag and the bundled Vim compiler plugin.
 
 ---
 
@@ -12,13 +12,13 @@ In your `~/.vim/after/ftplugin/tex.vim` (or `~/.config/nvim/after/ftplugin/tex.l
 
 ### Vimscript (`~/.vim/after/ftplugin/tex.vim`):
 ```vim
-setlocal makeprg=l\ --vim
+setlocal makeprg=l\ --compile
 setlocal errorformat=%f:%l:%c:\ %t%*[^:]:\ %m,%f:%l:\ %t%*[^:]:\ %m,%f:%l:\ %m,%-G%.%#
 ```
 
 ### Lua (`~/.config/nvim/after/ftplugin/tex.lua`):
 ```lua
-vim.opt_local.makeprg = "l --vim"
+vim.opt_local.makeprg = "l --compile"
 vim.opt_local.errorformat = "%f:%l:%c: %t%*[^:]: %m,%f:%l: %t%*[^:]: %m,%f:%l: %m,%-G%.%#"
 ```
 
@@ -67,7 +67,7 @@ Compiles in the background without freezing your editor and loads errors into Qu
 
 ### With `skywind3000/asynrun.vim`:
 ```vim
-:AsyncRun -program=make l --vim
+:AsyncRun -program=make l --compile
 ```
 
 ---
@@ -79,7 +79,7 @@ If you use [VimTeX](https://github.com/lervag/vimtex), configure it to use `l` a
 ```vim
 let g:vimtex_compiler_method = 'generic'
 let g:vimtex_compiler_generic = {
-      \ 'command' : 'l --vim',
+      \ 'command' : 'l --compile',
       \ }
 let g:vimtex_build_dir = 'junk'
 ```

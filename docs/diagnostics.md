@@ -142,17 +142,45 @@ When LaTeX crashes during `\printbibliography` or `\bibliography` due to a synta
 
 ---
 
-## 5. AUCTeX & Editor Integration
+## 5. GNU Standard Compiler Mode (`-cc` / `--compile`) & Editor Integration
 
-For Emacs / AUCTeX or editors parsing `-file-line-error` output directly:
+For standard compiler integration with editors, IDEs, and build runners (e.g. Emacs `M-x compile`, Vim `:make`, VS Code tasks, CI log matchers), `latex_it` provides the `-cc` / `--compile` flag.
 
+### Format Specification (GNU §4.4)
+Diagnostics are emitted directly to `$stderr` in standard GNU format:
+```text
+sourcefile:lineno:column: severity: message
+```
+- **Ordering**: Diagnostics are output in stream encounter order (the order they occurred during compilation), not sorted by severity tiers.
+- **Severity Mapping**:
+  - `errors` $\rightarrow$ `error:`
+  - `alerts` $\rightarrow$ `warning: [alert]`
+  - `warnings` $\rightarrow$ `warning:`
+  - `whatevers` (shown when `-a` is passed) $\rightarrow$ `note:`
+- **Clean Message Text**: Lowercase starting character, no trailing periods, and source paths formatted relative to the compilation directory.
+- **Clean Build Silence**: Completely silent on success with 0 warnings (exits 0 with no stdout/stderr output).
+- **No TUI Clutter**: Suppresses decorative frames, file headers (`── file.tex ──`), box explanations, and summary tallies.
+
+```bash
+# Standard compilation run (shorthand -cc or --compile)
+l -cc paper.tex
+l --compile paper.tex
+
+# With color explicitly enabled
+l -cc --color paper.tex
+
+# Include low-severity whatevers as 'note:' diagnostics
+l -cc -a paper.tex
+```
+
+For AUCTeX or editors parsing raw TeX parenthesized file-tracking blocks:
 ```bash
 # Emit AUCTeX-compatible error output
 l --emacs paper.tex
-
-# Output error/warning counts only (exit status reflects build success)
-l -s paper.tex
 ```
+
+> [!NOTE]
+> `--compile` and `--emacs` represent different integration formats and are mutually exclusive.
 
 ---
 

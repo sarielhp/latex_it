@@ -15,7 +15,7 @@ l --init-vscode
 ```
 
 `latex_it` automatically creates or updates the `.vscode/` configuration files:
-* **`.vscode/tasks.json`**: Sets up `Build LaTeX (latex_it)` with `l --qf` as the default build task (`Ctrl+Shift+B` / `Cmd+Shift+B`) and matches error/warning/alert/note messages into the **Problems** panel.
+* **`.vscode/tasks.json`**: Sets up `Build LaTeX (latex_it)` with `l --compile` as the default build task (`Ctrl+Shift+B` / `Cmd+Shift+B`) and matches error/warning/alert/note messages into the **Problems** panel.
 * **`.vscode/settings.json`**: Configures LaTeX Workshop tools, recipes, and sets `outDir: "%DIR%/junk"` so diagnostics and previewers synchronize cleanly.
 * **Non-destructive & Idempotent**: If `.vscode/tasks.json` or `.vscode/settings.json` already exist, your other tasks and settings are preserved.
 
@@ -35,7 +35,7 @@ Create `.vscode/tasks.json` in your project root:
       "label": "Build LaTeX (latex_it)",
       "type": "shell",
       "command": "l",
-      "args": ["--qf"],
+      "args": ["--compile"],
       "group": {
         "kind": "build",
         "isDefault": true

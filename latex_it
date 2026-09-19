@@ -36,6 +36,7 @@ require_relative 'lib/latex_it/meta_extractor'
 require_relative 'lib/latex_it/bib_locator'
 require_relative 'lib/latex_it/macro_harvester'
 require_relative 'lib/latex_it/error_catalog'
+require_relative 'lib/latex_it/compile_format'
 require_relative 'lib/latex_it/diagnostics'
 require_relative 'lib/latex_it/builder'
 require_relative 'lib/latex_it/packager'
@@ -46,7 +47,7 @@ module LatexCLI
   def self.run(argv = ARGV, prog_name = File.basename($PROGRAM_NAME))
     $stdout.sync = true
     $stderr.sync = true
-    at_exit { puts '' unless @interrupted || $stdout.closed? rescue nil }
+    at_exit { puts '' unless @interrupted || $stdout.closed? || @suppress_at_exit_newline rescue nil }
     LaTeXUtils.initial_pwd = Dir.pwd
 
     begin
@@ -59,6 +60,8 @@ module LatexCLI
       normalize_argv!(argv)
       parser = build_option_parser(options)
       parse_options!(parser, argv, prog_name)
+      validate_output_mode!(options, prog_name)
+      @suppress_at_exit_newline = true if options[:compile]
       handle_help_and_examples(parser, options, prog_name, argv)
 
       configure_environment(options)
@@ -75,13 +78,23 @@ module LatexCLI
     signo = exception&.respond_to?(:signo) ? exception.signo : 2
     exit_code = 128 + (signo || 2)
 
-    if options && options[:vim]
+    if options && options[:compile]
       $stderr.puts "\nBuild interrupted."
     else
       msg = signo == 15 ? '==> Build terminated by signal (SIGTERM).' : '==> Build cancelled by user (Ctrl-C).'
       $stderr.puts "\n#{Rainbow(msg).yellow.bright}"
     end
     exit exit_code
+  end
+
+  def self.validate_output_mode!(options, prog_name)
+    if options[:compile] && options[:emacs_explicit]
+      warn "#{prog_name}: error: --compile and --emacs cannot be used together"
+      warn "  Use --compile for GNU standard compiler diagnostics (file:line:col: severity: msg)"
+      warn "  Use --emacs for AUCTeX integration (TeX parenthesized file stack & l.<line> anchors)"
+      exit 2
+    end
+    options[:emacs] = false if options[:compile]
   end
 
   # Every script under tools/ handles this; the binary end users actually run
@@ -234,7 +247,7 @@ module LatexCLI
       junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
       bib_extract: false,
       bib_extract_name: nil,
-      vim: false
+      compile: cfg['compile'] == true
     }.merge(build_zip_options(cfg, extra_cli_files))
      .merge(build_arxiv_options(cfg))
   end
@@ -278,8 +291,7 @@ module LatexCLI
       when '-help' then '--help'
       when '-version' then '--version'
       when '--extract-bib' then '--bib-extract'
-      when '-vim' then '--vim'
-      when '--qf', '-qf' then '--vim'
+      when '-compile', '-cc', '--cc' then '--compile'
       else arg
       end
     end
@@ -395,8 +407,13 @@ module LatexCLI
     opts.on('--list-themes', 'List available diagnostic color themes with previews and exit') { options[:list_themes] = true }
     opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') { |v| options[:lock] = v }
     opts.on('--no-env', 'Reset environment variables used by LaTeX/BibTeX/Biber') { options[:no_env] = true }
-    opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') { options[:emacs] = true }
-    opts.on('--vim', '--qf', 'Format warnings/errors for Vim/Neovim quickfix integration (:make)') { options[:vim] = true }
+    opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') do
+      options[:emacs] = true
+      options[:emacs_explicit] = true
+    end
+    opts.on('--compile', '--cc', 'Format diagnostics in GNU standard compiler format (file:line:col: severity: message)') do
+      options[:compile] = true
+    end
     opts.on('--init-config', 'Create a local .l.jsonc configuration template in the current directory and exit') do
       LaTeXConfig.create_local_template!('.')
       exit 0
@@ -635,7 +652,7 @@ module LatexCLI
 
   def self.determine_color_enabled(options)
     return options[:color] unless options[:color].nil?
-    return false if options[:emacs] || options[:vim]
+    return false if options[:emacs]
     return false if ENV['NO_COLOR'] && !ENV['NO_COLOR'].empty?
 
     term = ENV['TERM'].to_s.strip

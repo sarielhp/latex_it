@@ -8,6 +8,7 @@
 # ==============================================================================
 
 require_relative 'error_catalog'
+require_relative 'compile_format'
 
 module LaTeXDiagnostics
   DIAGNOSTIC_EXPLANATIONS = LaTeXErrorCatalog::WARNING_EXPLANATIONS
@@ -776,7 +777,9 @@ module LaTeXDiagnostics
 
   def prepare_error_items(raw_items)
     bib_companions = generate_bib_companions(raw_items)
-    decluster_errors(raw_items) + bib_companions
+    items = decluster_errors(raw_items) + bib_companions
+    items.each { |i| i[:tier] = 'errors' }
+    items
   end
 
   def overfull_hbox?(item)
@@ -834,12 +837,6 @@ module LaTeXDiagnostics
   end
 
   def render_diagnostic_entry(item, max_width, current_header, tier_label = nil, header_counts = nil, io: $stdout)
-    if @options[:vim]
-      rendered = format_vim_diagnostic_item(item, tier_label)
-      io.puts rendered unless rendered.to_s.empty?
-      return current_header
-    end
-
     item_file = format_display_path(item[:file])
     lbl = tier_label_for(item, tier_label)
     header_key = @options[:emacs] ? item_file : [item_file, lbl]
@@ -861,57 +858,97 @@ module LaTeXDiagnostics
     io.puts rendered unless rendered.empty?
     io.puts '' if @options[:emacs]
 
-    explain_diagnostic_item(item, io: io) if @options[:explain]
+    explain_diagnostic_item(item, io: io) if @options[:explain] && !compile_mode?
     current_header
   end
 
-  def format_vim_diagnostic_item(item, tier_label = nil)
-    disp_file = format_display_path(item[:file] || @filename)
-    lbl = tier_label_for(item, tier_label)
-
-    if item[:err_block]
-      format_vim_error_entry(item, disp_file)
-    else
-      format_vim_warning_entry(item, disp_file, lbl)
-    end
+  def compile_mode?
+    @options && @options[:compile] == true
   end
 
-  def format_vim_error_entry(item, disp_file)
+  def normalize_diagnostic(item, tier)
+    {
+      file: compile_display_file(item),
+      line: normalized_line(item),
+      col: normalized_col(item),
+      tier: tier.to_s,
+      message: normalized_message(item),
+      token: item[:token] || item.dig(:catalog, :token),
+      hint: item.dig(:catalog, :hint),
+      index: item[:index] || 0,
+      repeat_count: item[:repeat_count] || 1
+    }
+  end
+
+  def normalized_line(item)
     root_line = item[:root_line] || item.dig(:catalog, :root_line)
-    root_col = item[:col] || item[:root_col] || item.dig(:catalog, :root_col)
-    active_line = (root_line && root_line.positive?) ? root_line : (item[:line] || 0)
-
-    raw_msg = item[:err_block]&.first.to_s.strip
-    msg = extract_clean_error_message(raw_msg)
-    if (hint = item.dig(:catalog, :hint))
-      msg += " (Hint: #{hint})"
+    if root_line && root_line.to_i.positive?
+      root_line.to_i
+    elsif item[:line] && item[:line].to_i.positive?
+      item[:line].to_i
+    else
+      item[:line_str].to_s =~ /\A\d+\z/ ? item[:line_str].to_i : 0
     end
-
-    loc_str = if active_line.positive?
-                root_col ? "#{active_line}:#{root_col}" : active_line.to_s
-              else
-                ''
-              end
-
-    loc_str.empty? ? "#{disp_file}: error: #{msg}" : "#{disp_file}:#{loc_str}: error: #{msg}"
   end
 
-  def format_vim_warning_entry(item, disp_file, lbl)
-    line = (item[:line] && item[:line].to_i.positive?) ? item[:line].to_i : item[:line_str].to_s.strip
-    raw_text = item[:text].to_s.gsub(/\s+/, ' ').strip
+  def normalized_col(item)
+    c = item[:col] || item[:root_col] || item.dig(:catalog, :root_col)
+    c && c.to_i.positive? ? c.to_i : nil
+  end
 
-    type_name = case lbl
-                when 'alerts' then 'alert'
-                when 'whatevers' then 'note'
-                else 'warning'
-                end
+  def normalized_message(item)
+    if item[:err_block] && !item[:err_block].empty?
+      raw_msg = item[:err_block].first.to_s.strip
+      extract_clean_error_message(raw_msg)
+    else
+      item[:text].to_s
+    end
+  end
 
-    line_str = line.to_s.empty? ? '' : "#{line}:"
-    "#{disp_file}:#{line_str} #{type_name}: #{raw_text}"
+  TEXTUAL_SOURCE_EXT = %w[.tex .sty .cls .bib .bbl .dtx .ltx .cfg].freeze
+
+  def compile_display_file(item)
+    raw_file = (item[:file] || @filename).to_s
+    raw_file = @filename.to_s if raw_file.empty? || raw_file == '.'
+    ext = File.extname(raw_file)
+    if ext == '.pdf' || raw_file == './bibliography' || raw_file == 'bibliography'
+      compile_relative_path(@filename)
+    else
+      compile_relative_path(raw_file)
+    end
+  end
+
+  def compile_relative_path(path)
+    init_pwd = LaTeXUtils.initial_pwd || Dir.pwd
+    full_path = File.expand_path(path)
+    init_prefix = "#{init_pwd}/"
+    if full_path.start_with?(init_prefix)
+      full_path.delete_prefix(init_prefix)
+    elsif path.to_s.start_with?('./')
+      path.to_s.delete_prefix('./')
+    else
+      format_display_path(path)
+    end
+  end
+
+  def emit_compile_diagnostics(errors: [], alerts: [], warnings: [], whatevers: [], io: $stderr)
+    records = collect_compile_records(errors: errors, alerts: alerts,
+                                      warnings: warnings, whatevers: whatevers)
+    records.sort_by { |r| [r[:index] || 0, r[:file] || '', r[:line] || 0, r[:col] || 0] }
+           .each { |r| io.puts LaTeXCompileFormat.render(r, color: @options[:color] != false) }
+    records.size
+  end
+
+  def collect_compile_records(errors:, alerts:, warnings:, whatevers:)
+    { 'errors' => errors, 'alerts' => alerts,
+      'warnings' => warnings, 'whatevers' => whatevers }
+      .reject { |tier, _| tier_suppressed?(tier.to_sym) }
+      .flat_map { |tier, items| (items || []).map { |it| normalize_diagnostic(it, tier) } }
   end
 
   def tier_label_for(item, tier_label)
     return tier_label if tier_label
+    return item[:tier] if item[:tier]
     return 'errors' if item[:err_block]
     return 'alerts' if item[:base_color] == :red
     return 'whatevers' if item[:base_color] == :cyan
@@ -964,6 +1001,14 @@ module LaTeXDiagnostics
   end
 
   def render_diagnostic_fallback(all_sorted, fallback_lines, current_header, tier_label = nil, io: $stdout)
+    if compile_mode?
+      if all_sorted.empty? && !fallback_lines.empty?
+        disp = format_display_path(@filename)
+        io.puts "#{disp}:1: error: compilation failed; see log for details"
+      end
+      return
+    end
+
     if all_sorted.empty? && !fallback_lines.empty?
       render_fallback_lines(fallback_lines, tier_label, io: io)
     elsif current_header && @options[:emacs]
@@ -1209,6 +1254,10 @@ module LaTeXDiagnostics
       end
     end
 
+    alert_items.each { |i| i[:tier] = 'alerts' }
+    regular_warnings.each { |i| i[:tier] = 'warnings' }
+    whatevers.each { |i| i[:tier] = 'whatevers' }
+
     [alert_items, regular_warnings, whatevers]
   end
 
@@ -1238,7 +1287,7 @@ module LaTeXDiagnostics
 
   def print_summary_line(errors, alerts, warnings, whatevers,
                          suppressed_warnings: false, suppressed_whatevers: false, suppressed_alerts: false, io: nil)
-    return if @options && @options[:vim]
+    return if @options && compile_mode?
 
     target_io = io || ((@options && @options[:score]) ? (@orig_stdout || $stdout) : $stdout)
     active = active_tiers(suppressed_alerts, suppressed_warnings, suppressed_whatevers)
@@ -1310,7 +1359,7 @@ module LaTeXDiagnostics
   end
 
   def throttle_errors(errors)
-    return [errors, nil] if (@options && (@options[:all] || @options[:emacs] || @options[:vim])) || errors.size <= 1
+    return [errors, nil] if (@options && (@options[:all] || @options[:emacs] || @options[:compile])) || errors.size <= 1
 
     groups = errors.group_by { |e| format_display_path(e[:file]) }
     first_file = primary_error_file(groups)
@@ -1363,6 +1412,7 @@ module LaTeXDiagnostics
   end
 
   def report_errors(loga, io: $stderr)
+    LaTeXIndicator.stop(clear: true)
     raw = LaTeXUtils.safe_read(loga)
     content = LaTeXUtils.filter_subcommand_noise(raw)
 
@@ -1373,6 +1423,20 @@ module LaTeXDiagnostics
                      []
                    end
     errors = prepare_error_items(compiler_errors) + brace_errors
+
+    if compile_mode?
+      raw_warns = extract_warnings(content, false)
+      alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
+      emit_compile_diagnostics(
+        errors: errors,
+        alerts: alert_items,
+        warnings: regular_warns,
+        whatevers: whatever_items,
+        io: io
+      )
+      exit 1
+    end
+
     fallback = errors.empty? ? content.lines.last(15) : []
     displayed_errors, cascade_info = throttle_errors(errors)
     _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)
@@ -1576,12 +1640,24 @@ module LaTeXDiagnostics
   end
 
   def render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    if compile_mode?
+      prepared_errors = prepare_error_items(err_items)
+      emit_compile_diagnostics(
+        errors: prepared_errors,
+        alerts: alert_items,
+        warnings: reg_warns,
+        whatevers: what_items,
+        io: $stderr
+      )
+      return [prepared_errors.size, errors].max
+    end
+
     if errors > 0 || !err_items.empty?
       prepared_errors = prepare_error_items(err_items)
       displayed_errors, cascade_info = throttle_errors(prepared_errors)
       _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
       print_cascade_notice(cascade_info, io: $stdout) if cascade_info
-      render_non_error_tiers(alert_items, reg_warns, what_items) if @options[:emacs] || @options[:vim] || @options[:all]
+      render_non_error_tiers(alert_items, reg_warns, what_items) if @options[:emacs] || @options[:all]
       [prepared_errors.size, errors].max
     else
       render_non_error_tiers(alert_items, reg_warns, what_items)
@@ -1603,6 +1679,7 @@ module LaTeXDiagnostics
     formatted = what_items.map do |wh|
       wh_copy = wh.dup
       wh_copy[:base_color] = :cyan
+      wh_copy[:tier] = 'whatevers'
       wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan)
       wh_copy
     end
@@ -1610,16 +1687,16 @@ module LaTeXDiagnostics
   end
 
   def summarize_and_check_werror(errors, alerts, warnings, whatevers)
-    suppressed_alt = (errors > 0 && !@options[:emacs] && !@options[:vim] && !@options[:all]) || (@options[:suppress_alerts] == true)
-    suppressed_wrn = (errors > 0 && !@options[:emacs] && !@options[:vim] && !@options[:all]) || (@options[:suppress_warnings] == true)
-    suppressed_wht = (errors > 0 && !@options[:emacs] && !@options[:vim] && !@options[:all]) || (@options[:suppress_whatevers] != false)
+    suppressed_alt = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_alerts] == true)
+    suppressed_wrn = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_warnings] == true)
+    suppressed_wht = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_whatevers] != false)
 
     print_summary_line(
       errors, alerts, warnings, whatevers,
       suppressed_alerts: suppressed_alt && alerts > 0,
       suppressed_warnings: suppressed_wrn && warnings > 0,
       suppressed_whatevers: suppressed_wht && whatevers > 0
-    ) unless @options[:vim]
+    ) unless compile_mode?
 
     fail_on_diagnostics(errors, alerts, warnings)
   end
@@ -1630,12 +1707,16 @@ module LaTeXDiagnostics
   # alerts and warnings, so even that flag could not make an error fatal.
   def fail_on_diagnostics(errors, alerts, warnings)
     if errors.positive?
-      puts Rainbow("\n#{errors} error(s) reported; exiting with a non-zero status.").red.bright
+      puts Rainbow("\n#{errors} error(s) reported; exiting with a non-zero status.").red.bright unless compile_mode?
       exit 1
     end
     return unless @options[:werror] && (alerts.positive? || warnings.positive?)
 
-    puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
+    if compile_mode?
+      warn 'latex_it: error: warnings being treated as errors (--werror)'
+    else
+      puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
+    end
     exit 1
   end
 

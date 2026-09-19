@@ -139,7 +139,7 @@ class TestLaTeXConfigAndConventions < Minitest::Test
       task = tasks.first
       assert_equal 'Build LaTeX (latex_it)', task['label']
       assert_equal 'l', task['command']
-      assert_equal ['--qf'], task['args']
+      assert_equal ['--compile'], task['args']
       assert_equal true, task.dig('group', 'isDefault')
       assert_equal 'latex', task.dig('problemMatcher', 'owner')
 

@@ -17,11 +17,11 @@ class TestVimIntegration < Minitest::Test
     assert File.file?(@compiler_vim), "Expected #{@compiler_vim} to exist"
     content = File.read(@compiler_vim)
     assert_includes content, 'let current_compiler = "latex_it"'
-    assert_includes content, 'CompilerSet makeprg=l\ --vim'
+    assert_includes content, 'CompilerSet makeprg=l\ --compile'
     assert_includes content, 'CompilerSet errorformat='
   end
 
-  def test_clean_build_in_vim_mode_produces_no_diagnostic_noise
+  def test_clean_build_in_compile_mode_produces_no_diagnostic_noise
     Dir.mktmpdir('vim_clean') do |dir|
       tex = File.join(dir, 'clean.tex')
       File.write(tex, <<~TEX)
@@ -31,14 +31,14 @@ class TestVimIntegration < Minitest::Test
         \\end{document}
       TEX
 
-      out, status = Open3.capture2e(@bin_path, '--vim', 'clean.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', 'clean.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
       refute_includes out, '── clean.tex'
       refute_includes out, 'Errors: 0'
     end
   end
 
-  def test_error_formatting_in_vim_mode_and_quickfix_parsing
+  def test_error_formatting_and_quickfix_parsing
     skip 'vim not installed' unless LaTeXUtils.command_available?('vim')
 
     Dir.mktmpdir('vim_err') do |dir|
@@ -50,11 +50,11 @@ class TestVimIntegration < Minitest::Test
         \\end{document}
       TEX
 
-      out, status = Open3.capture2e(@bin_path, '--vim', 'bad.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', 'bad.tex', chdir: dir)
       assert_equal 1, status.exitstatus, "Expected exit 1 on compilation failure. Output: #{out}"
 
       # Check single-line GNU format
-      assert_match(/^bad\.tex:\d+(?::\d+)?: error: Undefined control sequence/, out)
+      assert_match(/^bad\.tex:\d+(?::\d+)?: error: undefined control sequence/i, out)
       refute_includes out, '── bad.tex'
       refute_includes out, 'Errors: 1'
 
@@ -71,7 +71,7 @@ class TestVimIntegration < Minitest::Test
     end
   end
 
-  def test_warning_and_alert_formatting_in_vim_mode
+  def test_warning_and_alert_formatting_and_quickfix_parsing
     skip 'vim not installed' unless LaTeXUtils.command_available?('vim')
 
     Dir.mktmpdir('vim_warn') do |dir|
@@ -83,7 +83,7 @@ class TestVimIntegration < Minitest::Test
         \\end{document}
       TEX
 
-      out, status = Open3.capture2e(@bin_path, '--vim', '-u', 'warn.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', '-u', 'warn.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
 
       assert_match(/^warn\.tex:3: warning: .*undefined/i, out)
@@ -101,10 +101,11 @@ class TestVimIntegration < Minitest::Test
     end
   end
 
-  def test_qf_alias_flag
-    out, status = Open3.capture2e(@bin_path, '--help-all')
-    assert status.success?
-    assert_includes out, '--vim'
-    assert_includes out, '--qf'
+  def test_vim_and_qf_flags_removed
+    _out, status = Open3.capture2e(@bin_path, '--vim')
+    assert_equal 2, status.exitstatus
+
+    _out, status = Open3.capture2e(@bin_path, '--qf')
+    assert_equal 2, status.exitstatus
   end
 end

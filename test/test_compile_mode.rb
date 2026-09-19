@@ -269,4 +269,37 @@ class TestCompileMode < Minitest::Test
       assert_includes output, "\e]8;;\e\\"
     end
   end
+
+  def test_compile_mode_on_latex_file
+    Dir.mktmpdir('compile_standard_file') do |dir|
+      File.write(File.join(dir, 'sample.tex'), <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        Hello world.
+        \\end{document}
+      TEX
+
+      # Explicit file target
+      out, status = Open3.capture2e(@bin_path, '-cc', 'sample.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
+      assert File.file?(File.join(dir, 'sample.pdf')), 'Expected sample.pdf to be generated'
+
+      # Implicit target (auto-detect main file in directory)
+      FileUtils.rm_f(File.join(dir, 'sample.pdf'))
+      FileUtils.rm_rf(File.join(dir, 'junk'))
+      out_auto, status_auto = Open3.capture2e(@bin_path, '-cc', chdir: dir)
+      assert_equal 0, status_auto.exitstatus, "Expected exit 0 with auto-detected file. Output: #{out_auto}"
+      assert File.file?(File.join(dir, 'sample.pdf')), 'Expected sample.pdf to be generated on auto-detect'
+    end
+  end
+
+  def test_compile_mode_in_directory_with_no_tex_files
+    Dir.mktmpdir('compile_no_tex') do |dir|
+      out, status = Open3.capture2e(@bin_path, '-cc', chdir: dir)
+      assert_equal 1, status.exitstatus
+      refute_includes out, 'from /'
+      refute_includes out, 'Traceback'
+      assert_includes out, 'No LaTeX (.tex) files found'
+    end
+  end
 end

@@ -305,4 +305,32 @@ class TestCompileMode < Minitest::Test
       assert_includes out, 'No LaTeX (.tex) files found'
     end
   end
+
+  def test_compile_mode_suppresses_warnings_when_errors_present
+    Dir.mktmpdir('compile_err_and_warn') do |dir|
+      File.write(File.join(dir, 'bad.tex'), <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\hbox to 20pt{\\rule{100pt}{10pt}}
+        Missing ref: \\ref{nonexistent_ref}.
+        \\fatalundefinedcmd
+        \\end{document}
+      TEX
+
+      # Default -cc: errors are emitted, but alerts and warnings are suppressed
+      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'bad.tex', chdir: dir)
+      assert_equal 1, status.exitstatus
+      assert_includes out, 'error: undefined control sequence'
+      refute_includes out, 'warning:'
+      refute_includes out, 'overfull'
+      refute_includes out, 'nonexistent_ref'
+
+      # With -a / --all: warnings and alerts are shown alongside errors
+      out_all, status_all = Open3.capture2e(@bin_path, '-cc', '-a', '--no-color', 'bad.tex', chdir: dir)
+      assert_equal 1, status_all.exitstatus
+      assert_includes out_all, 'error: undefined control sequence'
+      assert_includes out_all, 'warning: [alert] overfull'
+      assert_includes out_all, 'warning: reference `nonexistent_ref\''
+    end
+  end
 end

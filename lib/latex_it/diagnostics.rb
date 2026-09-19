@@ -1503,6 +1503,25 @@ module LaTeXDiagnostics
     content.match?(COMPILER_BRACE_ERROR_PATTERN)
   end
 
+  def report_compile_mode_errors(errors, content, io: $stderr)
+    alerts = []
+    warns = []
+    whats = []
+    if @options[:all]
+      raw_warns = extract_warnings(content, false)
+      alerts, warns, whats = partition_diagnostics(content, raw_warns)
+    end
+
+    emit_compile_diagnostics(
+      errors: errors,
+      alerts: alerts,
+      warnings: warns,
+      whatevers: whats,
+      io: io
+    )
+    exit 1
+  end
+
   def report_errors(loga, io: $stderr)
     LaTeXIndicator.stop(clear: true)
     raw = LaTeXUtils.safe_read(loga)
@@ -1516,18 +1535,7 @@ module LaTeXDiagnostics
                    end
     errors = prepare_error_items(compiler_errors) + brace_errors
 
-    if compile_mode?
-      raw_warns = extract_warnings(content, false)
-      alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
-      emit_compile_diagnostics(
-        errors: errors,
-        alerts: alert_items,
-        warnings: regular_warns,
-        whatevers: whatever_items,
-        io: io
-      )
-      exit 1
-    end
+    return report_compile_mode_errors(errors, content, io: io) if compile_mode?
 
     fallback = errors.empty? ? content.lines.last(15) : []
     displayed_errors, cascade_info = throttle_errors(errors)
@@ -1731,18 +1739,23 @@ module LaTeXDiagnostics
     summarize_and_check_werror(errors, alerts, warnings, whatevers)
   end
 
+  def render_compile_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    prepared_errors = prepare_error_items(err_items)
+    has_errors = errors > 0 || !prepared_errors.empty?
+    show_non_errors = @options[:all] || !has_errors
+
+    emit_compile_diagnostics(
+      errors: prepared_errors,
+      alerts: show_non_errors ? alert_items : [],
+      warnings: show_non_errors ? reg_warns : [],
+      whatevers: show_non_errors ? what_items : [],
+      io: $stderr
+    )
+    [prepared_errors.size, errors].max
+  end
+
   def render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
-    if compile_mode?
-      prepared_errors = prepare_error_items(err_items)
-      emit_compile_diagnostics(
-        errors: prepared_errors,
-        alerts: alert_items,
-        warnings: reg_warns,
-        whatevers: what_items,
-        io: $stderr
-      )
-      return [prepared_errors.size, errors].max
-    end
+    return render_compile_mode_tiers(err_items, alert_items, reg_warns, what_items, errors) if compile_mode?
 
     if errors > 0 || !err_items.empty?
       prepared_errors = prepare_error_items(err_items)

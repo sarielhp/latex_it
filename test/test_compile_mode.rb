@@ -270,24 +270,27 @@ class TestCompileMode < Minitest::Test
     end
   end
 
-  def test_compile_mode_on_latex_file
-    Dir.mktmpdir('compile_standard_file') do |dir|
+  def test_compile_mode_on_latex_file_via_ll_symlink
+    Dir.mktmpdir('compile_ll_symlink') do |dir|
+      ll_bin = File.join(dir, 'll')
+      FileUtils.ln_s(@bin_path, ll_bin)
+
       File.write(File.join(dir, 'sample.tex'), <<~TEX)
         \\documentclass{article}
         \\begin{document}
-        Hello world.
+        Hello world from ll compile mode.
         \\end{document}
       TEX
 
-      # Explicit file target
-      out, status = Open3.capture2e(@bin_path, '-cc', 'sample.tex', chdir: dir)
+      # Explicit file target via ll -cc
+      out, status = Open3.capture2e(ll_bin, '-cc', 'sample.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
       assert File.file?(File.join(dir, 'sample.pdf')), 'Expected sample.pdf to be generated'
 
-      # Implicit target (auto-detect main file in directory)
+      # Implicit target via ll -cc (auto-detect main file in directory)
       FileUtils.rm_f(File.join(dir, 'sample.pdf'))
       FileUtils.rm_rf(File.join(dir, 'junk'))
-      out_auto, status_auto = Open3.capture2e(@bin_path, '-cc', chdir: dir)
+      out_auto, status_auto = Open3.capture2e(ll_bin, '-cc', chdir: dir)
       assert_equal 0, status_auto.exitstatus, "Expected exit 0 with auto-detected file. Output: #{out_auto}"
       assert File.file?(File.join(dir, 'sample.pdf')), 'Expected sample.pdf to be generated on auto-detect'
     end

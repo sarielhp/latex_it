@@ -333,4 +333,31 @@ class TestCompileMode < Minitest::Test
       assert_includes out_all, 'warning: reference `nonexistent_ref\''
     end
   end
+
+  def test_compile_mode_throttles_errors_to_ten_by_default
+    Dir.mktmpdir('compile_throttle') do |dir|
+      bad_tex = File.join(dir, 'many_errors.tex')
+      error_cmds = (1..15).map { |i| "\\errCommand#{i}" }.join("\n")
+      File.write(bad_tex, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        #{error_cmds}
+        \\end{document}
+      TEX
+
+      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'many_errors.tex', chdir: dir)
+      assert_equal 1, status.exitstatus
+      error_lines = out.lines.select { |l| l.include?('error: undefined control sequence') }
+      assert_equal 10, error_lines.size, "Expected exactly 10 errors displayed, got #{error_lines.size}: #{out}"
+      assert_includes out, 'note: 5 more errors in many_errors.tex were truncated'
+      assert_includes out, "(run with 'l -a' to display all)"
+
+      # With -a, all 15 errors should be displayed
+      out_all, status_all = Open3.capture2e(@bin_path, '-cc', '-a', '--no-color', 'many_errors.tex', chdir: dir)
+      assert_equal 1, status_all.exitstatus
+      error_lines_all = out_all.lines.select { |l| l.include?('error: undefined control sequence') }
+      assert_equal 15, error_lines_all.size, "Expected 15 errors with -a, got #{error_lines_all.size}: #{out_all}"
+      refute_includes out_all, 'were truncated'
+    end
+  end
 end

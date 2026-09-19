@@ -1451,7 +1451,7 @@ module LaTeXDiagnostics
   end
 
   def throttle_errors(errors)
-    return [errors, nil] if (@options && (@options[:all] || @options[:emacs] || @options[:compile])) || errors.size <= 1
+    return [errors, nil] if (@options && (@options[:all] || @options[:emacs])) || errors.size <= 1
 
     groups = errors.group_by { |e| format_display_path(e[:file]) }
     first_file = primary_error_file(groups)
@@ -1497,6 +1497,21 @@ module LaTeXDiagnostics
     io.puts Rainbow('═══════════════════════════════════════════════════════════════════════════════').yellow
   end
 
+  def emit_compile_cascade_notice(cascade_info, io: $stderr)
+    return unless cascade_info
+
+    note_label = (@options && @options[:color] == false) ? 'note:' : Rainbow('note:').cyan.bright.bold.to_s
+    if cascade_info[:remaining_in_first].to_i > 0
+      msg = "#{cascade_info[:remaining_in_first]} more errors in #{cascade_info[:first_file]} were truncated"
+      io.puts "latex_it: #{note_label} #{msg} (run with 'l -a' to display all)"
+    end
+    if cascade_info[:other_errors_count].to_i > 0
+      files_str = format_other_files_list(cascade_info[:other_files])
+      msg = "#{cascade_info[:other_errors_count]} more errors detected across #{cascade_info[:other_files].size} other files (#{files_str})"
+      io.puts "latex_it: #{note_label} #{msg} (run with 'l -a' to display all)"
+    end
+  end
+
   COMPILER_BRACE_ERROR_PATTERN = /(?:Runaway argument\?|File ended while scanning use of|Extra \}, or forgotten \\endgroup|Extra \\endgroup|Too many \}'s|Missing \} inserted|Paragraph ended before .* was complete|\\begin\{.*\} ended by \\end\{.*\})/i.freeze
 
   def compiler_indicates_brace_error?(content)
@@ -1504,6 +1519,7 @@ module LaTeXDiagnostics
   end
 
   def report_compile_mode_errors(errors, content, io: $stderr)
+    displayed_errors, cascade_info = throttle_errors(errors)
     alerts = []
     warns = []
     whats = []
@@ -1513,12 +1529,13 @@ module LaTeXDiagnostics
     end
 
     emit_compile_diagnostics(
-      errors: errors,
+      errors: displayed_errors,
       alerts: alerts,
       warnings: warns,
       whatevers: whats,
       io: io
     )
+    emit_compile_cascade_notice(cascade_info, io: io)
     exit 1
   end
 
@@ -1741,16 +1758,18 @@ module LaTeXDiagnostics
 
   def render_compile_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
     prepared_errors = prepare_error_items(err_items)
+    displayed_errors, cascade_info = throttle_errors(prepared_errors)
     has_errors = errors > 0 || !prepared_errors.empty?
     show_non_errors = @options[:all] || !has_errors
 
     emit_compile_diagnostics(
-      errors: prepared_errors,
+      errors: displayed_errors,
       alerts: show_non_errors ? alert_items : [],
       warnings: show_non_errors ? reg_warns : [],
       whatevers: show_non_errors ? what_items : [],
       io: $stderr
     )
+    emit_compile_cascade_notice(cascade_info, io: $stderr)
     [prepared_errors.size, errors].max
   end
 

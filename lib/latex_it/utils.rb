@@ -258,6 +258,29 @@ module LaTeXUtils
     content.include?('\bibitem') || content.include?('\entry{')
   end
 
+  def self.extract_citation_keys(aux_str, bcf_content = nil)
+    keys = aux_str.to_s.scan(/\\citation\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.map(&:strip)
+    if bcf_content
+      keys.concat(bcf_content.to_s.scan(/<bcf:citekey[^>]*>([^<]+)<\/bcf:citekey>/).flatten.map(&:strip))
+    end
+    keys.reject(&:empty?).sort.uniq
+  end
+
+  def self.bib_fatal_error?(tool, bib_out, status_ok)
+    out = bib_out.to_s
+    if tool == :bibtex
+      return false if status_ok
+      return false if out =~ /I found no \\citation commands/i && out !~ /Illegal end of database|syntax error|I couldn't open/i
+      true
+    elsif tool == :biber
+      return false if status_ok && out !~ /> (?:FATAL|ERROR) -/i && out !~ /INFO - ERRORS: [1-9]/i
+      return false if out =~ /does not contain any citations/i && out !~ /syntax error/i
+      true
+    else
+      !status_ok
+    end
+  end
+
   def self.command_available?(cmd)
     ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? do |dir|
       bin = File.join(dir, cmd.to_s)

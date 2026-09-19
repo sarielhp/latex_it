@@ -1039,6 +1039,11 @@ module LaTeXErrorCatalog
       why: 'Document-level summary emitted at end of LaTeX run.',
       fix: 'Harmless recap; individual items are already reported above.'
     },
+    etex_allocation: {
+      title: 'Whatever: Extended Allocation In Use',
+      why: 'Modern LaTeX formats already provide extended allocation; etex.sty code was skipped.',
+      fix: 'Harmless notice on modern TeX engines; safely ignored.'
+    },
     inverted_label: {
       title: 'Alert: Inverted \\label Before \\caption',
       why: '\\label{...} was placed before \\caption in a float. Cross-references (\\ref) will resolve to the Section number instead of the float number.',

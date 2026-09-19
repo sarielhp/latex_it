@@ -33,12 +33,6 @@ class LatexBuilder
 
   DEFAULT_PASS_TIMEOUT = 180
 
-  BIB_RERUN_PATTERNS = [
-    /Please \(re\)run Biber/i, /No file .*\.bbl/i, /Citation .* undefined/i,
-    /There were undefined citations/i, /Package biblatex Warning: Please rerun/i,
-    /Package natbib Warning: Citation\(s\) may have changed/i
-  ].freeze
-
   LATEX_RERUN_PATTERNS = [
     /Label\(s\) may have changed/i, /Rerun to get/i, /Please rerun LaTeX/i,
     /\bRerun\s+LaTeX/i,
@@ -148,11 +142,7 @@ class LatexBuilder
     save_build_state!
   end
 
-  # -a, -e, -v and --emacs exist to show more output, so returning early from
-  # the up-to-date branch made exactly the flags a user reaches for print
-  # nothing at all -- an AUCTeX run would report an empty error list for a
-  # document that has warnings. Re-reporting from the cached log keeps the
-  # cache fast and the flags honest.
+  # Re-reporting from cached log keeps cache fast and verbose flags honest.
   def diagnostics_requested?
     @options[:all] || @options[:explain] || @options[:verbose] || @options[:emacs] || @options[:compile]
   end
@@ -212,7 +202,7 @@ class LatexBuilder
     return [true, false] unless bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux)
 
     log_bib_start(bib_tool, first: false)
-    [run_bib_pass(bib_tool), true]
+    [run_bib_pass(bib_tool, curr_aux), true]
   end
 
   def check_and_run_index_pass
@@ -238,7 +228,7 @@ class LatexBuilder
       curr_aux = compute_aux_hash
       bib_tool = detect_bib_tool(curr_aux)
       bib_ok, bib_ran_now = check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
-      return false unless bib_ok
+      return false if @bib_fatal
 
       if bib_ran_now
         bib_ran = true
@@ -341,6 +331,8 @@ class LatexBuilder
 
       @input_snapshots[f] = { mtime: File.mtime(f).to_f, sha: (Digest::SHA256.file(f).hexdigest rescue nil) }
     end
+    state = JSON.parse(File.read('junk/.build_state.json')) rescue nil
+    @last_bib_citations ||= state['citations'] if state.is_a?(Hash) && state['citations'].is_a?(Array)
   end
 
   def save_build_state!
@@ -361,7 +353,8 @@ class LatexBuilder
       'engine' => @engine_name,
       'signature' => build_signature,
       'saved_at' => Time.now.to_i,
-      'sources' => sources
+      'sources' => sources,
+      'citations' => current_citation_keys
     }
     state['idx_sha'] = Digest::SHA256.file("junk/#{@bfilename}.idx").hexdigest if File.file?("junk/#{@bfilename}.idx")
 
@@ -413,13 +406,7 @@ class LatexBuilder
     Digest::SHA256.hexdigest(JSON.generate(payload))
   end
 
-  # The single source of truth for where bibliographies live. Five call sites
-  # used to hardcode Dir['*.bib', 'refs/*.bib'] while discover_bib_files knew
-  # about bib/ and bibliography/ as well, and bib_dirs is user-configurable.
-  # A .bib never appears in the .fls either -- LaTeX reads the .bbl out of
-  # junk/, which extract_fls_dependencies excludes -- so a bibliography under
-  # bib/ was tracked by nothing at all, and editing it left targets_up_to_date?
-  # reporting the stale PDF as current.
+  # Single source of truth for bibliography file locations on disk.
   def bib_globs
     dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
     ['*.bib'] + dirs.map { |d| "#{d.to_s.chomp('/')}/*.bib" }
@@ -838,7 +825,7 @@ class LatexBuilder
     end
   end
 
-  def run_bib_pass(tool)
+  def run_bib_pass(tool, aux_contents = nil)
     puts '' if @options[:trace] || @options[:raw]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     fnbbl = "junk/#{@bfilename}.bbl"
@@ -847,30 +834,41 @@ class LatexBuilder
     preserve_bibliography_backup(previous, root_bbl)
     FileUtils.rm_f(fnbbl)
 
-    return false unless execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
+    result = execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
+    @last_bib_citations = current_citation_keys(aux_contents)
 
     if @options[:time]
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
     end
-    true
+    result
   end
 
   def execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
+    @bib_fatal = false
     begin
       bib_out, status = execute_bibliography(tool)
     rescue Errno::ENOENT => e
       File.write(@biberr, e.message)
       restore_bibliography(fnbbl, previous)
       warn "\nBibliography tool unavailable: #{e.message}"
+      @bib_fatal = true
       return false
     end
     File.write(@biberr, bib_out)
 
-    valid = status.success? && LaTeXUtils.bbl_has_entries?(fnbbl)
-    unless valid
+    status_ok = status.respond_to?(:success?) ? status.success? : (status == 0)
+    has_entries = LaTeXUtils.bbl_has_entries?(fnbbl)
+    if LaTeXUtils.bib_fatal_error?(tool, bib_out, status_ok)
       restore_bibliography(fnbbl, previous)
       warn "\nBibliography process failed or produced no valid entries. See #{@biberr}."
+      @bib_fatal = true
+      return false
+    end
+
+    unless has_entries
+      restore_bibliography(fnbbl, previous) if previous
+      warn "\nBibliography process failed or produced no valid entries. See #{@biberr}." if @options[:verbose] || @options[:trace]
       return false
     end
 
@@ -891,10 +889,7 @@ class LatexBuilder
   end
 
   def restore_bibliography(junk_bbl, previous)
-    unless previous
-      FileUtils.rm_f(junk_bbl)
-      return
-    end
+    return FileUtils.rm_f(junk_bbl) unless previous
 
     backup = "#{@bfilename}.bbl.bak"
     source = File.file?(backup) ? backup : previous
@@ -913,8 +908,7 @@ class LatexBuilder
     return [] unless File.exist?(bcf_path)
 
     files = []
-    bcf_content = LaTeXUtils.safe_read(bcf_path)
-    bcf_content.scan(/<bcf:datasource[^>]*>(.*?)<\/bcf:datasource>/) do |m|
+    LaTeXUtils.safe_read(bcf_path).scan(/<bcf:datasource[^>]*>(.*?)<\/bcf:datasource>/) do |m|
       collect_bib_candidates(m.first.strip, files)
     end
     files
@@ -922,16 +916,9 @@ class LatexBuilder
 
   def extract_aux_bib_files(aux_contents = nil)
     files = []
-    if aux_contents
-      aux_contents.scan(/\\bibdata\{([^}]+)\}/) do |m|
-        collect_bib_candidates(m.first, files)
-      end
-    else
-      Dir.glob('junk/**/*.aux').each do |aux|
-        LaTeXUtils.safe_read(aux).scan(/\\bibdata\{([^}]+)\}/) do |m|
-          collect_bib_candidates(m.first, files)
-        end
-      end
+    sources = aux_contents ? [aux_contents] : Dir.glob('junk/**/*.aux').map { |aux| LaTeXUtils.safe_read(aux) }
+    sources.each do |content|
+      content.scan(/\\bibdata\{([^}]+)\}/) { |m| collect_bib_candidates(m.first, files) }
     end
     files
   end
@@ -955,9 +942,7 @@ class LatexBuilder
             copy_style_files_for_bibtex
             ['bibtex', @bfilename]
           end
-    Dir.chdir('junk') do
-      capture_pass_output(cmd)
-    end
+    Dir.chdir('junk') { capture_pass_output(cmd) }
   end
 
   def copy_style_files_for_bibtex
@@ -972,23 +957,28 @@ class LatexBuilder
     aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
   end
 
+  def current_citation_keys(aux_contents = nil)
+    aux_str = aux_contents || compute_aux_hash
+    bcf_path = "junk/#{@bfilename}.bcf"
+    bcf = File.file?(bcf_path) ? LaTeXUtils.safe_read(bcf_path) : nil
+    LaTeXUtils.extract_citation_keys(aux_str, bcf)
+  end
+
   def needs_bib_pass?(tool, loga, aux_contents = nil)
     return false if @options[:bib] == false
     return true if @options[:bib] == true
 
     fnbbl = "junk/#{@bfilename}.bbl"
-    return true unless File.exist?(fnbbl) && File.size(fnbbl) > 0
+    return true unless File.exist?(fnbbl)
 
     bbl_mtime = File.mtime(fnbbl)
     bib_files = discover_bib_files(aux_contents)
     return true if bib_files.any? { |b| File.mtime(b) > bbl_mtime }
 
-    log_content = LaTeXUtils.safe_read(loga)
-    bib_rerun_requested?(log_content)
-  end
+    current_cites = current_citation_keys(aux_contents)
+    return true if @last_bib_citations && current_cites != @last_bib_citations
 
-  def bib_rerun_requested?(log_content)
-    BIB_RERUN_PATTERNS.any? { |pat| log_content =~ pat }
+    false
   end
 
   def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
@@ -1001,7 +991,8 @@ class LatexBuilder
   end
 
   def latex_rerun_requested?(log_content)
-    LATEX_RERUN_PATTERNS.any? { |pat| log_content =~ pat }
+    filtered = log_content.gsub(/Package biblatex Warning: Please \(re\)run Biber.*?and rerun LaTeX afterwards\./m, '')
+    LATEX_RERUN_PATTERNS.any? { |pat| filtered =~ pat }
   end
 
   def aux_has_cross_references?(aux_hash)

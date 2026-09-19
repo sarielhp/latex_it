@@ -1269,6 +1269,7 @@ module LaTeXDiagnostics
     return :float_specifier if txt =~ /float specifier changed to/i
     return :font_shape if txt.include?('Some font shapes were not available') || txt =~ /Font shape .* undefined/i
     return :summary_warning if txt.include?('There were multiply-defined labels') || txt.include?('There were undefined references')
+    return :etex_allocation if txt.include?('Extended allocation already in use')
 
     :generic
   end
@@ -1500,7 +1501,8 @@ module LaTeXDiagnostics
                    txt.include?('There were multiply-defined labels') ||
                    txt.include?('There were undefined references') ||
                    txt.include?('Some font shapes were not available') ||
-                   txt =~ /Font shape .* undefined using .* instead/i
+                   txt =~ /Font shape .* undefined using .* instead/i ||
+                   txt.include?('Extended allocation already in use')
 
     false
   end

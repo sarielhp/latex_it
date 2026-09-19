@@ -210,4 +210,64 @@ class TestBibIntegration < Minitest::Test
     assert_equal '', LaTeXUtils.wrap_text('')
     assert_equal '', LaTeXUtils.wrap_text(nil)
   end
+
+  def test_empty_bibliography_completes_and_resolves_labels_on_clean_dir
+    Dir.mktmpdir('empty_bib_test') do |dir|
+      tex = <<~'TEX'
+        \documentclass{article}
+        \begin{document}
+        \section{Introduction}\label{sec:intro}
+        See section \ref{sec:intro}.
+        Citation: \cite{nonexistent}.
+        \bibliographystyle{plain}
+        \bibliography{refs}
+        \end{document}
+      TEX
+      File.write(File.join(dir, 'main.tex'), tex)
+      File.write(File.join(dir, 'refs.bib'), '')
+
+      bin_path = File.expand_path('../latex_it', __dir__)
+      out, status = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Compilation failed on clean dir: #{out}"
+      pdf_path = File.join(dir, 'main.pdf')
+      assert File.file?(pdf_path), 'Expected main.pdf to be generated'
+
+      # Verify cross-references were resolved on pass 2
+      txt, _ = Open3.capture2('pdftotext', pdf_path, '-')
+      assert_includes txt, 'See section 1'
+
+      # Second run untouched: should be up to date
+      out2, status2 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus
+      assert_includes out2, 'up-to-date'
+
+      # Third run with text edit only: should run single pass without bibtex
+      File.write(File.join(dir, 'main.tex'), tex.sub('See section', 'See section updated'))
+      out3, status3 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status3.exitstatus
+      assert_includes out3, 'xelatex (1)'
+      refute_includes out3, 'bibtex'
+    end
+  end
+
+  def test_syntax_error_in_bib_halts_compilation
+    Dir.mktmpdir('bib_syntax_err_test') do |dir|
+      tex = <<~'TEX'
+        \documentclass{article}
+        \begin{document}
+        \section{Intro}\label{sec:intro}
+        \cite{broken}.
+        \bibliographystyle{plain}
+        \bibliography{refs}
+        \end{document}
+      TEX
+      File.write(File.join(dir, 'main.tex'), tex)
+      File.write(File.join(dir, 'refs.bib'), '@article{broken, author = {Incomplete')
+
+      bin_path = File.expand_path('../latex_it', __dir__)
+      _out, status = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 1, status.exitstatus, 'Expected compilation to halt on bib syntax error'
+    end
+  end
 end
+

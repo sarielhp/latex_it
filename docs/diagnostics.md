@@ -164,7 +164,6 @@ sourcefile:lineno:column: severity: message
 ```bash
 # Standard compilation run (shorthand -cc or --compile)
 l -cc paper.tex
-l --compile paper.tex
 
 # With color explicitly enabled
 l -cc --color paper.tex

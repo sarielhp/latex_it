@@ -61,17 +61,33 @@ module LaTeXDiagnostics
   end
 
   def extract_box_severity(box_line)
-    if box_line =~ /\(([\d\.]+)pt too (?:wide|high)\)/i || box_line =~ /\(badness (\d+)\)/i
+    if box_line =~ /(?:\(?\b|)([\d\.]+)pt too (?:wide|high)\)?/i || box_line =~ /\(badness (\d+)\)/i
       Regexp.last_match(1).to_f
     else
       0.0
     end
   end
 
-  def colorize_line_num(str, base_color = nil)
+  def colorize_line_num(str, _base_color = nil)
     return str if @options[:emacs]
 
-    base_color == :cyan ? Rainbow(str).blue.bright.to_s : Rainbow(str).cyan.bright.to_s
+    Rainbow(str).cyan.bright.to_s
+  end
+
+  def link_enabled?
+    @options && @options[:link] == true && !@options[:emacs]
+  end
+
+  def format_terminal_link(file, line_str, display_str)
+    return display_str unless link_enabled? && file && !file.to_s.empty?
+
+    target_line = line_str.to_s[/^\d+/] || '1'
+    real_file = LaTeXErrorCatalog.find_source_file(file) || file
+    return display_str unless File.exist?(real_file)
+
+    abs_path = ::URI::DEFAULT_PARSER.escape(File.expand_path(real_file.to_s))
+    uri = "file://#{abs_path}##{target_line}"
+    "\e]8;;#{uri}\e\\#{display_str}\e]8;;\e\\"
   end
 
   def highlight_line_numbers(text, base_color, bright: false)
@@ -104,48 +120,69 @@ module LaTeXDiagnostics
     parts.join
   end
 
-  def format_diagnostic_line(line_str, message, base_color, width: 0, bright_sep: true)
-    if @options[:emacs]
-      return message if message =~ WARNING_LINE_PATTERN ||
-                        message =~ /^(?:Overfull|Underfull)\s+\\(?:hbox|vbox)/ ||
-                        message =~ /^.+:\d+:\s+/
+  def format_emacs_diagnostic_line(line_str, message)
+    return message if message =~ WARNING_LINE_PATTERN ||
+                      message =~ /^(?:Overfull|Underfull)\s+\\(?:hbox|vbox)/ ||
+                      message =~ /^.+:\d+:\s+/
 
-      str = line_str.to_s
-      return "LaTeX Warning: #{message.chomp('.')} on input line #{str}." unless str.empty?
+    str = line_str.to_s
+    return "LaTeX Warning: #{message.chomp('.')} on input line #{str}." unless str.empty?
 
-      return "LaTeX Warning: #{message}"
-    end
+    "LaTeX Warning: #{message}"
+  end
 
+  def format_diagnostic_left_side(line_str, base_color, width, bright_sep, file)
     str = line_str.to_s
     sep = Rainbow(': ').send(base_color)
     sep_str = bright_sep ? sep.bright.to_s : sep.to_s
 
-    left_side = if str.empty?
-                  "#{' ' * width}#{sep_str}"
-                else
-                  padding = ' ' * [width - str.length, 0].max
-                  "#{padding}#{colorize_line_num(str, base_color)}#{sep_str}"
-                end
+    if str.empty?
+      tag = (file == 'bibliography' || file == './bibliography') ? 'bib' : ''
+      return "#{' ' * width}#{sep_str}" if tag.empty?
 
-    formatted = highlight_line_numbers(message, base_color)
-    if formatted.include?("\n")
-      sub_indent = ' ' * (width + 2)
-      lines = formatted.split("\n")
-      first = left_side + highlight_latex_it_tag(lines[0], base_color)
-      rest = lines[1..].map { |l| "#{sub_indent}#{highlight_latex_it_tag(l, base_color)}" }
-      ([first] + rest).join("\n")
+      padding = ' ' * [width - tag.length, 0].max
+      tag_str = colorize_line_num(tag, base_color)
+      return "#{padding}#{tag_str}#{sep_str}" unless link_enabled? && file && !file.to_s.empty?
+
+      colon = bright_sep ? Rainbow(':').send(base_color).bright.to_s : Rainbow(':').send(base_color).to_s
+      "#{padding}#{format_terminal_link(file, '1', "#{tag_str}#{colon}")} "
     else
-      left_side + highlight_latex_it_tag(formatted, base_color)
+      padding = ' ' * [width - str.length, 0].max
+      col_num = colorize_line_num(str, base_color)
+      return "#{padding}#{col_num}#{sep_str}" unless link_enabled? && file && !file.to_s.empty?
+
+      colon = bright_sep ? Rainbow(':').send(base_color).bright.to_s : Rainbow(':').send(base_color).to_s
+      "#{padding}#{format_terminal_link(file, str, "#{col_num}#{colon}")} "
     end
+  end
+
+  def format_diagnostic_line(line_str, message, base_color, width: 0, bright_sep: true, file: nil)
+    return format_emacs_diagnostic_line(line_str, message) if @options[:emacs]
+
+    left_side = format_diagnostic_left_side(line_str, base_color, width, bright_sep, file)
+    formatted = highlight_line_numbers(message, base_color)
+    return left_side + highlight_latex_it_tag(formatted, base_color) unless formatted.include?("\n")
+
+    sub_indent = ' ' * (width + 2)
+    lines = formatted.split("\n")
+    first = left_side + highlight_latex_it_tag(lines[0], base_color)
+    rest = lines[1..].map { |l| "#{sub_indent}#{highlight_latex_it_tag(l, base_color)}" }
+    ([first] + rest).join("\n")
   end
 
   def highlight_latex_it_tag(str, base_color = :red)
     return str if @options[:emacs] || @options[:color] == false
     return str unless str.include?('[latex_it]')
 
-    reassert = Rainbow('').send(base_color).bright.to_s
-    tag = "#{Rainbow('[latex_it]').magenta.bold}#{reassert}"
-    str.gsub('[latex_it]', tag)
+    tag = Rainbow('[latex_it]').magenta.bold.to_s
+    parts = str.split('[latex_it]', -1)
+    return str if parts.size <= 1
+
+    first = parts[0]
+    rest = parts[1..].map do |part|
+      part.empty? ? '' : Rainbow(part).send(base_color).to_s
+    end
+    "#{first}#{tag}#{rest.join(tag)}"
   end
 
   def format_error_block(err_block, line_no, width: 0, catalog: nil, repeat_count: 1, item: nil)
@@ -394,7 +431,7 @@ module LaTeXDiagnostics
     return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog], repeat_count: item[:repeat_count] || 1, item: item) if item[:err_block]
 
     base_color = item[:base_color] || :yellow
-    out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width)
+    out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width, file: item[:file])
     if @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
       indent = ' ' * (width.positive? ? width + 2 : 2)
       out += "\n" + item[:extra_lines].map do |el|
@@ -445,6 +482,95 @@ module LaTeXDiagnostics
     false
   end
 
+  def clean_box_diagnostic(box_line, prefix_type = :warning)
+    prefix = case prefix_type
+             when :alert then 'Alert:'
+             when :note then 'Note:'
+             when :none then ''
+             else 'Warning:'
+             end
+
+    is_alignment = box_line.include?('in alignment')
+
+    body = if box_line =~ /(?:\(|\b)([\d\.]+)pt too (wide|high)\)?/i
+             pt_val = Regexp.last_match(1).to_f.round(2)
+             dimension = Regexp.last_match(2)
+             suffix = is_alignment ? ' (alignment)' : ''
+             format('%.2fpt too %s%s', pt_val, dimension, suffix)
+           elsif box_line =~ /\(badness (\d+)\)/i
+             badness = Regexp.last_match(1)
+             "underfull line (badness #{badness})"
+           else
+             clean = box_line.sub(/\\(?:hbox|vbox)\s*/, '')
+                             .sub(/\s*(?:detected at line \d+|in paragraph at lines \d+(?:--\d+)?|in alignment at lines \d+(?:--\d+)?)\.?/, '')
+                             .strip
+             clean.empty? ? box_line : clean
+           end
+
+    prefix.empty? ? body : "#{prefix} #{body}"
+  end
+
+  def clean_diagnostic_warning(text)
+    return text if @options[:emacs]
+
+    str = text.strip
+    return clean_ref_warning(str) if str =~ /LaTeX Warning: (?:Hyper reference|Reference)/i
+    return clean_cite_warning(str) if str =~ /LaTeX Warning: Citation/i
+
+    if str =~ /LaTeX Warning: Empty bibliography(?:\s+on input line \d+)?\.?/i
+      return 'Warning: empty bibliography'
+    end
+    if str =~ /LaTeX Warning: Command\s+(.+?)\s+invalid in math mode(?:\s+on input line \d+)?\.?/i
+      return "Warning: command #{Regexp.last_match(1)} invalid in math mode"
+    end
+    if str =~ /Missing database entry:\s*['"]([^`'"]+)['"]/i
+      return "Warning: Missing database entry: '#{Regexp.last_match(1)}'"
+    end
+    if str =~ /^Missing database entries/i
+      return "Warning: #{str}"
+    end
+    if str =~ /^(?:Package|Class)\s+([-\w.@*]+)\s+[Ww]arning:\s*(.+)$/m
+      pkg = Regexp.last_match(1)
+      body = Regexp.last_match(2).gsub(/\(#{Regexp.escape(pkg)}\)/, ' ').gsub(/\s+/, ' ').strip
+      body = body.sub(/\s+on input line \d+\.?$/i, '')
+      return "Warning: [#{pkg}] #{body}"
+    end
+    if str =~ /^LaTeX Warning:\s*(.+)$/i
+      body = Regexp.last_match(1).gsub(/\s+/, ' ').strip
+      body = body.sub(/\s+on input line \d+\.?$/i, '')
+      return "Warning: #{body}"
+    end
+
+    str
+  end
+
+  def clean_ref_warning(str)
+    if str =~ /LaTeX Warning: (?:Hyper reference|Reference)\s+[`'"](.+?)[`'"](?:\s+on page (\d+))?\s+undefined(?:\s+on input line \d+)?\.?/i
+      key = Regexp.last_match(1)
+      pg = Regexp.last_match(2)
+      return pg ? "Warning: undefined reference '#{key}' (page #{pg})" : "Warning: undefined reference '#{key}'"
+    end
+    str
+  end
+
+  def clean_cite_warning(str)
+    if str =~ /LaTeX Warning: Citation\s+[`'"](.+?)[`'"](?:\s+on page (\d+))?\s+undefined(?:\s+on input line \d+)?\.?/i
+      key = Regexp.last_match(1)
+      pg = Regexp.last_match(2)
+      return pg ? "Warning: undefined citation '#{key}' (page #{pg})" : "Warning: undefined citation '#{key}'"
+    end
+    str
+  end
+
+  def warning_dedup_key(item)
+    raw = item[:raw_text] || item[:text]
+    if raw =~ /(?:Hyper reference|Reference)\s+[`'"](.+?)[`'"](?:\s+on page \d+)?\s+undefined/i
+      [:undef_ref, item[:file], item[:line], Regexp.last_match(1)]
+    else
+      item[:text]
+    end
+  end
+
   def parse_package_warning(lines, i, file_stack)
     l = lines[i]
     return [nil, i + 1] if l.include?('multiply defined')
@@ -457,11 +583,15 @@ module LaTeXDiagnostics
       i += 1
     end
 
-    warn_text = condense_package_warning(warn_block.join(' '))
-    file_name, line_no, line_str = extract_warning_location(warn_text, file_stack)
+    raw_warn_text = condense_package_warning(warn_block.join(' '))
+    file_name, line_no, line_str = extract_warning_location(raw_warn_text, file_stack)
+    warn_text = clean_diagnostic_warning(raw_warn_text)
 
-    formatted = format_diagnostic_line(line_str, warn_text, :yellow)
-    item = { type: :warn, file: file_name, line: line_no, line_str: line_str, text: warn_text, base_color: :yellow, formatted: formatted, index: start_idx }
+    formatted = format_diagnostic_line(line_str, warn_text, :yellow, file: file_name)
+    item = {
+      type: :warn, file: file_name, line: line_no, line_str: line_str,
+      text: warn_text, raw_text: raw_warn_text, base_color: :yellow, formatted: formatted, index: start_idx
+    }
     [item, i]
   end
 
@@ -498,7 +628,7 @@ module LaTeXDiagnostics
     start_idx = i
     box_type = (l =~ /^(Overfull|Underfull) \\(hbox|vbox)/) ? "#{Regexp.last_match(1)} \\#{Regexp.last_match(2)}" : 'Overfull \\hbox'
     box_line = l.strip
-    color_m = box_line.start_with?('Overfull') ? :magenta : :cyan
+    is_overfull = box_line.start_with?('Overfull')
     i += 1
     extra_lines = []
     while i < lines.size && !diagnostic_boundary_line?(lines[i]) && lines[i] !~ /^l\.\d+/
@@ -507,16 +637,21 @@ module LaTeXDiagnostics
     end
 
     line_no, line_str = (box_line =~ /lines?\s+(\d+(?:--\d+)?)/i) ? [Regexp.last_match(1).split('--').first.to_i, Regexp.last_match(1)] : [0, '']
+    line_str = line_str.sub(/^(\d+)--\1$/, '\1')
+    line_no = line_str[/^\d+/].to_i if line_str && !line_str.empty?
     file_name = current_log_file(file_stack)
-    formatted = format_diagnostic_line(line_str, box_line, color_m)
+    severity = extract_box_severity(box_line)
+
+    base_color = :yellow
+    clean_text = @options[:emacs] ? box_line : clean_box_diagnostic(box_line, is_overfull ? :warning : :note)
+    formatted = format_diagnostic_line(line_str, clean_text, base_color, file: file_name)
     if verbose && !extra_lines.empty?
-      formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : highlight_line_numbers(line, color_m) }.join("\n")
+      formatted += "\n" + extra_lines.map { |line| @options[:emacs] ? line : highlight_line_numbers(line, base_color) }.join("\n")
     end
 
-    severity = extract_box_severity(box_line)
     item = {
       type: box_type, file: file_name, line: line_no, line_str: line_str,
-      text: box_line, base_color: color_m, extra_lines: extra_lines,
+      text: clean_text, raw_text: box_line, base_color: base_color, extra_lines: extra_lines,
       severity: severity, formatted: formatted, index: start_idx
     }
     [item, i]
@@ -552,9 +687,12 @@ module LaTeXDiagnostics
 
       if l =~ WARNING_LINE_PATTERN
         item, i = parse_package_warning(lines, i, file_stack)
-        if item && !seen_warnings[item[:text]]
-          seen_warnings[item[:text]] = true
-          raw_warnings << item
+        if item
+          d_key = warning_dedup_key(item)
+          if !seen_warnings[d_key]
+            seen_warnings[d_key] = true
+            raw_warnings << item
+          end
         end
       elsif l =~ /^(?:Overfull|Underfull) \\(?:hbox|vbox)/
         item, i = parse_box_warning(lines, i, file_stack, verbose)
@@ -792,24 +930,22 @@ module LaTeXDiagnostics
     idx = item[:index] || 0
     target = item[:companion_to] ? format_display_path(item[:companion_to]) : format_display_path(item[:file])
     rank = item[:companion_to] ? 1 : 0
-    [target, rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, item[:line] || 0, idx]
+    line_num = if item[:line].is_a?(Integer) && item[:line].positive?
+                 item[:line]
+               elsif item[:line_str].to_s =~ /\A(\d+)/
+                 $1.to_i
+               else
+                 item[:line] || 0
+               end
+    [target, rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, line_num, idx]
   end
 
   def sort_diagnostic_items(warnings, errors)
-    overfull_warnings, other_warnings = warnings.partition { |w| overfull_hbox?(w) }
-
-    sorted_other = other_warnings.sort_by { |w| [format_display_path(w[:file]), w[:line] || 0, w[:index] || 0] }
-    sorted_overfull = overfull_warnings.sort_by do |w|
-      sev = w[:severity] || extract_box_severity(w[:text].to_s)
-      [format_display_path(w[:file]), sev.to_f, w[:line] || 0, w[:index] || 0]
-    end
-    sorted_errors = errors.sort_by { |e| [format_display_path(e[:file]), e[:line] || 0, e[:index] || 0] }
-
-    all_items = sorted_other + sorted_overfull + sorted_errors
+    all_items = warnings + errors
     all_sorted = all_items.sort_by { |item| diagnostic_item_sort_key(item) }
 
-    total_warn_count = other_warnings.sum { |w| w[:count] || 1 } + sorted_overfull.size
-    [all_sorted, total_warn_count, sorted_errors.size]
+    total_warn_count = warnings.sum { |w| w[:count] || 1 }
+    [all_sorted, total_warn_count, errors.size]
   end
 
   def print_diagnostics_body(warnings, errors, fallback_lines: [], tier_label: nil, io: $stdout)
@@ -897,6 +1033,9 @@ module LaTeXDiagnostics
   end
 
   def normalized_message(item)
+    return item[:compile_text] if item[:compile_text]
+    return item[:raw_text] if item[:raw_text]
+
     if item[:err_block] && !item[:err_block].empty?
       raw_msg = item[:err_block].first.to_s.strip
       extract_clean_error_message(raw_msg)
@@ -965,10 +1104,22 @@ module LaTeXDiagnostics
 
     color = tier_color(tier_label)
     lead = Rainbow('── ').send(color).bright
-    file_part = Rainbow(item_file).bold
-    count_part = " (#{count_str}) "
+    disp_file = Rainbow(item_file).bold
+    linked_file = format_file_banner_link(item_file, disp_file)
+    count_part = Rainbow(" (#{count_str}) ").send(color).bright
     tail = Rainbow(dashes).send(color).bright
-    "#{lead}#{file_part}#{count_part}#{tail}"
+    "#{lead}#{linked_file}#{count_part}#{tail}"
+  end
+
+  def format_file_banner_link(file, display_str)
+    return display_str unless link_enabled? && file && !file.to_s.empty?
+
+    real_file = LaTeXErrorCatalog.find_source_file(file) || file
+    return display_str unless File.exist?(real_file)
+
+    abs_path = ::URI::DEFAULT_PARSER.escape(File.expand_path(real_file.to_s))
+    uri = "file://#{abs_path}"
+    "\e]8;;#{uri}\e\\#{display_str}\e]8;;\e\\"
   end
 
   def format_tier_count_label(count, tier_label)
@@ -1166,15 +1317,35 @@ module LaTeXDiagnostics
   def build_duplicate_label_alerts(label_key, locs, base_index)
     uniq_locs = locs.uniq
     uniq_locs.each_with_index.map do |loc, idx|
-      suffix = uniq_locs.size > 1 ? " (location #{idx + 1} of #{uniq_locs.size})" : ''
-      msg = "LaTeX Warning: Label `#{label_key}' multiply defined#{suffix}"
-      formatted = format_diagnostic_line(loc[:line].to_s, msg, :red)
+      other_locs = uniq_locs.reject.with_index { |_, i| i == idx }
+
+      if @options[:emacs]
+        suffix = uniq_locs.size > 1 ? " (location #{idx + 1} of #{uniq_locs.size})" : ''
+        msg = "LaTeX Warning: Label `#{label_key}' multiply defined#{suffix}"
+      else
+        if other_locs.empty?
+          msg = "Alert: label '#{label_key}' duplicate"
+        else
+          linked_others = other_locs.map do |ol|
+            disp = "#{format_display_path(ol[:file])}:#{ol[:line]}"
+            link_enabled? ? format_terminal_link(ol[:file], ol[:line].to_s, disp) : disp
+          end.join(', ')
+          msg = "Alert: label '#{label_key}' duplicate (also at #{linked_others})"
+        end
+      end
+
+      compile_suffix = uniq_locs.size > 1 ? " (location #{idx + 1} of #{uniq_locs.size})" : ''
+      compile_text = "LaTeX Warning: Label `#{label_key}' multiply defined#{compile_suffix}"
+
+      formatted = format_diagnostic_line(loc[:line].to_s, msg, :red, file: loc[:file])
       {
         file: loc[:file],
         line: loc[:line],
         line_str: loc[:line].to_s,
         text: msg,
+        compile_text: compile_text,
         base_color: :red,
+        tier: 'alerts',
         formatted: formatted,
         index: base_index + idx,
         alert_type: :multiply_defined_label
@@ -1183,13 +1354,23 @@ module LaTeXDiagnostics
   end
 
   def build_fallback_label_alert(text, file_name, base_index)
-    formatted = format_diagnostic_line('', text, :red)
+    key = text[/Label\s+[`'"]?([^`'"\s]+)[`'"]?\s+multiply defined/i, 1]
+    clean_text = if @options[:emacs]
+                   text
+                 elsif key
+                   "Alert: label '#{key}' duplicate"
+                 else
+                   text.sub(/^LaTeX Warning:\s*/i, 'Alert: ')
+                 end
+    formatted = format_diagnostic_line('', clean_text, :red, file: file_name)
     [{
       file: file_name,
       line: 0,
       line_str: '',
-      text: text,
+      text: clean_text,
+      compile_text: text,
       base_color: :red,
+      tier: 'alerts',
       formatted: formatted,
       index: base_index,
       alert_type: :multiply_defined_label
@@ -1209,7 +1390,7 @@ module LaTeXDiagnostics
       track_log_file(line, file_stack)
       next unless line.include?('multiply defined') && line.include?('LaTeX Warning')
 
-      label_key = line[/Label\s+[`'"]?([^'"\s]+)['"]?\s+multiply defined/i, 1]
+      label_key = line[/Label\s+[`'"]?([^`'"\s]+)[`'"]?\s+multiply defined/i, 1]
       next if internal_label_key?(label_key) || (label_key && seen_duplicate_keys.include?(label_key))
 
       seen_duplicate_keys << label_key if label_key
@@ -1254,7 +1435,9 @@ module LaTeXDiagnostics
     end
     alert_boxes.each do |ab|
       ab[:base_color] = :red
-      ab[:formatted] = format_diagnostic_line(ab[:line_str], ab[:text], :red)
+      ab[:tier] = 'alerts'
+      ab[:text] = ab[:text].sub(/^Warning:/, 'Alert:')
+      ab[:formatted] = format_diagnostic_line(ab[:line_str], ab[:text], :red, file: ab[:file])
     end
     extract_label_alerts(clean_content) + alert_boxes + collect_source_label_alerts + collect_type3_font_alerts
   end
@@ -1690,14 +1873,16 @@ module LaTeXDiagnostics
     return if missing_keys.empty?
 
     formatted_msg = format_missing_bib_entries(missing_keys)
+    warn_text = @options[:emacs] ? formatted_msg : clean_diagnostic_warning(formatted_msg)
     warn_items << {
       file: './bibliography',
       line: 0,
-      line_str: '',
-      text: formatted_msg,
+      line_str: 'bib',
+      text: warn_text,
+      raw_text: formatted_msg,
       base_color: :yellow,
       count: missing_keys.size,
-      formatted: format_diagnostic_line('', formatted_msg, :yellow),
+      formatted: format_diagnostic_line('bib', warn_text, :yellow, file: './bibliography'),
       index: 100000
     }
   end
@@ -1804,7 +1989,7 @@ module LaTeXDiagnostics
       wh_copy = wh.dup
       wh_copy[:base_color] = :cyan
       wh_copy[:tier] = 'whatevers'
-      wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan)
+      wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan, file: wh[:file])
       wh_copy
     end
     print_diagnostics_body(formatted, [], tier_label: 'whatevers', io: io)

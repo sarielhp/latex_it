@@ -358,8 +358,8 @@ module LaTeXUtils
     lines << ''
     lines << '  7. Configuration & Utilities:'
     lines << '     l -m                           Print detected main LaTeX file and exit'
-    lines << '     l --init-config                Generate a starter .l.jsonc configuration file'
-    lines << '     l --init-vscode                Generate .vscode/tasks.json and settings.json for VS Code'
+    lines << '     l --config-init                Generate a starter .l.jsonc configuration file'
+    lines << '     l --vscode-init                Generate .vscode/tasks.json and settings.json for VS Code'
     lines.join("\n")
   end
 

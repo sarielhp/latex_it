@@ -39,11 +39,17 @@ module LaTeXConfig
       // Maximum compilation passes (1-3, default: 3)
       "passes": 3,
 
+      // Run makeindex on target when .idx changes (-I / --[no-]index)
+      "index": false,
+
       // Only update target PDF if extracted text content changed (requires pdftotext)
       "update_on_diff": false,
 
       // Display execution timing diagnostics per pass (-T / --time)
       "time": false,
+
+      // Display raw, unfiltered compiler output without diagnostic filtering (-r / --raw)
+      "raw": false,
 
       // Print exact external subprocess commands and environment overrides (--trace)
       "trace": false,
@@ -122,7 +128,7 @@ module LaTeXConfig
         // When true, harvested style files are placed in styles/ and \\input@path
         // is injected into the packaged .tex file.
         // When false (default), harvested styles sit in the archive root.
-        "inject_styles": false,
+        "styles_inject": false,
 
         // Additional figure source file extensions to auto-discover
         "fig_sources": [".fig", ".ipe", ".svg", ".asy", ".gp", ".gnuplot", ".py", ".R"],
@@ -262,23 +268,94 @@ module LaTeXConfig
     [tasks_path, settings_path]
   end
 
-  def self.save_global_theme!(new_theme, config_file = GLOBAL_CONFIG_FILE)
-    ensure_global_config_exists! if config_file == GLOBAL_CONFIG_FILE
-    return false unless File.exist?(config_file)
+  def self.update_jsonc_key(content, key, val)
+    json_val = val.is_a?(String) ? val.to_json : (val.nil? ? 'null' : val.to_s)
+    key_pattern = /"#{Regexp.escape(key)}"\s*:\s*(?:"(?:[^"\\]|\\.)*"|true|false|null|-?\d+(?:\.\d+)?)/
 
-    content = File.read(config_file)
-    updated = if content =~ /"theme"\s*:\s*"[^"]*"/
-                content.sub(/"theme"\s*:\s*"[^"]*"/, "\"theme\": \"#{new_theme}\"")
-              elsif content =~ /(["']?color["']?\s*:\s*[^,\n]+,)/
-                content.sub(/(["']?color["']?\s*:\s*[^,\n]+,)/, "\\1\n\n  // Diagnostic color theme: \"blush\" (default), \"catppuccin\", \"tokyo-night\", \"dracula\", \"nord\", \"ansi\"\n  \"theme\": \"#{new_theme}\",")
-              else
-                content.sub(/\}\s*\z/, "  \"theme\": \"#{new_theme}\"\n}\n")
-              end
-    File.write(config_file, updated)
+    return content.sub(key_pattern, "\"#{key}\": #{json_val}") if content =~ key_pattern
+
+    comment_pattern = %r{//\s*"#{Regexp.escape(key)}"\s*:\s*(?:"(?:[^"\\]|\\.)*"|true|false|null|-?\d+(?:\.\d+)?),?}
+    return content.sub(comment_pattern, "\"#{key}\": #{json_val},") if content =~ comment_pattern
+
+    content.sub(/(?<=\S)(\s*\}\s*\z)/) do |match|
+      prev_char = content[0...content.rindex(match)].strip[-1]
+      prefix = (prev_char == '{' || prev_char == ',') ? '' : ",\n"
+      "#{prefix}  \"#{key}\": #{json_val}\n}"
+    end
+  end
+
+  def self.save_settings!(settings, target_file)
+    FileUtils.mkdir_p(File.dirname(target_file))
+    content = File.exist?(target_file) ? File.read(target_file) : DEFAULT_CONFIG_TEMPLATE.dup
+
+    settings.each do |k, v|
+      if k == 'zip' && v.is_a?(Hash)
+        v.each { |zk, zv| content = update_jsonc_key(content, zk, zv) }
+      else
+        content = update_jsonc_key(content, k, v)
+      end
+    end
+
+    File.write(target_file, content)
     true
   rescue StandardError => e
-    warn " -- Warning: Could not persist theme to #{config_file}: #{e.message}"
+    warn " -- Warning: Could not persist settings to #{target_file}: #{e.message}"
     false
+  end
+
+  SAVABLE_CLI_MAPPINGS = [
+    [:explicit_index, 'index', ->(opts) { opts[:index] }],
+    [:engine_explicit, 'engine', ->(opts) { opts[:engine] }],
+    [:explicit_passes, 'passes', ->(opts) { opts[:passes] }],
+    [:explicit_update_on_diff, 'update_on_diff', ->(opts) { opts[:update_on_diff] }],
+    [:explicit_time, 'time', ->(opts) { opts[:time] }],
+    [:explicit_raw, 'raw', ->(opts) { opts[:raw] }],
+    [:explicit_trace, 'trace', ->(opts) { opts[:trace] }],
+    [:explicit_werror, 'werror', ->(opts) { opts[:werror] }],
+    [:explicit_emacs, 'emacs', ->(opts) { opts[:emacs] }],
+    [:explicit_help_style, 'help_style', ->(opts) { opts[:help_style] }],
+    [:theme_arg, 'theme', ->(opts) { opts[:theme_arg] }],
+    [:explicit_styles_inject, 'styles_inject', ->(opts) { opts[:inject_styles] }]
+  ].freeze
+
+  def self.extract_savable_settings(options)
+    settings = {}
+    SAVABLE_CLI_MAPPINGS.each do |flag_key, config_key, extractor|
+      next unless options[flag_key]
+
+      val = extractor.call(options)
+      if config_key == 'styles_inject'
+        settings['zip'] = { 'styles_inject' => val }
+      else
+        settings[config_key] = val
+      end
+    end
+    settings
+  end
+
+  def self.save_cli_options!(options, dir = '.')
+    return false unless options[:config_save]
+
+    scope = options[:config_scope] || :local
+    target_file = (scope == :global) ? GLOBAL_CONFIG_FILE : File.join(dir, '.l.jsonc')
+    settings = extract_savable_settings(options)
+
+    if settings.empty?
+      warn ' -- Warning: --config-save specified but no configurable options were provided.'
+      return false
+    end
+
+    success = save_settings!(settings, target_file)
+    if success && !options[:score]
+      saved_keys = settings.keys.map { |k| k == 'zip' ? 'styles_inject' : k }.join(', ')
+      puts Rainbow(" -- Saved #{saved_keys} to #{scope} configuration: #{target_file}").green
+    end
+    success
+  end
+
+  def self.save_global_theme!(new_theme, config_file = GLOBAL_CONFIG_FILE)
+    ensure_global_config_exists! if config_file == GLOBAL_CONFIG_FILE
+    save_settings!({ 'theme' => new_theme }, config_file)
   end
 
   def self.skip_comment(content, i, len)
@@ -420,8 +497,28 @@ module LaTeXConfig
     }
   end
 
-  def self.format_active_config(dir = '.')
+  def self.format_active_config(dir = '.', scope: nil)
     info = active_config_info(dir)
+    if scope == :global
+      return [
+        '# =========================================================================',
+        '# Global latex_it Configuration',
+        '# =========================================================================',
+        format('# Global file: %s (%s)', info[:global_file], info[:global_exists] ? 'loaded' : 'not found'),
+        '',
+        info[:global_exists] ? File.read(info[:global_file]) : JSON.pretty_generate(parse_jsonc(DEFAULT_CONFIG_TEMPLATE))
+      ].join("\n")
+    elsif scope == :local
+      return [
+        '# =========================================================================',
+        '# Local latex_it Configuration',
+        '# =========================================================================',
+        format('# Local file: %s', info[:local_file] ? "#{info[:local_file]} (loaded)" : 'none (no .l.jsonc found)'),
+        '',
+        info[:local_file] ? File.read(info[:local_file]) : "{}\n"
+      ].join("\n")
+    end
+
     lines = [
       '# =========================================================================',
       '# Active latex_it Configuration',

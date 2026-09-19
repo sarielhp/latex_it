@@ -18,7 +18,7 @@ module QualityGate
     test_sample_arxiv.rb test_sample_arxiv_review.rb
   ].freeze
   MEDIUM_TESTS = %w[
-    test_arxiv.rb test_compile_mode.rb test_latex_it.rb test_metadata_report_review.rb
+    test_arxiv.rb test_compile_mode.rb test_raw_mode.rb test_latex_it.rb test_metadata_report_review.rb
   ].freeze
   FULL_TESTS = %w[
     test_arxiv_fixups.rb test_bws_review.rb test_visual_verification.rb

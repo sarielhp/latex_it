@@ -62,7 +62,7 @@ class LatexBuilder
   end
 
   def interactive_tty?
-    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:trace] && !@options[:score]
+    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:trace] && !@options[:score] && !@options[:raw]
   end
 
   def run!
@@ -74,17 +74,15 @@ class LatexBuilder
   end
 
   def run_in_current_directory!
+    return compile_target unless @options[:score]
+
+    @orig_stdout = $stdout
+    $stdout = File.open(File::NULL, 'w')
+    compile_target
+  ensure
     if @options[:score]
-      @orig_stdout = $stdout
-      $stdout = File.open(File::NULL, 'w')
-      begin
-        compile_target
-      ensure
-        $stdout.close rescue nil
-        $stdout = @orig_stdout
-      end
-    else
-      compile_target
+      $stdout.close rescue nil
+      $stdout = @orig_stdout
     end
   end
 
@@ -160,7 +158,7 @@ class LatexBuilder
   end
 
   def targets_up_to_date?
-    return false if @options[:clean] || @options[:single_pass] || @options[:force] || @options[:score] || @options[:werror]
+    return false if @options[:clean] || @options[:single_pass] || @options[:force] || @options[:score] || @options[:werror] || @options[:raw]
     return false if @options[:bib] == true
 
     target_pdf = "#{@bfilename}.pdf"
@@ -172,6 +170,7 @@ class LatexBuilder
     state = JSON.parse(File.read(state_file)) rescue nil
     return false unless state.is_a?(Hash) && state['target'] == target_pdf
     return false unless state['signature'] == build_signature
+    return false if @options[:index] == true && index_stale?(state)
 
     sources = state['sources']
     return false unless sources.is_a?(Hash) && !sources.empty?
@@ -189,28 +188,24 @@ class LatexBuilder
     end
   end
 
-  def log_pass_start(engine, pass, first: false)
+  def log_activity_start(label, message, suffix: '', first: false)
     return if @options[:compile] && !interactive_tty?
 
     if interactive_tty?
-      LaTeXIndicator.start("Building #{@bfilename}.pdf (#{engine} pass #{pass})...")
+      LaTeXIndicator.start(message)
     else
       prefix = first ? '      ' : ', '
-      print "#{prefix}#{Rainbow(engine).bright} (#{pass})"
+      print "#{prefix}#{Rainbow(label).bright}#{suffix}"
       $stdout.flush
     end
   end
 
-  def log_bib_start(tool, first: false)
-    return if @options[:compile] && !interactive_tty?
+  def log_pass_start(engine, pass, first: false)
+    log_activity_start(engine, "Building #{@bfilename}.pdf (#{engine} pass #{pass})...", suffix: " (#{pass})", first: first)
+  end
 
-    if interactive_tty?
-      LaTeXIndicator.start("Running #{tool} on #{@bfilename}...")
-    else
-      prefix = first ? '      ' : ', '
-      print "#{prefix}#{Rainbow(tool).bright}"
-      $stdout.flush
-    end
+  def log_bib_start(tool, first: false)
+    log_activity_start(tool, "Running #{tool} on #{@bfilename}...", first: first)
   end
 
   def run_convergence_loop
@@ -237,7 +232,13 @@ class LatexBuilder
         next
       end
 
-      rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux)
+      index_ran = false
+      if @options[:index] && needs_index_pass?
+        log_index_start(first: false)
+        index_ran = run_index_pass
+      end
+
+      rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux) || index_ran
       aux_before = curr_aux
       if pass >= max_passes
         @cacheable_build = false if rerun
@@ -247,6 +248,46 @@ class LatexBuilder
       break unless rerun
     end
     true
+  end
+
+  def log_index_start(first: false)
+    log_activity_start('makeindex', "Running makeindex on #{@bfilename}...", first: first)
+  end
+
+  def needs_index_pass?
+    idx = "junk/#{@bfilename}.idx"
+    return false unless File.file?(idx) && File.size(idx) > 0
+
+    Digest::SHA256.file(idx).hexdigest != @last_idx_hash || !File.file?("junk/#{@bfilename}.ind")
+  end
+
+  def run_index_pass
+    puts '' if @options[:trace] || @options[:raw]
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
+    idx_file = "junk/#{@bfilename}.idx"
+    return false unless File.file?(idx_file)
+
+    @last_idx_hash = Digest::SHA256.file(idx_file).hexdigest
+    cmd = ['makeindex', '-q', "#{@bfilename}.idx"]
+    out, status = Dir.chdir('junk') { capture_pass_output(cmd) }
+    File.write("junk/#{@bfilename}.ilg", out) unless out.empty?
+
+    if @options[:time]
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
+    end
+    status.success?
+  end
+
+  def index_stale?(state = nil)
+    idx = "junk/#{@bfilename}.idx"
+    return false unless File.file?(idx) && File.size(idx) > 0
+
+    ind = "junk/#{@bfilename}.ind"
+    return true unless File.file?(ind)
+    return Digest::SHA256.file(idx).hexdigest != state['idx_sha'] if state.is_a?(Hash) && state['idx_sha']
+
+    File.mtime(idx) > File.mtime(ind)
   end
 
   def bib_files_newer_than_bbl?
@@ -285,19 +326,12 @@ class LatexBuilder
   def snapshot_build_inputs!
     @build_start_time = Time.now
     @input_snapshots = {}
-    files_to_snapshot = [@filename]
-    files_to_snapshot.concat(Dir['*.tex'].select { |f| File.file?(f) })
-    files_to_snapshot.concat(discover_bib_files)
-    if File.exist?("junk/#{@bfilename}.fls")
-      files_to_snapshot.concat(extract_fls_dependencies("junk/#{@bfilename}.fls"))
-    end
-    files_to_snapshot.uniq.each do |f|
+    files = [@filename] + Dir['*.tex'].select { |f| File.file?(f) } + discover_bib_files
+    files.concat(extract_fls_dependencies("junk/#{@bfilename}.fls")) if File.exist?("junk/#{@bfilename}.fls")
+    files.uniq.each do |f|
       next unless File.file?(f)
 
-      @input_snapshots[f] = {
-        mtime: File.mtime(f).to_f,
-        sha: (Digest::SHA256.file(f).hexdigest rescue nil)
-      }
+      @input_snapshots[f] = { mtime: File.mtime(f).to_f, sha: (Digest::SHA256.file(f).hexdigest rescue nil) }
     end
   end
 
@@ -321,6 +355,7 @@ class LatexBuilder
       'saved_at' => Time.now.to_i,
       'sources' => sources
     }
+    state['idx_sha'] = Digest::SHA256.file("junk/#{@bfilename}.idx").hexdigest if File.file?("junk/#{@bfilename}.idx")
 
     File.write('junk/.build_state.json', JSON.generate(state))
   rescue StandardError => e
@@ -361,6 +396,7 @@ class LatexBuilder
     payload = {
       engine: @engine_name,
       bib: @options[:bib],
+      index: @options[:index] == true,
       passes: @options[:passes],
       single_pass: @options[:single_pass] == true,
       no_env: @options[:no_env] == true,
@@ -499,7 +535,7 @@ class LatexBuilder
     reason = pdflatex_reasons.join(' and ')
 
     if incompatible && @options[:engine_explicit]
-      puts Rainbow(" -- Source uses #{reason}; #{requested_engine} may fail. Recommended: --pdflatex").yellow
+      puts Rainbow(" -- Source uses #{reason}; #{requested_engine} may fail. Recommended: -e pdflatex").yellow
       requested_engine
     elsif incompatible
       puts Rainbow(" -- Source uses #{reason}; selecting pdflatex automatically.").cyan
@@ -541,7 +577,7 @@ class LatexBuilder
     # reserves. A bare 'log.txt' was removed: this tool writes its transcript to
     # junk/log.txt, so a root log.txt can only be a file the user wrote, and
     # paper_cleanup runs on every build with no flag guarding it.
-    exts = %w[.ps .blg .dvi .thm .aux .idx .log .out .vtc .bcf .run.xml]
+    exts = %w[.ps .blg .dvi .thm .aux .idx .ind .ilg .log .out .vtc .bcf .run.xml]
     (exts.map { |e| "#{@bfilename}#{e}" } + %w[texput.log missfont.log mfput.log]).each { |f| FileUtils.rm_f(f) }
 
     root_bbl = "#{@bfilename}.bbl"
@@ -597,6 +633,7 @@ class LatexBuilder
                     capture_with_timeout(env, cmd_args, timeout)
                   end
     trace_status(status) if @options[:trace]
+    $stdout.puts out if @options[:raw]
     [out, status]
   rescue Errno::ENOENT
     raise
@@ -628,7 +665,7 @@ class LatexBuilder
   end
 
   def run_latex_pass(suffix)
-    puts '' if @options[:trace]
+    puts '' if @options[:trace] || @options[:raw]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     lgx = "#{@pdferr}#{suffix}"
     FileUtils.rm_f(lgx)
@@ -794,7 +831,7 @@ class LatexBuilder
   end
 
   def run_bib_pass(tool)
-    puts '' if @options[:trace]
+    puts '' if @options[:trace] || @options[:raw]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
     fnbbl = "junk/#{@bfilename}.bbl"
     root_bbl = "#{@bfilename}.bbl"
@@ -948,11 +985,8 @@ class LatexBuilder
 
   def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
     curr_aux_hash ||= compute_aux_hash
-    if prev_aux_hash && !prev_aux_hash.empty?
-      return true if curr_aux_hash != prev_aux_hash
-    elsif prev_aux_hash && prev_aux_hash.empty?
-      return true if aux_has_cross_references?(curr_aux_hash)
-    end
+    return true if prev_aux_hash && !prev_aux_hash.empty? && curr_aux_hash != prev_aux_hash
+    return true if prev_aux_hash && prev_aux_hash.empty? && aux_has_cross_references?(curr_aux_hash)
 
     log_content = LaTeXUtils.safe_read(loga)
     latex_rerun_requested?(log_content)

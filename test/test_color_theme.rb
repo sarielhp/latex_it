@@ -94,7 +94,7 @@ class TestColorTheme < Minitest::Test
 
   def test_cli_list_themes_flag
     bin = File.expand_path('../latex_it', __dir__)
-    out, status = Open3.capture2e(bin, '--list-themes')
+    out, status = Open3.capture2e(bin, '--theme-list')
     assert status.success?
     assert_match(/Available diagnostic color themes:/, out)
     assert_match(/blush/, out)
@@ -164,7 +164,7 @@ class TestColorTheme < Minitest::Test
 
   def test_show_config_cli
     bin = File.expand_path('../latex_it', __dir__)
-    out, status = Open3.capture2e(bin, '--show-config')
+    out, status = Open3.capture2e(bin, '--config-show')
     assert status.success?
     assert_match(/Active latex_it Configuration/, out)
     assert_match(/"theme":/, out)

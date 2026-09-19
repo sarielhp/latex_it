@@ -29,7 +29,7 @@ class TestReviewIntegration < Minitest::Test
   def test_arxiv_rejects_author_names_hidden_from_both_pdfs
     fixture do |dir|
       File.write(File.join(dir, 'paper.tex'), document('Anonymous submission.').sub('\\maketitle', ''))
-      output, status = run_cli(dir, '--pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
+      output, status = run_cli(dir, '-e', 'pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
       refute status.success?, output
       assert_includes output, 'Fixture Author'
       assert_match(/first page|page 1/i, output)
@@ -42,7 +42,7 @@ class TestReviewIntegration < Minitest::Test
     fixture do |dir|
       tex = document("Anonymous submission.\\newpage\nReferences mention Fixture Author.")
       File.write(File.join(dir, 'paper.tex'), tex.sub('\\maketitle', ''))
-      output, status = run_cli(dir, '--pdflatex', '--arxiv', '--no-arxiv-visual-verify',
+      output, status = run_cli(dir, '-e', 'pdflatex', '--arxiv', '--no-arxiv-visual-verify',
                                '--no-biblatex-shield', 'paper.tex')
       refute status.success?, output
       assert_includes output, 'Fixture Author'
@@ -56,7 +56,7 @@ class TestReviewIntegration < Minitest::Test
       tex = document('Visible Author presents the paper.').sub('\\maketitle', '')
       tex.sub!('Fixture Author', 'Visible Author \\and Missing Author')
       File.write(File.join(dir, 'paper.tex'), tex)
-      output, status = run_cli(dir, '--pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
+      output, status = run_cli(dir, '-e', 'pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
       refute status.success?, output
       assert_includes output, 'Missing Author'
       refute_includes output, '[VERIFIED]'
@@ -94,7 +94,7 @@ class TestReviewIntegration < Minitest::Test
       output, status = run_cli(dir, 'paper.tex')
       assert status.success?, output
       assert_includes output, 'up-to-date'
-      output, status = run_cli(dir, '--lua', 'paper.tex')
+      output, status = run_cli(dir, '-e', 'lualatex', 'paper.tex')
       assert status.success?, output
       refute_includes output, 'up-to-date'
       assert_includes output, 'lualatex'
@@ -105,7 +105,7 @@ class TestReviewIntegration < Minitest::Test
     fixture do |dir|
       body = '\\ifdefined\\pdftexversion PDF engine selected\\else Other engine selected\\fi'
       File.write(File.join(dir, 'paper.tex'), document(body))
-      output, status = run_cli(dir, '--pdflatex', 'paper.tex')
+      output, status = run_cli(dir, '-e', 'pdflatex', 'paper.tex')
       assert status.success?, output
       assert_includes File.read(File.join(dir, 'junk/paper.log')), 'pdfTeX'
       text, status = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
@@ -176,7 +176,7 @@ class TestReviewIntegration < Minitest::Test
     fixture do |dir|
       body = '\\ifdefined\\directlua Lua engine selected\\else Wrong engine selected\\fi'
       File.write(File.join(dir, 'paper.tex'), document(body))
-      output, status = run_cli(dir, '--lua', '--arxiv', '--no-biblatex-shield', 'paper.tex')
+      output, status = run_cli(dir, '-e', 'lualatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
       assert status.success?, output
       assert_includes output, '[VERIFIED]'
     end
@@ -204,7 +204,7 @@ class TestReviewIntegration < Minitest::Test
       tex.sub!('\\begin{document}', "\\usepackage{xcolor}\n" \
         "\\def\\redink{\\color{red}}\n\\def\\blueink{\\color{blue}}\n\\begin{document}")
       File.write(File.join(dir, 'paper.tex'), tex)
-      args = ['--pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex']
+      args = ['-e', 'pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex']
       output, status = run_cli(dir, *args)
       refute status.success?, output
       assert_includes output, 'text layout exactly matches'
@@ -228,7 +228,7 @@ class TestReviewIntegration < Minitest::Test
   def test_arxiv_visual_check_accepts_matching_multiple_pages
     fixture do |dir|
       File.write(File.join(dir, 'paper.tex'), document("First page.\\newpage\nSecond page.\\rule{30pt}{30pt}"))
-      output, status = run_cli(dir, '--pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
+      output, status = run_cli(dir, '-e', 'pdflatex', '--arxiv', '--no-biblatex-shield', 'paper.tex')
       assert status.success?, output
       assert_includes output, '[VERIFIED]'
       assert_match(/visual|pixel|rendered/i, output)

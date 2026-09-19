@@ -193,10 +193,10 @@ class TestLaTeXConfigAndConventions < Minitest::Test
     end
   end
 
-  def test_cli_init_vscode_flag
+  def test_cli_vscode_init_flag
     Dir.mktmpdir('latex_it_cli_vscode') do |dir|
       bin = File.expand_path('../latex_it', __dir__)
-      out, status = Open3.capture2(bin, '--init-vscode', chdir: dir)
+      out, status = Open3.capture2(bin, '--vscode-init', chdir: dir)
       assert_equal 0, status.exitstatus
       assert_includes out, 'Configured VS Code workspace'
       assert File.file?(File.join(dir, '.vscode', 'tasks.json'))

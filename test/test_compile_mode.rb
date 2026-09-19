@@ -131,7 +131,7 @@ class TestCompileMode < Minitest::Test
     end
   end
 
-  def test_shorthand_cc_flags
+  def test_cc_short_form_and_redundant_aliases
     Dir.mktmpdir('compile_shorthand') do |dir|
       tex = File.join(dir, 'doc.tex')
       File.write(tex, <<~TEX)
@@ -141,13 +141,25 @@ class TestCompileMode < Minitest::Test
         \\end{document}
       TEX
 
+      # Canonical short form: -cc
       out_short, status_short = Open3.capture2e(@bin_path, '-cc', '--no-color', 'doc.tex', chdir: dir)
       assert_equal 1, status_short.exitstatus
       assert_match(/^doc\.tex:3:1: error: undefined control sequence/, out_short)
 
-      out_double, status_double = Open3.capture2e(@bin_path, '--cc', '--no-color', 'doc.tex', chdir: dir)
-      assert_equal 1, status_double.exitstatus
-      assert_match(/^doc\.tex:3:1: error: undefined control sequence/, out_double)
+      # Canonical long form: --compile
+      out_long, status_long = Open3.capture2e(@bin_path, '--compile', '--no-color', 'doc.tex', chdir: dir)
+      assert_equal 1, status_long.exitstatus
+      assert_match(/^doc\.tex:3:1: error: undefined control sequence/, out_long)
+
+      # Redundant double-dash short alias --cc must be rejected
+      _, stderr_double, status_double = Open3.capture3(@bin_path, '--cc', 'doc.tex')
+      refute status_double.success?
+      assert_match(/invalid option: --cc/i, stderr_double)
+
+      # Redundant single-dash long alias -compile must be rejected
+      _, stderr_compile, status_compile = Open3.capture3(@bin_path, '-compile', 'doc.tex')
+      refute status_compile.success?
+      assert_match(/invalid option/i, stderr_compile)
     end
   end
 
@@ -173,7 +185,7 @@ class TestCompileMode < Minitest::Test
         \\end{document}
       TEX
 
-      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'main.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', '--no-color', 'main.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
 
       lines = out.lines.map(&:strip)
@@ -209,7 +221,7 @@ class TestCompileMode < Minitest::Test
         \\end{document}
       TEX
 
-      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'main.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', '--no-color', 'main.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
 
       lines = out.lines.map(&:strip)
@@ -232,13 +244,13 @@ class TestCompileMode < Minitest::Test
       TEX
 
       # Explicit --link enables OSC 8 escape sequences even in non-tty subprocess
-      out, status = Open3.capture2e(@bin_path, '-cc', '--link', 'doc.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', '--link', 'doc.tex', chdir: dir)
       assert_equal 1, status.exitstatus
       assert_includes out, "\e]8;;file://"
       assert_includes out, "doc.tex:3:1:\e]8;;\e\\"
 
       # Explicit --no-link guarantees zero OSC 8 sequences
-      out_nolink, status_nolink = Open3.capture2e(@bin_path, '-cc', '--no-link', 'doc.tex', chdir: dir)
+      out_nolink, status_nolink = Open3.capture2e(@bin_path, '--compile', '--no-link', 'doc.tex', chdir: dir)
       assert_equal 1, status_nolink.exitstatus
       refute_includes out_nolink, "\e]8;;"
       assert_match(/^doc\.tex:3:1: error: undefined control sequence/, out_nolink)
@@ -255,7 +267,7 @@ class TestCompileMode < Minitest::Test
       TEX
 
       env = { 'KITTY_WINDOW_ID' => '1', 'TERM' => 'xterm-kitty', 'LATEX_IT_THEME' => 'blush' }
-      cmd = "cd #{dir} && #{@bin_path} -cc doc.tex"
+      cmd = "cd #{dir} && #{@bin_path} --compile doc.tex"
       output = String.new
       require 'pty'
       PTY.spawn(env, 'bash', '-c', cmd) do |r, _w, _pid|
@@ -282,15 +294,15 @@ class TestCompileMode < Minitest::Test
         \\end{document}
       TEX
 
-      # Explicit file target via ll -cc
-      out, status = Open3.capture2e(ll_bin, '-cc', 'sample.tex', chdir: dir)
+      # Explicit file target via ll --compile
+      out, status = Open3.capture2e(ll_bin, '--compile', 'sample.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
       assert File.file?(File.join(dir, 'sample.pdf')), 'Expected sample.pdf to be generated'
 
-      # Implicit target via ll -cc (auto-detect main file in directory)
+      # Implicit target via ll --compile (auto-detect main file in directory)
       FileUtils.rm_f(File.join(dir, 'sample.pdf'))
       FileUtils.rm_rf(File.join(dir, 'junk'))
-      out_auto, status_auto = Open3.capture2e(ll_bin, '-cc', chdir: dir)
+      out_auto, status_auto = Open3.capture2e(ll_bin, '--compile', chdir: dir)
       assert_equal 0, status_auto.exitstatus, "Expected exit 0 with auto-detected file. Output: #{out_auto}"
       assert File.file?(File.join(dir, 'sample.pdf')), 'Expected sample.pdf to be generated on auto-detect'
     end
@@ -298,7 +310,7 @@ class TestCompileMode < Minitest::Test
 
   def test_compile_mode_in_directory_with_no_tex_files
     Dir.mktmpdir('compile_no_tex') do |dir|
-      out, status = Open3.capture2e(@bin_path, '-cc', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', chdir: dir)
       assert_equal 1, status.exitstatus
       refute_includes out, 'from /'
       refute_includes out, 'Traceback'
@@ -317,8 +329,8 @@ class TestCompileMode < Minitest::Test
         \\end{document}
       TEX
 
-      # Default -cc: errors are emitted, but alerts and warnings are suppressed
-      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'bad.tex', chdir: dir)
+      # Default --compile: errors are emitted, but alerts and warnings are suppressed
+      out, status = Open3.capture2e(@bin_path, '--compile', '--no-color', 'bad.tex', chdir: dir)
       assert_equal 1, status.exitstatus
       assert_includes out, 'error: undefined control sequence'
       refute_includes out, 'warning:'
@@ -326,7 +338,7 @@ class TestCompileMode < Minitest::Test
       refute_includes out, 'nonexistent_ref'
 
       # With -a / --all: warnings and alerts are shown alongside errors
-      out_all, status_all = Open3.capture2e(@bin_path, '-cc', '-a', '--no-color', 'bad.tex', chdir: dir)
+      out_all, status_all = Open3.capture2e(@bin_path, '--compile', '-a', '--no-color', 'bad.tex', chdir: dir)
       assert_equal 1, status_all.exitstatus
       assert_includes out_all, 'error: undefined control sequence'
       assert_includes out_all, 'warning: [alert] overfull'
@@ -345,7 +357,7 @@ class TestCompileMode < Minitest::Test
         \\end{document}
       TEX
 
-      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'many_errors.tex', chdir: dir)
+      out, status = Open3.capture2e(@bin_path, '--compile', '--no-color', 'many_errors.tex', chdir: dir)
       assert_equal 1, status.exitstatus
       error_lines = out.lines.select { |l| l.include?('error: undefined control sequence') }
       assert_equal 10, error_lines.size, "Expected exactly 10 errors displayed, got #{error_lines.size}: #{out}"
@@ -353,7 +365,7 @@ class TestCompileMode < Minitest::Test
       assert_includes out, "(run with 'l -a' to display all)"
 
       # With -a, all 15 errors should be displayed
-      out_all, status_all = Open3.capture2e(@bin_path, '-cc', '-a', '--no-color', 'many_errors.tex', chdir: dir)
+      out_all, status_all = Open3.capture2e(@bin_path, '--compile', '-a', '--no-color', 'many_errors.tex', chdir: dir)
       assert_equal 1, status_all.exitstatus
       error_lines_all = out_all.lines.select { |l| l.include?('error: undefined control sequence') }
       assert_equal 15, error_lines_all.size, "Expected 15 errors with -a, got #{error_lines_all.size}: #{out_all}"

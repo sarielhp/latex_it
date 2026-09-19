@@ -20,7 +20,7 @@ Settings are resolved using the following order of precedence (highest to lowest
 To create a documented configuration file in your project directory:
 
 ```bash
-l --init-config
+l --config-init
 ```
 
 This creates `.l.jsonc` pre-populated with default settings and comments:
@@ -165,7 +165,7 @@ When compiling large documents in editor setups that trigger builds on save, mul
   Advances to the next theme in the cycle and persists the choice to your global `config.jsonc`.
 * **List available themes**:
   ```bash
-  l --list-themes
+  l --theme-list
   ```
 * **Use custom hex**:
   ```bash

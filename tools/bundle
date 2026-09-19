@@ -27,6 +27,7 @@ module LatexBundler
     compatibility.rb
     config.rb
     utils.rb
+    help_manual.rb
     brace_checker.rb
     flattener.rb
     meta_extractor.rb

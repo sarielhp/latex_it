@@ -31,6 +31,7 @@ require_relative 'lib/latex_it/color'
 require_relative 'lib/latex_it/compatibility'
 require_relative 'lib/latex_it/config'
 require_relative 'lib/latex_it/utils'
+require_relative 'lib/latex_it/help_manual'
 require_relative 'lib/latex_it/brace_checker'
 require_relative 'lib/latex_it/flattener'
 require_relative 'lib/latex_it/meta_extractor'
@@ -64,6 +65,11 @@ module LatexCLI
       validate_output_mode!(options, prog_name)
       @suppress_at_exit_newline = true if options[:compile]
       handle_help_and_examples(parser, options, prog_name, argv)
+
+      if options[:config_save]
+        LaTeXConfig.save_cli_options!(options)
+        exit 0 if argv.empty? && LaTeXUtils.candidate_tex_files('.', options[:exclude_main_tex]).empty?
+      end
 
       configure_environment(options)
       execute_targets(argv, options)
@@ -123,12 +129,10 @@ module LatexCLI
 
   def self.dispatch_clean_personality(argv, prog_name)
     if argv.include?('-h') || argv.include?('--help')
-      puts "Usage: #{prog_name} [directory...]"
-      puts 'Clean all LaTeX auxiliary and junk files in the specified directory (default: current directory).'
+      puts "Usage: #{prog_name} [directory...]\nClean all LaTeX auxiliary and junk files in the specified directory (default: current directory)."
       return
     end
-    dirs = argv.empty? ? [nil] : argv
-    dirs.each { |d| LaTeXUtils.clean_directory(directory_argument_or_abort(d, prog_name)) }
+    (argv.empty? ? [nil] : argv).each { |d| LaTeXUtils.clean_directory(directory_argument_or_abort(d, prog_name)) }
   end
 
   # Resolves a CLI directory argument: a directory is itself, a file is its
@@ -205,14 +209,8 @@ module LatexCLI
       engine: symlink_engine,
       config_engine: cfg['engine'],
       engine_explicit: !symlink_engine.nil?,
-      clean: false,
-      force: false,
-      single_pass: false,
-      show_examples: false,
-      show_help: false,
-      show_help_all: false,
-      show_main: false,
-      clean_only: false,
+      clean: false, force: false, single_pass: false, show_examples: false,
+      show_help: false, show_help_all: false, show_main: false, clean_only: false,
       fast: is_lw || cfg['fast'] == true,
       update_on_diff: cfg['update_on_diff'] == true,
       bib: cfg['bib'],
@@ -220,47 +218,36 @@ module LatexCLI
       timeout: cfg['timeout'],
       time: cfg['time'] == true,
       lock: cfg.key?('lock') ? (cfg['lock'] == true) : true,
-      score: false,
-      color: cfg['color'],
-      theme: cfg['theme'],
-      theme_arg: nil,
+      score: false, color: cfg['color'], theme: cfg['theme'], theme_arg: nil,
       help_style: cfg['help_style'] || (cfg['help_lines'] == true ? 'lines' : 'plain'),
-      list_themes: false,
-      show_config: false,
-      no_env: is_env_free,
-      verbose: false,
-      trace: cfg['trace'] == true,
-      emacs: cfg['emacs'] == true,
-      werror: cfg['werror'] == true,
+      list_themes: false, show_config: false, no_env: is_env_free, verbose: false,
+      trace: cfg['trace'] == true, emacs: cfg['emacs'] == true, werror: cfg['werror'] == true,
       revtex4: cfg['revtex4'].is_a?(Hash) ? cfg['revtex4'] : {},
       alert_overfull_pt: (cfg['alert_overfull_pt'] || 24.0).to_f,
       whatever_overfull_pt: (cfg['whatever_overfull_pt'] || 2.5).to_f,
       suppress_whatevers: cfg.key?('suppress_whatevers') ? (cfg['suppress_whatevers'] == true) : true,
       suppress_warnings: cfg['suppress_warnings'] == true,
       suppress_alerts: cfg['suppress_alerts'] == true,
-      all: false,
-      explain: false,
-      deps: false,
+      all: false, explain: false, deps: false,
       exclude_main_tex: cfg['exclude_main_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_MAIN_PATTERNS,
       exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
       bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
       auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
       junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
-      bib_extract: false,
-      bib_extract_name: nil,
-      compile: cfg['compile'] == true,
-      link: cfg['links']
+      bib_extract: false, bib_extract_name: nil,
+      compile: cfg['compile'] == true, raw: cfg['raw'] == true, link: cfg['links'],
+      index: cfg['index'] == true, explicit_index: false, config_save: false, config_scope: nil,
+      explicit_passes: false, explicit_update_on_diff: false, explicit_time: false,
+      explicit_raw: false, explicit_trace: false, explicit_werror: false,
+      explicit_emacs: false, explicit_help_style: false, explicit_styles_inject: false
     }.merge(build_zip_options(cfg, extra_cli_files))
      .merge(build_arxiv_options(cfg))
   end
 
   def self.build_zip_options(cfg, extra_cli_files)
     {
-      zip: false,
-      zip_flat: cfg.dig('zip', 'flat') == true,
-      verify: false,
-      zip_name: nil,
-      inject_styles: cfg.dig('zip', 'inject_styles') == true,
+      zip: false, zip_flat: cfg.dig('zip', 'flat') == true, verify: false, zip_name: nil,
+      inject_styles: (cfg.dig('zip', 'styles_inject') || cfg.dig('zip', 'inject_styles')) == true,
       fig_sources: cfg.dig('zip', 'fig_sources') || ['.fig', '.ipe', '.svg', '.asy', '.gp', '.gnuplot', '.py', '.R'],
       extra_files: (Array(cfg.dig('zip', 'include')) + extra_cli_files).uniq
     }
@@ -268,9 +255,7 @@ module LatexCLI
 
   def self.build_arxiv_options(cfg)
     {
-      arxiv: false,
-      arxiv_name: nil,
-      meta_only: false,
+      arxiv: false, arxiv_name: nil, meta_only: false,
       arxiv_verify: cfg.dig('arxiv', 'verify') != false,
       arxiv_visual_verify: cfg.dig('arxiv', 'visual_verify') != false,
       biblatex_shield: cfg.dig('arxiv', 'bundle_biblatex') != false,
@@ -281,36 +266,20 @@ module LatexCLI
   end
 
   def self.normalize_argv!(argv)
-    argv.delete('--fast')
     normalize_bib_extract_args!(argv)
-    argv.map! do |arg|
-      case arg
-      when '-Werror' then '--werror'
-      when '-emacs' then '--emacs'
-      when '--pdflatex', '-pdflatex' then '--engine=pdflatex'
-      when '--xe', '-xelatex' then '--engine=xelatex'
-      when '--lua', '-lualatex' then '--engine=lualatex'
-      when '-help' then '--help'
-      when '-version' then '--version'
-      when '--extract-bib' then '--bib-extract'
-      when '-compile', '-cc', '--cc' then '--compile'
-      when '--links' then '--link'
-      when '--no-links' then '--no-link'
-      else arg
-      end
-    end
+    argv.map! { |arg| arg == '-cc' ? '--compile' : arg }
   end
 
   def self.normalize_bib_extract_args!(argv)
     i = 0
     while i < argv.size
       arg = argv[i]
-      if arg =~ /^--(?:bib-extract|extract-bib)=(.+)$/
+      if arg =~ /^--bib-extract=(.+)$/
         val = Regexp.last_match(1)
         argv[i] = '--bib-extract'
         argv.insert(i + 1, '--bib-name', val)
         i += 2
-      elsif (arg == '-B' || arg == '--bib-extract' || arg == '--extract-bib') &&
+      elsif (arg == '-B' || arg == '--bib-extract') &&
             i + 1 < argv.size && argv[i + 1].end_with?('.bib')
         val = argv[i + 1]
         argv[i] = '--bib-extract'
@@ -349,14 +318,25 @@ module LatexCLI
       options[:passes] = 1
       options[:bib] = false
     end
-    opts.on('-n', '--passes NUM', Integer, 'Maximum number of compilation passes (1-3, default: 3)') { |v| options[:passes] = v.clamp(1, 3) }
+    opts.on('-n', '--passes NUM', Integer, 'Maximum number of compilation passes (1-3, default: 3)') do |v|
+      options[:passes] = v.clamp(1, 3)
+      options[:explicit_passes] = true
+    end
     opts.on('-b', '--[no-]bib', 'Explicitly enable or skip bibliography pass (default: auto-detect)') { |v| options[:bib] = v }
+    opts.on('-I', '--[no-]index', 'Run makeindex pass when .idx changes (default: false or config)') do |v|
+      options[:index] = v
+      options[:explicit_index] = true
+    end
+    opts.on('-i') { raise OptionParser::InvalidOption }
     opts.on('-e', '--engine ENGINE', 'Compiler engine: x (xelatex), l (lualatex), or p (pdflatex)') do |v|
       options[:engine] = LaTeXUtils.normalize_engine(v)
       options[:engine_explicit] = true
     end
     opts.on('--timeout SECONDS', Integer, 'Maximum execution timeout allowed per pass in seconds') { |v| options[:timeout] = v }
-    opts.on('-T', '--time', 'Show execution wall-clock time breakdown per compilation pass') { options[:time] = true }
+    opts.on('-T', '--time', 'Show execution wall-clock time breakdown per compilation pass') do
+      options[:time] = true
+      options[:explicit_time] = true
+    end
   end
 
   def self.add_compilation_options_target(opts, options)
@@ -364,12 +344,19 @@ module LatexCLI
     opts.separator '  Output Management & Cleaning:'
     opts.on('-c', '--clean', 'Clean temporary build files in junk/ (.aux, .bbl, .log) before compilation') { options[:clean] = true }
     opts.on('-C', '--clean-only', 'Clean auxiliary files in directory and exit without building') { options[:clean_only] = true }
-    opts.on('--update-if-changed', 'Only replace target PDF if extracted text changed (prevents viewer reloads)') { options[:update_on_diff] = true }
+    opts.on('--update-if-changed', 'Only replace target PDF if extracted text changed (prevents viewer reloads)') do
+      options[:update_on_diff] = true
+      options[:explicit_update_on_diff] = true
+    end
   end
 
   def self.add_compilation_options_diag(opts, options)
     opts.separator ''
     opts.separator '  Diagnostics & Error Filtering:'
+    opts.on('-r', '--raw', 'Print raw compiler stdout/stderr during compilation passes') do
+      options[:raw] = true
+      options[:explicit_raw] = true
+    end
     opts.on('-x', '--explain', 'Display boxed plain-English explanations and fixes for diagnostics on first occurrence') { options[:explain] = true }
     opts.on('-a', '--all', 'Show all diagnostics across all tiers (including Whatevers and Warnings)') do
       options[:all] = true
@@ -377,10 +364,16 @@ module LatexCLI
       options[:suppress_warnings] = false
       options[:suppress_alerts] = false
     end
-    opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero status') { options[:werror] = true }
+    opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero status') do
+      options[:werror] = true
+      options[:explicit_werror] = true
+    end
     opts.on('-s', '--score', 'Quiet mode: suppress stdout and print only numeric error/alert/warning counts') { options[:score] = true }
     opts.on('-v', '--verbose', 'Verbose output mode (show raw overfull hbox snippet text and resolution steps)') { options[:verbose] = true }
-    opts.on('--trace', 'Print exact external subprocess commands, working directory, and environment overrides') { options[:trace] = true }
+    opts.on('--trace', 'Print exact external subprocess commands, working directory, and environment overrides') do
+      options[:trace] = true
+      options[:explicit_trace] = true
+    end
     opts.on('--alert-hbox PT', Float, 'Overfull hbox threshold in points to classify as Alert (default: 24.0)') { |v| options[:alert_overfull_pt] = v.to_f }
     opts.on('--whatever-pt PT', Float, 'Overfull hbox threshold in points to classify as Whatever (default: 2.5)') { |v| options[:whatever_overfull_pt] = v.to_f }
   end
@@ -400,7 +393,10 @@ module LatexCLI
       options[:bib_extract] = true
       options[:bib_extract_name] = v
     end
-    opts.on('--[no-]inject-styles', 'Enable or disable isolating harvested styles into styles/ and injecting \input@path') { |v| options[:inject_styles] = v }
+    opts.on('--[no-]styles-inject', 'Enable or disable isolating harvested styles into styles/ and injecting \input@path') do |v|
+      options[:inject_styles] = v
+      options[:explicit_styles_inject] = true
+    end
   end
 
   def self.add_compilation_options_env(opts, options)
@@ -411,25 +407,41 @@ module LatexCLI
       options[:link] = v
     end
     opts.on('--theme THEME', 'Set diagnostic color theme (e.g. blush, catppuccin, or "+1" to cycle)') { |v| options[:theme_arg] = v }
-    opts.on('--list-themes', 'List available diagnostic color themes with previews and exit') { options[:list_themes] = true }
+    opts.on('--theme-list', 'List available diagnostic color themes with previews and exit') { options[:list_themes] = true }
     opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') { |v| options[:lock] = v }
     opts.on('--no-env', 'Reset environment variables used by LaTeX/BibTeX/Biber') { options[:no_env] = true }
     opts.on('--emacs', 'Format warnings/errors for Emacs AUCTeX integration (suppress line prefixes)') do
       options[:emacs] = true
       options[:emacs_explicit] = true
+      options[:explicit_emacs] = true
     end
-    opts.on('--compile', '--cc', 'Format diagnostics in GNU standard compiler format (file:line:col: severity: message)') do
-      options[:compile] = true
-    end
-    opts.on('--init-config', 'Create a local .l.jsonc configuration template in the current directory and exit') do
+    sw = OptionParser::Switch::NoArgument.new(
+      nil,
+      proc { options[:compile] = true },
+      ['-cc'],
+      ['--compile'],
+      nil,
+      ['Format diagnostics in GNU standard compiler format (file:line:col: severity: message)']
+    )
+    opts.top.append(sw, [], ['compile'])
+    opts.on('--config-init', 'Create a local .l.jsonc configuration template in the current directory and exit') do
       LaTeXConfig.create_local_template!('.')
       exit 0
     end
-    opts.on('--init-vscode', 'Create VS Code tasks.json and settings.json in .vscode/ and exit') do
+    opts.on('--config-show', 'Show active configuration sources and resolved settings and exit') { options[:show_config] = true }
+    opts.on('--config-save', 'Save specified CLI option choices to configuration file (default: local .l.jsonc)') do
+      options[:config_save] = true
+    end
+    opts.on('--global', 'Target global configuration (~/.config/latex_it/config.jsonc) for config operations') do
+      options[:config_scope] = :global
+    end
+    opts.on('--local', 'Target local configuration (./.l.jsonc) for config operations (default)') do
+      options[:config_scope] = :local
+    end
+    opts.on('--vscode-init', 'Create VS Code tasks.json and settings.json in .vscode/ and exit') do
       LaTeXConfig.create_vscode_template!('.')
       exit 0
     end
-    opts.on('--show-config', 'Show active configuration sources and resolved settings and exit') { options[:show_config] = true }
   end
 
   def self.add_arxiv_options(opts, options)
@@ -452,9 +464,8 @@ module LatexCLI
     end
     opts.on('-E', '--examples', 'Show detailed usage examples and common workflows') { options[:show_examples] = true }
     opts.on('-h', '--help', 'Show condensed help summary (see -H for all options)') { options[:show_help] = true }
-    opts.on('-H', '--help-all', 'Show all available options with detailed descriptions') { options[:show_help_all] = true }
+    opts.on('-H', '--help-all', 'Show comprehensive manual of all options with detailed descriptions and examples') { options[:show_help_all] = true }
     opts.on('--help-style STYLE', %w[plain lines], 'Help display style: plain (default) or lines (subdued dividers)') { |v| options[:help_style] = v }
-    opts.on('--[no-]help-lines', 'Enable or disable horizontal divider lines between options in help') { |v| options[:help_style] = v ? 'lines' : 'plain' }
   end
 
   def self.condensed_help(_prog_name = 'l')
@@ -464,6 +475,7 @@ module LatexCLI
       'Common Options:',
       '  -f, --force          Force compilation run (bypasses build cache)',
       '  -u, --single-pass    Single pass only (fast draft, skip bib/extra passes)',
+      '  -r, --raw            Print raw compiler output (debug mode)',
       '  -c, --clean          Clean temporary build files (junk/, .aux, .bbl)',
       '  -x, --explain        Display plain-English explanations for diagnostics',
       '  -B, --bib-extract    Extract cited bib entries into local .bib file',
@@ -525,7 +537,7 @@ module LatexCLI
 
   def self.colorize_flags(str)
     str.gsub(/\b[A-Z]{2,}\b/) { |arg| Rainbow(arg).yellow }
-       .gsub(/(-[a-zA-Z0-9]|--(?:\[no-\])?[a-zA-Z0-9\-_]+)/) { |flag| Rainbow(flag).green.bold }
+       .gsub(/(-[a-zA-Z0-9]+|--(?:\[no-\])?[a-zA-Z0-9\-_]+)/) { |flag| Rainbow(flag).green.bold }
   end
 
   def self.colorize_help_line(line)
@@ -537,10 +549,10 @@ module LatexCLI
       "#{lead}#{Rainbow(usage).cyan.bold}#{sp}#{Rainbow(prog).bold}#{colored_rest}"
     elsif (m = line.match(/^(\s*)([A-Za-z0-9\s&,\/\-\.]+:)$/))
       "#{m[1]}#{Rainbow(m[2]).cyan.bold}"
-    elsif (m = line.match(/^(\s{2,})((?:-[a-zA-Z0-9],?\s*|--(?:\[no-\])?[a-zA-Z0-9\-_]+(?:\s+[A-Z]+)?(?:,\s*)?)+)( {2,})(\S.*)$/))
+    elsif (m = line.match(/^(\s{2,})((?:-[a-zA-Z0-9]+,?\s*|--(?:\[no-\])?[a-zA-Z0-9\-_]+(?:\s+[A-Z]+)?(?:,\s*)?)+)( {2,})(\S.*)$/))
       lead, flags, sp, desc = m[1], m[2], m[3], m[4]
       "#{lead}#{colorize_flags(flags)}#{sp}#{desc}"
-    elsif (m = line.match(/^(\s{2,})(-[a-zA-Z0-9]|--(?:\[no-\])?[a-zA-Z0-9\-_]+.*)$/))
+    elsif (m = line.match(/^(\s{2,})(-[a-zA-Z0-9\-_].*)$/))
       lead, flags = m[1], m[2]
       "#{lead}#{colorize_flags(flags)}"
     elsif (m = line.match(/(run:\s+)(\S+\s+-E)/))
@@ -572,11 +584,11 @@ module LatexCLI
         in_group = true
         seen_option = false
         result << line
-      elsif plain.strip.empty?
+      elsif plain =~ /^[A-Z]/ && !plain.start_with?('  ')
         in_group = false
         seen_option = false
         result << line
-      elsif in_group && plain =~ /^\s{2,}(-[a-zA-Z0-9]|--(?:\[no-\])?[a-zA-Z0-9\-_]+)/
+      elsif in_group && plain =~ /^\s{2,}(-[a-zA-Z0-9]+|--(?:\[no-\])?[a-zA-Z0-9\-_]+)/
         result << divider if seen_option
         seen_option = true
         result << line
@@ -609,7 +621,7 @@ module LatexCLI
     end
 
     if options[:show_config]
-      puts LaTeXConfig.format_active_config
+      puts LaTeXConfig.format_active_config('.', scope: options[:config_scope])
       exit 0
     end
 
@@ -628,16 +640,13 @@ module LatexCLI
   end
 
   def self.help_output_text(parser, options, prog_name)
-    if options[:show_help_all] && options[:show_examples]
-      "#{parser}\n\n#{LaTeXUtils.detailed_examples}"
-    elsif options[:show_help_all]
-      "#{parser}\n\nFor detailed usage examples and common workflows, run: #{prog_name} -E"
-    elsif options[:show_help] && options[:show_examples]
-      "#{condensed_help(prog_name)}\n\n#{LaTeXUtils.detailed_examples}"
+    manual = options[:show_help_all] ? LaTeXHelpManual.render(prog_name) : condensed_help(prog_name)
+    if (options[:show_help_all] || options[:show_help]) && options[:show_examples]
+      "#{manual}\n\n#{LaTeXUtils.detailed_examples}"
+    elsif options[:show_help_all] || options[:show_help]
+      manual
     elsif options[:show_examples]
       LaTeXUtils.detailed_examples(parser.banner)
-    elsif options[:show_help]
-      condensed_help(prog_name)
     end
   end
 
@@ -683,12 +692,10 @@ module LatexCLI
 
   def self.osc8_capable_terminal?
     return true if ENV['KITTY_WINDOW_ID'] || ENV['KITTY_PID'] || ENV['TERM'] == 'xterm-kitty'
-    return true if ENV['TERMINFO'].to_s.include?('kitty')
+    return true if ENV['TERMINFO'].to_s.include?('kitty') || ENV['WT_SESSION']
     return true if %w[iTerm.app vscode WezTerm ghostty foot warp].include?(ENV['TERM_PROGRAM'])
-    return true if ENV['WT_SESSION']
-    return true if ENV['VTE_VERSION'].to_i >= 5000
 
-    false
+    ENV['VTE_VERSION'].to_i >= 5000
   end
 
   def self.apply_theme_configuration(options)

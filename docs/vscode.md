@@ -6,12 +6,12 @@
 
 ---
 
-## Instant Automated Setup (`l --init-vscode`)
+## Instant Automated Setup (`l --vscode-init`)
 
 Run the following command inside your LaTeX project root:
 
 ```bash
-l --init-vscode
+l --vscode-init
 ```
 
 `latex_it` automatically creates or updates the `.vscode/` configuration files:

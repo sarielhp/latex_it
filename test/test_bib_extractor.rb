@@ -193,7 +193,7 @@ class TestBibExtractor < Minitest::Test
     LatexCLI.normalize_bib_extract_args!(args)
     assert_equal ['--bib-extract', '--bib-name', 'custom.bib', 'paper.tex'], args
 
-    args = ['--extract-bib=foo.bib', 'paper.tex']
+    args = ['--bib-extract=foo.bib', 'paper.tex']
     LatexCLI.normalize_bib_extract_args!(args)
     assert_equal ['--bib-extract', '--bib-name', 'foo.bib', 'paper.tex'], args
   end

@@ -67,6 +67,7 @@ Common everyday commands:
 ```bash
 lw          # Fast incremental rebuild (reuses cached state)
 l -f        # Force a rebuild even if files haven't changed
+l -r        # Print raw compiler output (debug mode)
 l -C        # Clean auxiliary and temporary files
 l -x        # Show plain-English explanations for errors and warnings
 l -B        # Extract cited references into local .bib file
@@ -108,9 +109,10 @@ l -B        # Extract cited references into local .bib file
 | `-z`, `--zip` | Create a self-contained portable zip archive of the paper. |
 | `-Z`, `--zip-flat` | Create a self-contained portable zip archive with inlined/flattened `.tex`. |
 | `-B`, `--bib-extract` | Extract cited bibliography entries into local `.bib` file (default: `<doc>.bib`). |
-| `--arxiv` | Prepare a sanitized, flattened zip package for arXiv submission. |
-| `--init-config` | Generate a local `.l.jsonc` configuration template. |
-| `--init-vscode` | Generate `.vscode/tasks.json` and `settings.json` for VS Code integration. |
+| `--config-init` | Generate a local `.l.jsonc` configuration template. |
+| `--config-show` | Show active configuration sources and resolved settings. |
+| `--vscode-init` | Generate `.vscode/tasks.json` and `settings.json` for VS Code integration. |
+| `--theme-list` | List available diagnostic color themes with terminal previews. |
 | `-cc`, `--compile` | Format diagnostics in strict GNU standard (`file:line:col: severity: message`). |
 | `-h`, `--help` | Show condensed help summary of everyday options. |
 | `-H`, `--help-all` | Show complete list of command-line options with detailed explanations. |

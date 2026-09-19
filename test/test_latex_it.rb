@@ -125,34 +125,37 @@ class TestLatexItCLI < Minitest::Test
   end
 
   def test_canonical_cli_flags_and_anti_alias
-    canonical_flags = [
-      %w[-u], %w[--single-pass], %w[-f], %w[--force], %w[-m], %w[--main],
-      %w[-x], %w[--explain], %w[--update-if-changed], %w[-t], %w[--verify],
-      %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
-      %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex],
-      %w[--help-style=lines], %w[--help-lines]
-    ]
-    canonical_flags.each do |flag_args|
-      flag_str = flag_args.join(' ')
-      _, stderr, _status = Open3.capture3(BIN, *flag_args, 'nonexistent_doc_test.tex')
-      refute_match(/invalid option/i, stderr, "Canonical flag #{flag_str} should be a valid option")
-      refute_match(/ambiguous option/i, stderr, "Canonical flag #{flag_str} should not be ambiguous")
-      assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless flag_args.include?('-m') || flag_args.include?('--main')
-    end
+    Dir.mktmpdir('latex_it_canon_flags') do |dir|
+      canonical_flags = [
+        %w[-u], %w[--single-pass], %w[-f], %w[--force], %w[-m], %w[--main],
+        %w[-x], %w[--explain], %w[--update-if-changed], %w[-t], %w[--verify],
+        %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
+        %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex],
+        %w[--help-style=lines], %w[-r], %w[--raw], %w[-cc], %w[--compile],
+        %w[--config-init], %w[--config-show], %w[--vscode-init], %w[--theme-list],
+        %w[--styles-inject], %w[--no-styles-inject],
+        %w[-I], %w[--index], %w[--no-index], %w[--config-save], %w[--global], %w[--local]
+      ]
+      canonical_flags.each do |flag_args|
+        flag_str = flag_args.join(' ')
+        _, stderr, _status = Open3.capture3(BIN, *flag_args, 'nonexistent_doc_test.tex', chdir: dir)
+        refute_match(/invalid option/i, stderr, "Canonical flag #{flag_str} should be a valid option")
+        refute_match(/ambiguous option/i, stderr, "Canonical flag #{flag_str} should not be ambiguous")
+        assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless flag_args.include?('-m') || flag_args.include?('--main') || flag_args.include?('--config-init') || flag_args.include?('--config-show') || flag_args.include?('--vscode-init') || flag_args.include?('--theme-list')
+      end
 
-    hidden_aliases = %w[--lua --xe --pdflatex --fast]
-    hidden_aliases.each do |alias_flag|
-      _, stderr, _status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
-      refute_match(/invalid option/i, stderr, "Hidden alias #{alias_flag} should be accepted")
-      refute_match(/ambiguous option/i, stderr, "Hidden alias #{alias_flag} should not be ambiguous")
-      assert_includes stderr, "File 'nonexistent_doc_test.tex' not found"
-    end
-
-    removed_aliases = %w[--one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff --test --env-free --envfree --pdf]
-    removed_aliases.each do |alias_flag|
-      _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex')
-      assert_match(/invalid option/i, stderr, "Removed alias #{alias_flag} should be rejected")
-      refute status.success?
+      removed_aliases = %w[
+        --one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff
+        --test --env-free --envfree --pdf --lua --xe --pdflatex --fast --cc
+        --extract-bib --help-lines --no-help-lines --links --no-links
+        --init-config --show-config --init-vscode --list-themes
+        --inject-styles --no-inject-styles -i
+      ]
+      removed_aliases.each do |alias_flag|
+        _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex', chdir: dir)
+        assert_match(/invalid option/i, stderr, "Removed alias #{alias_flag} should be rejected")
+        refute status.success?
+      end
     end
   end
 
@@ -175,18 +178,18 @@ class TestLatexItCLI < Minitest::Test
 
   def test_help_lines_style
     # In dumb terminal (test runner default), dividers use '-'
-    stdout_lines, status_lines = Open3.capture2(BIN, '-h', '--help-lines')
+    stdout_lines, status_lines = Open3.capture2(BIN, '-h', '--help-style=lines')
     assert status_lines.success?
     assert_includes stdout_lines, '----------------------------------------------------------------------------'
 
     # In UTF-8 terminal with color, dividers use '─' with faint styling
-    stdout_utf8, status_utf8 = Open3.capture2({ 'TERM' => 'xterm-256color' }, BIN, '-h', '--help-lines', '--color')
+    stdout_utf8, status_utf8 = Open3.capture2({ 'TERM' => 'xterm-256color' }, BIN, '-h', '--help-style=lines', '--color')
     assert status_utf8.success?
     assert_includes stdout_utf8, '────────────────────────────────────────────────────────────────────────────'
     assert_match(/\e\[2m/, stdout_utf8)
 
     # In plain style, no divider lines appear
-    stdout_plain, status_plain = Open3.capture2(BIN, '-h', '--no-help-lines')
+    stdout_plain, status_plain = Open3.capture2(BIN, '-h', '--help-style=plain')
     assert status_plain.success?
     refute_includes stdout_plain, '----------------------------------------------------------------------------'
     refute_includes stdout_plain, '────────────────────────────────────────────────────────────────────────────'
@@ -716,7 +719,7 @@ class TestLatexItCLI < Minitest::Test
     assert_equal './chapters/ch1.tex', ch1_warn[:file]
     assert_equal 42, ch1_warn[:line]
 
-    ch2_warn = warnings.find { |w| w[:text].include?('Overfull') }
+    ch2_warn = warnings.find { |w| w[:type].to_s.include?('Overfull') || w[:text].include?('too wide') }
     assert ch2_warn
     assert_equal './chapters/ch2.tex', ch2_warn[:file]
     assert_equal 10, ch2_warn[:line]
@@ -850,15 +853,14 @@ class TestLatexItCLI < Minitest::Test
 
   def test_init_config_cli
     Dir.mktmpdir do |dir|
-      Dir.chdir(dir) do
-        stdout, status = Open3.capture2(BIN, '--init-config')
-        assert status.success?
-        assert_includes stdout, 'Created local configuration file: ./.l.jsonc'
-        assert File.file?('.l.jsonc')
-        content = File.read('.l.jsonc')
-        assert_includes content, 'latex_it Global Configuration File'
-        assert_includes content, '"engine": "xelatex"'
-      end
+      stdout, status = Open3.capture2(BIN, '--config-init', chdir: dir)
+      assert status.success?
+      assert_includes stdout, 'Created local configuration file: ./.l.jsonc'
+      target = File.join(dir, '.l.jsonc')
+      assert File.file?(target)
+      content = File.read(target)
+      assert_includes content, 'latex_it Global Configuration File'
+      assert_includes content, '"engine": "xelatex"'
     end
   end
 
@@ -1125,8 +1127,8 @@ class TestLatexItCLI < Minitest::Test
       plain = strip_ansi(out)
       assert_includes plain, '(1 alert)'
       assert_includes plain, '(2 warnings)'
-      assert_includes plain, 'Label `sec:dup` multiply defined.'
-      assert_includes plain, 'Reference `sec:unknown` undefined'
+      assert_includes plain, "label 'sec:dup' duplicate"
+      assert_includes plain, "undefined reference 'sec:unknown'"
       assert_includes plain, 'Errors: 0'
       assert_includes plain, 'Alerts: 1'
       assert_includes plain, 'Warnings: 2'
@@ -1144,8 +1146,8 @@ class TestLatexItCLI < Minitest::Test
       plain_supp = strip_ansi(out_supp)
       assert_includes plain_supp, '(1 alert)'
       refute_includes plain_supp, 'warnings)'
-      assert_includes plain_supp, 'Label `sec:dup` multiply defined.'
-      refute_includes plain_supp, 'Reference `sec:unknown` undefined'
+      assert_includes plain_supp, "label 'sec:dup' duplicate"
+      refute_includes plain_supp, "undefined reference 'sec:unknown'"
       assert_includes plain_supp, 'Warnings: 2'
       assert_includes plain_supp, '(Warnings suppressed)'
     end
@@ -1174,8 +1176,8 @@ class TestLatexItCLI < Minitest::Test
       plain = strip_ansi(out)
       assert_includes plain, '(1 alert)'
       assert_includes plain, '(1 warning)'
-      assert_includes plain, 'Overfull \hbox (35.0pt too wide)'
-      assert_includes plain, 'Overfull \hbox (10.0pt too wide)'
+      assert_includes plain, '35.00pt too wide'
+      assert_includes plain, '10.00pt too wide'
       assert_includes plain, 'Errors: 0'
       assert_includes plain, 'Alerts: 1'
       assert_includes plain, 'Warnings: 1'
@@ -1193,8 +1195,8 @@ class TestLatexItCLI < Minitest::Test
       plain_custom = strip_ansi(out_custom)
       refute_includes plain_custom, 'alert)'
       assert_includes plain_custom, '(2 warnings)'
-      assert_includes plain_custom, 'Overfull \hbox (35.0pt too wide)'
-      assert_includes plain_custom, 'Overfull \hbox (10.0pt too wide)'
+      assert_includes plain_custom, '35.00pt too wide'
+      assert_includes plain_custom, '10.00pt too wide'
       assert_includes plain_custom, 'Errors: 0'
       assert_includes plain_custom, 'Alerts: 0'
       assert_includes plain_custom, 'Warnings: 2'
@@ -1240,7 +1242,7 @@ class TestLatexItCLI < Minitest::Test
 
       plain_all = strip_ansi(out_all)
       assert_includes plain_all, '(4 whatevers)'
-      assert_includes plain_all, '2.09996pt too wide'
+      assert_includes plain_all, '2.10pt too wide'
       assert_includes plain_all, 'Token not allowed in a PDF string'
       assert_includes plain_all, 'float specifier changed to'
       assert_includes plain_all, 'Whatevers: 4'
@@ -1321,10 +1323,8 @@ class TestLatexItCLI < Minitest::Test
       plain = strip_ansi(out)
       assert_includes plain, 'chap1.tex'
       assert_includes plain, '42:'
-      assert_includes plain, 'chap2.tex'
-      assert_includes plain, '88:'
-      assert_includes plain, "Label `sec:dup' multiply defined (location 1 of 2)"
-      assert_includes plain, "Label `sec:dup' multiply defined (location 2 of 2)"
+      assert_includes plain, "label 'sec:dup' duplicate (also at chap2.tex:88)"
+      assert_includes plain, "label 'sec:dup' duplicate (also at chap1.tex:42)"
       refute_includes plain, 'main.aux'
     end
   end

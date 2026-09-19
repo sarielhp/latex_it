@@ -14,6 +14,8 @@ module LatexColor
       yellow: '#ffe0b2',
       cyan: '#b3e5fc',
       green: '#c8e6c9',
+      magenta: '#f8bbd0',
+      blue: '#90caf9',
       desc: 'Soft pastel blush with high luminance'
     },
     'catppuccin' => {
@@ -22,6 +24,8 @@ module LatexColor
       yellow: '#fab387',
       cyan: '#89dceb',
       green: '#a6e3a1',
+      magenta: '#f5c2e7',
+      blue: '#89b4fa',
       desc: 'Warm soothing pastels'
     },
     'tokyo-night' => {
@@ -30,6 +34,8 @@ module LatexColor
       yellow: '#ff9e64',
       cyan: '#7dcfff',
       green: '#9ece6a',
+      magenta: '#bb9af7',
+      blue: '#7aa2f7',
       desc: 'Cyberpunk rose pastel'
     },
     'dracula' => {
@@ -38,6 +44,8 @@ module LatexColor
       yellow: '#ffb86c',
       cyan: '#8be9fd',
       green: '#50fa7b',
+      magenta: '#ff79c6',
+      blue: '#8be9fd',
       desc: 'High-contrast vibrant coral'
     },
     'nord' => {
@@ -46,6 +54,8 @@ module LatexColor
       yellow: '#d08770',
       cyan: '#88c0d0',
       green: '#a3be8c',
+      magenta: '#b48ead',
+      blue: '#81a1c1',
       desc: 'Calm arctic muted brick'
     },
     'ansi' => {
@@ -54,6 +64,8 @@ module LatexColor
       yellow: nil,
       cyan: nil,
       green: nil,
+      magenta: nil,
+      blue: nil,
       desc: 'Classic terminal 16-color ANSI'
     }
   }.freeze

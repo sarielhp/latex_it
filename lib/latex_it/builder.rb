@@ -660,18 +660,23 @@ class LatexBuilder
     status.success?
   end
 
-  BIBLATEX_HOOK = '\makeatletter\AtBeginDocument{\@ifpackageloaded{biblatex}{\AtEveryBibitem{\typeout{BIB_ENTRY: \thefield{entrykey}}}}{}}\makeatother'
+  LABEL_HOOK = '\let\lit@orig@pw\protected@write' \
+               '\long\def\protected@write#1#2#3{\ifx#1\@auxout\typeout{LIT_LBL:\the\inputlineno:\detokenize{#3}}\fi\lit@orig@pw{#1}{#2}{#3}}'
+
+  BIBLATEX_HOOK = '\AtBeginDocument{\@ifpackageloaded{biblatex}{\AtEveryBibitem{\typeout{BIB_ENTRY: \thefield{entrykey}}}}{}}'
+
+  RUNTIME_HOOK = "\\makeatletter#{LABEL_HOOK}#{BIBLATEX_HOOK}\\makeatother"
 
   def build_latex_pass_cmd
     latexopts = ENV['LATEXOPTS'] || ''
     latexoptions = ENV['LATEXOPTIONS'] || ''
 
     cfilename = if !latexoptions.empty?
-                  "#{latexoptions} #{BIBLATEX_HOOK}\\input{#{@filename}}"
+                  "#{latexoptions} #{RUNTIME_HOOK}\\input{#{@filename}}"
                 elsif !latexopts.empty?
-                  "#{latexopts}#{BIBLATEX_HOOK}\\input{#{@filename}}"
+                  "#{latexopts}#{RUNTIME_HOOK}\\input{#{@filename}}"
                 else
-                  "#{BIBLATEX_HOOK}\\input{#{@filename}}"
+                  "#{RUNTIME_HOOK}\\input{#{@filename}}"
                 end
 
     [@engine_name] + @latex_flags + [cfilename]

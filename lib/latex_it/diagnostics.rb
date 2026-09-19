@@ -1133,24 +1133,116 @@ module LaTeXDiagnostics
     (@options[:whatever_overfull_pt] || 2.5).to_f
   end
 
+  def internal_label_key?(key)
+    return true if key.nil?
+
+    key.end_with?('@cref') || key.end_with?('@vr') || key.end_with?('@xvr')
+  end
+
+  def collect_runtime_label_locations(lines)
+    file_stack = [@filename]
+    label_locs = Hash.new { |h, k| h[k] = [] }
+
+    lines.each do |line|
+      track_log_file(line, file_stack)
+      next unless line =~ /LIT_LBL:(\d+):.*\\newlabel\s*\{([^}]+)\}/
+
+      line_no = Regexp.last_match(1).to_i
+      raw_key = Regexp.last_match(2).strip
+      next if internal_label_key?(raw_key)
+
+      label_locs[raw_key] << { file: current_log_file(file_stack), line: line_no }
+    end
+    label_locs
+  end
+
+  def resolve_duplicate_label_locations(label_key, label_locs)
+    locs = label_key ? label_locs[label_key] : []
+    return locs unless locs.empty?
+
+    label_key ? find_source_label_definitions(label_key) : []
+  end
+
+  def build_duplicate_label_alerts(label_key, locs, base_index)
+    uniq_locs = locs.uniq
+    uniq_locs.each_with_index.map do |loc, idx|
+      suffix = uniq_locs.size > 1 ? " (location #{idx + 1} of #{uniq_locs.size})" : ''
+      msg = "LaTeX Warning: Label `#{label_key}' multiply defined#{suffix}"
+      formatted = format_diagnostic_line(loc[:line].to_s, msg, :red)
+      {
+        file: loc[:file],
+        line: loc[:line],
+        line_str: loc[:line].to_s,
+        text: msg,
+        base_color: :red,
+        formatted: formatted,
+        index: base_index + idx,
+        alert_type: :multiply_defined_label
+      }
+    end
+  end
+
+  def build_fallback_label_alert(text, file_name, base_index)
+    formatted = format_diagnostic_line('', text, :red)
+    [{
+      file: file_name,
+      line: 0,
+      line_str: '',
+      text: text,
+      base_color: :red,
+      formatted: formatted,
+      index: base_index,
+      alert_type: :multiply_defined_label
+    }]
+  end
+
   def extract_label_alerts(content)
-    alerts = []
     clean_content = LaTeXUtils.filter_subcommand_noise(content)
     lines = clean_content.lines
+    label_locs = collect_runtime_label_locations(lines)
+
+    alerts = []
     file_stack = [@filename]
+    seen_duplicate_keys = []
+
     lines.each_with_index do |line, i|
       track_log_file(line, file_stack)
       next unless line.include?('multiply defined') && line.include?('LaTeX Warning')
 
-      text = line.strip
-      file_name = current_log_file(file_stack)
-      formatted = format_diagnostic_line('', text, :red)
-      alerts << {
-        file: file_name, line: 0, line_str: '', text: text,
-        base_color: :red, formatted: formatted, index: i
-      }
+      label_key = line[/Label\s+[`'"]?([^'"\s]+)['"]?\s+multiply defined/i, 1]
+      next if internal_label_key?(label_key) || (label_key && seen_duplicate_keys.include?(label_key))
+
+      seen_duplicate_keys << label_key if label_key
+      locs = resolve_duplicate_label_locations(label_key, label_locs)
+      if locs.empty?
+        alerts.concat(build_fallback_label_alert(line.strip, current_log_file(file_stack), i))
+      else
+        alerts.concat(build_duplicate_label_alerts(label_key, locs, i))
+      end
     end
     alerts
+  end
+
+  def find_source_label_definitions(label_key)
+    candidates = collect_source_candidates
+    locs = []
+    ref_pattern = /\\(?:page|auto|eq|c|C|name)?ref\*?\{[^}]*\b#{Regexp.escape(label_key)}\b[^}]*\}/
+
+    candidates.each do |file|
+      next unless File.file?(file)
+
+      content = File.read(file, encoding: 'UTF-8', invalid: :replace, undef: :replace)
+      content.lines.each_with_index do |line_text, idx|
+        clean = line_text.sub(/(?<!\\)%.*$/, '')
+        next unless clean.include?(label_key)
+
+        stripped = clean.gsub(ref_pattern, '')
+        if stripped.include?(label_key)
+          locs << { file: file, line: idx + 1 }
+        end
+      end
+    end
+    locs
   end
 
   def extract_alerts(content, warn_items = nil)

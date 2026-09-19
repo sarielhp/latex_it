@@ -150,4 +150,75 @@ class TestCompileMode < Minitest::Test
       assert_match(/^doc\.tex:3:1: error: undefined control sequence/, out_double)
     end
   end
+
+  def test_multiply_defined_label_pinpointing_in_compile_mode
+    Dir.mktmpdir('compile_dup_labels') do |dir|
+      File.write(File.join(dir, 'chap1.tex'), <<~TEX)
+        \\section{Chapter One}
+        \\label{sec:duplicate}
+        Content of chapter one.
+      TEX
+
+      File.write(File.join(dir, 'chap2.tex'), <<~TEX)
+        \\section{Chapter Two}
+        \\label{sec:duplicate}
+        Content of chapter two.
+      TEX
+
+      File.write(File.join(dir, 'main.tex'), <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\input{chap1}
+        \\input{chap2}
+        \\end{document}
+      TEX
+
+      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'main.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
+
+      lines = out.lines.map(&:strip)
+      loc1 = lines.find { |l| l.include?('chap1.tex:2:') && l.include?('multiply defined (location 1 of 2)') }
+      loc2 = lines.find { |l| l.include?('chap2.tex:2:') && l.include?('multiply defined (location 2 of 2)') }
+
+      refute_nil loc1, "Expected location 1 in chap1.tex:2. Output:\n#{out}"
+      refute_nil loc2, "Expected location 2 in chap2.tex:2. Output:\n#{out}"
+      refute_match(/\.aux:1:/, out, 'Must not attribute multiply defined label to the .aux file')
+    end
+  end
+
+  def test_multiply_defined_label_with_macro_in_compile_mode
+    Dir.mktmpdir('compile_macro_dup') do |dir|
+      File.write(File.join(dir, 'chap1.tex'), <<~TEX)
+        \\section{Chapter One}
+        \\mylabel{sec:custom}
+        Content of chapter one.
+      TEX
+
+      File.write(File.join(dir, 'chap2.tex'), <<~TEX)
+        \\section{Chapter Two}
+        \\mylabel{sec:custom}
+        Content of chapter two.
+      TEX
+
+      File.write(File.join(dir, 'main.tex'), <<~TEX)
+        \\documentclass{article}
+        \\newcommand{\\mylabel}[1]{\\label{#1}}
+        \\begin{document}
+        \\input{chap1}
+        \\input{chap2}
+        \\end{document}
+      TEX
+
+      out, status = Open3.capture2e(@bin_path, '-cc', '--no-color', 'main.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
+
+      lines = out.lines.map(&:strip)
+      loc1 = lines.find { |l| l.include?('chap1.tex:2:') && l.include?('multiply defined (location 1 of 2)') }
+      loc2 = lines.find { |l| l.include?('chap2.tex:2:') && l.include?('multiply defined (location 2 of 2)') }
+
+      refute_nil loc1, "Expected location 1 in chap1.tex:2. Output:\n#{out}"
+      refute_nil loc2, "Expected location 2 in chap2.tex:2. Output:\n#{out}"
+      refute_match(/\.aux:1:/, out, 'Must not attribute multiply defined label to the .aux file')
+    end
+  end
 end

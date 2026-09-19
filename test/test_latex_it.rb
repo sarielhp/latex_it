@@ -1292,6 +1292,43 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
+  def test_multiply_defined_label_pinpointing_in_diagnostics
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        (./chap1.tex
+        LIT_LBL:42:\\newlabel{sec:dup}{{1}{1}}
+        )
+        (./chap2.tex
+        LIT_LBL:88:\\newlabel{sec:dup}{{2}{1}}
+        )
+        (./main.aux
+        LaTeX Warning: Label `sec:dup' multiply defined.
+        )
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+      plain = strip_ansi(out)
+      assert_includes plain, 'chap1.tex'
+      assert_includes plain, '42:'
+      assert_includes plain, 'chap2.tex'
+      assert_includes plain, '88:'
+      assert_includes plain, "Label `sec:dup' multiply defined (location 1 of 2)"
+      assert_includes plain, "Label `sec:dup' multiply defined (location 2 of 2)"
+      refute_includes plain, 'main.aux'
+    end
+  end
+
   def test_custom_whatever_pt_threshold
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, 'junk'))

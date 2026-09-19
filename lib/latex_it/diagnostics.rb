@@ -1033,9 +1033,6 @@ module LaTeXDiagnostics
   end
 
   def normalized_message(item)
-    return item[:compile_text] if item[:compile_text]
-    return item[:raw_text] if item[:raw_text]
-
     if item[:err_block] && !item[:err_block].empty?
       raw_msg = item[:err_block].first.to_s.strip
       extract_clean_error_message(raw_msg)
@@ -1334,16 +1331,12 @@ module LaTeXDiagnostics
         end
       end
 
-      compile_suffix = uniq_locs.size > 1 ? " (location #{idx + 1} of #{uniq_locs.size})" : ''
-      compile_text = "LaTeX Warning: Label `#{label_key}' multiply defined#{compile_suffix}"
-
       formatted = format_diagnostic_line(loc[:line].to_s, msg, :red, file: loc[:file])
       {
         file: loc[:file],
         line: loc[:line],
         line_str: loc[:line].to_s,
         text: msg,
-        compile_text: compile_text,
         base_color: :red,
         tier: 'alerts',
         formatted: formatted,
@@ -1368,7 +1361,6 @@ module LaTeXDiagnostics
       line: 0,
       line_str: '',
       text: clean_text,
-      compile_text: text,
       base_color: :red,
       tier: 'alerts',
       formatted: formatted,

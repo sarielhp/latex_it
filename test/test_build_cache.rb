@@ -299,4 +299,35 @@ class TestBuildCache < Minitest::Test
       end
     end
   end
+
+  def test_undefined_reference_stabilizes_and_caches
+    Dir.mktmpdir('latex_it_undef_ref_test') do |dir|
+      tex_file = File.join(dir, 'doc.tex')
+      File.write(tex_file, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\section{Intro}\\label{sec:intro}
+        See Section~\\ref{sec:intro} and missing Section~\\ref{sec:missing}.
+        \\end{document}
+      TEX
+
+      bin = File.expand_path('../latex_it', __dir__)
+      out, status = Open3.capture2e(bin, '--no-color', 'doc.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
+      assert File.file?(File.join(dir, 'doc.pdf'))
+      assert File.file?(File.join(dir, 'junk', '.build_state.json')), 'Build state should be saved'
+
+      out2, status2 = Open3.capture2e(bin, '--no-color', 'doc.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus
+      assert_includes out2, 'up-to-date'
+
+      File.write(tex_file, "#{File.read(tex_file)}% comment\n")
+      future = Time.now + 2
+      File.utime(future, future, tex_file)
+
+      out3, status3 = Open3.capture2e(bin, '--raw', '--no-color', 'doc.tex', chdir: dir)
+      assert_equal 0, status3.exitstatus
+      refute_includes out3, 'Running pass 2'
+    end
+  end
 end

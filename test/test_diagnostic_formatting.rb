@@ -148,4 +148,13 @@ class TestDiagnosticFormatting < Minitest::Test
       assert palette.key?(:blue), "Theme #{theme_name} missing :blue"
     end
   end
+
+  def test_unwrap_log_lines_rejoins_hardwrapped_file_paths
+    line1 = '(./very/deeply/nested/directory/path/with/a/long/filename_that_crosses_col_79_x'
+    assert_equal 79, line1.length
+    line2 = 'yz.tex'
+    log = "#{line1}\n#{line2}\n[1]\n)"
+    unwrapped = LaTeXUtils.unwrap_log_lines(log, 79)
+    assert_includes unwrapped, "(./very/deeply/nested/directory/path/with/a/long/filename_that_crosses_col_79_xyz.tex\n"
+  end
 end

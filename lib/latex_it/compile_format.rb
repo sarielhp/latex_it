@@ -105,6 +105,8 @@ module LaTeXCompileFormat
       "[#{pkg}] #{rest}"
     elsif text =~ WARNING_HEADER_PATTERN
       text.sub(WARNING_HEADER_PATTERN, '')
+    elsif text =~ /\A(?:Alert|Warning|Note|Error):\s*(.*)\z/i
+      Regexp.last_match(1)
     else
       text
     end

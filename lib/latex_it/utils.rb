@@ -218,7 +218,37 @@ module LaTeXUtils
   def self.filter_subcommand_noise(text)
     return '' if text.nil? || text.empty?
 
-    text.gsub(/(?:kpathsea: Running mktex\S+|mktex\S+: Running mf).*?(?:failed to make \S+|Transcript written on mfput\.log\.)\n?/m, '')
+    filtered = text.gsub(/(?:kpathsea: Running mktex\S+|mktex\S+: Running mf).*?(?:failed to make \S+|Transcript written on mfput\.log\.)\n?/m, '')
+    unwrap_log_lines(filtered)
+  end
+
+  def self.unwrap_log_lines(text, wrap_col = 79)
+    return '' if text.nil? || text.empty?
+
+    lines = text.lines
+    result = []
+    i = 0
+    while i < lines.size
+      line = lines[i].chomp
+      while line.length == wrap_col && i + 1 < lines.size && !log_boundary_start?(lines[i + 1])
+        i += 1
+        line += lines[i].chomp
+      end
+      result << "#{line}\n"
+      i += 1
+    end
+    result.join
+  end
+
+  def self.log_boundary_start?(next_line)
+    str = next_line.to_s.strip
+    return true if str.empty?
+    return true if str.start_with?('(', ')', '!', '[')
+    return true if str =~ /^(?:Package|Class|LaTeX|\*|\s*(?:Overfull|Underfull))\b/
+    return true if str =~ /^.+?:\d+:/
+    return true if str =~ /^l\.\d+\b/
+
+    false
   end
 
   def self.bbl_has_entries?(path)

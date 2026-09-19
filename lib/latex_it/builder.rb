@@ -41,7 +41,7 @@ class LatexBuilder
 
   LATEX_RERUN_PATTERNS = [
     /Label\(s\) may have changed/i, /Rerun to get/i, /Please rerun LaTeX/i,
-    /There were undefined references/i, /There were undefined citations/i,
+    /\bRerun\s+LaTeX/i,
     /Package rerunfilecheck Warning: File .* has changed/i, /Package ocgx2 Warning: Rerun/i
   ].freeze
 
@@ -208,9 +208,23 @@ class LatexBuilder
     log_activity_start(tool, "Running #{tool} on #{@bfilename}...", first: first)
   end
 
+  def check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
+    return [true, false] unless bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux)
+
+    log_bib_start(bib_tool, first: false)
+    [run_bib_pass(bib_tool), true]
+  end
+
+  def check_and_run_index_pass
+    return false unless @options[:index] && needs_index_pass?
+
+    log_index_start(first: false)
+    run_index_pass
+  end
+
   def run_convergence_loop
     @cacheable_build = true
-    max_passes = @options[:passes]
+    max_passes = @options[:passes] || 3
     pass = 0
     bib_ran = false
     aux_before = compute_aux_hash
@@ -223,21 +237,15 @@ class LatexBuilder
 
       curr_aux = compute_aux_hash
       bib_tool = detect_bib_tool(curr_aux)
+      bib_ok, bib_ran_now = check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
+      return false unless bib_ok
 
-      if bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux)
-        log_bib_start(bib_tool, first: false)
-        return false unless run_bib_pass(bib_tool)
-
+      if bib_ran_now
         bib_ran = true
         next
       end
 
-      index_ran = false
-      if @options[:index] && needs_index_pass?
-        log_index_start(first: false)
-        index_ran = run_index_pass
-      end
-
+      index_ran = check_and_run_index_pass
       rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux) || index_ran
       aux_before = curr_aux
       if pass >= max_passes

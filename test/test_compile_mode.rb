@@ -75,12 +75,12 @@ class TestCompileMode < Minitest::Test
       lines = out.lines.map(&:strip).reject(&:empty?)
       alert_line = lines.find { |l| l.include?('warning: [alert]') }
       refute_nil alert_line, "Expected alert warning in output: #{out}"
-      assert_match(/\Awarn\.tex:3: warning: \[alert\] overfull \\hbox/, alert_line)
+      assert_match(/\Awarn\.tex:3: warning: \[alert\] 80\.00pt too wide/, alert_line)
       refute_match(/\.\z/, alert_line)
 
-      warn_line = lines.find { |l| l.include?('warning: reference') }
+      warn_line = lines.find { |l| l.include?("undefined reference 'nonexistent_ref'") }
       refute_nil warn_line, "Expected regular warning in output: #{out}"
-      assert_match(/\Awarn\.tex:4: warning: reference.*undefined/, warn_line)
+      assert_match(/\Awarn\.tex:4: warning: undefined reference 'nonexistent_ref'/, warn_line)
       refute_match(/\.\z/, warn_line)
     end
   end
@@ -97,11 +97,11 @@ class TestCompileMode < Minitest::Test
 
       # Default: whatevers are suppressed
       out_default, = Open3.capture2e(@bin_path, '--compile', '--no-color', '-u', 'what.tex', chdir: dir)
-      refute_includes out_default, 'note: overfull \hbox'
+      refute_includes out_default, 'note: 1.50pt too wide'
 
       # With -a (--all): whatevers are shown as note:
       out_all, = Open3.capture2e(@bin_path, '--compile', '--no-color', '-u', '-a', 'what.tex', chdir: dir)
-      assert_includes out_all, 'what.tex:3: note: overfull \hbox (1.5pt too wide) detected'
+      assert_includes out_all, 'what.tex:3: note: 1.50pt too wide'
     end
   end
 
@@ -189,8 +189,8 @@ class TestCompileMode < Minitest::Test
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
 
       lines = out.lines.map(&:strip)
-      loc1 = lines.find { |l| l.include?('chap1.tex:2:') && l.include?('multiply defined (location 1 of 2)') }
-      loc2 = lines.find { |l| l.include?('chap2.tex:2:') && l.include?('multiply defined (location 2 of 2)') }
+      loc1 = lines.find { |l| l.include?('chap1.tex:2:') && l.include?("label 'sec:duplicate' duplicate (also at chap2.tex:2)") }
+      loc2 = lines.find { |l| l.include?('chap2.tex:2:') && l.include?("label 'sec:duplicate' duplicate (also at chap1.tex:2)") }
 
       refute_nil loc1, "Expected location 1 in chap1.tex:2. Output:\n#{out}"
       refute_nil loc2, "Expected location 2 in chap2.tex:2. Output:\n#{out}"
@@ -225,8 +225,8 @@ class TestCompileMode < Minitest::Test
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
 
       lines = out.lines.map(&:strip)
-      loc1 = lines.find { |l| l.include?('chap1.tex:2:') && l.include?('multiply defined (location 1 of 2)') }
-      loc2 = lines.find { |l| l.include?('chap2.tex:2:') && l.include?('multiply defined (location 2 of 2)') }
+      loc1 = lines.find { |l| l.include?('chap1.tex:2:') && l.include?("label 'sec:custom' duplicate (also at chap2.tex:2)") }
+      loc2 = lines.find { |l| l.include?('chap2.tex:2:') && l.include?("label 'sec:custom' duplicate (also at chap1.tex:2)") }
 
       refute_nil loc1, "Expected location 1 in chap1.tex:2. Output:\n#{out}"
       refute_nil loc2, "Expected location 2 in chap2.tex:2. Output:\n#{out}"
@@ -341,8 +341,8 @@ class TestCompileMode < Minitest::Test
       out_all, status_all = Open3.capture2e(@bin_path, '--compile', '-a', '--no-color', 'bad.tex', chdir: dir)
       assert_equal 1, status_all.exitstatus
       assert_includes out_all, 'error: undefined control sequence'
-      assert_includes out_all, 'warning: [alert] overfull'
-      assert_includes out_all, 'warning: reference `nonexistent_ref\''
+      assert_includes out_all, 'warning: [alert] 80.00pt too wide'
+      assert_includes out_all, "warning: undefined reference 'nonexistent_ref'"
     end
   end
 

@@ -221,4 +221,52 @@ class TestCompileMode < Minitest::Test
       refute_match(/\.aux:1:/, out, 'Must not attribute multiply defined label to the .aux file')
     end
   end
+
+  def test_compile_mode_with_link_flag
+    Dir.mktmpdir('compile_links') do |dir|
+      File.write(File.join(dir, 'doc.tex'), <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\undefcommand
+        \\end{document}
+      TEX
+
+      # Explicit --link enables OSC 8 escape sequences even in non-tty subprocess
+      out, status = Open3.capture2e(@bin_path, '-cc', '--link', 'doc.tex', chdir: dir)
+      assert_equal 1, status.exitstatus
+      assert_includes out, "\e]8;;file://"
+      assert_includes out, "doc.tex:3:1:\e]8;;\e\\"
+
+      # Explicit --no-link guarantees zero OSC 8 sequences
+      out_nolink, status_nolink = Open3.capture2e(@bin_path, '-cc', '--no-link', 'doc.tex', chdir: dir)
+      assert_equal 1, status_nolink.exitstatus
+      refute_includes out_nolink, "\e]8;;"
+      assert_match(/^doc\.tex:3:1: error: undefined control sequence/, out_nolink)
+    end
+  end
+
+  def test_compile_mode_auto_detects_kitty_in_tty
+    Dir.mktmpdir('compile_pty') do |dir|
+      File.write(File.join(dir, 'doc.tex'), <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\undefcommand
+        \\end{document}
+      TEX
+
+      env = { 'KITTY_WINDOW_ID' => '1', 'TERM' => 'xterm-kitty', 'LATEX_IT_THEME' => 'blush' }
+      cmd = "cd #{dir} && #{@bin_path} -cc doc.tex"
+      output = String.new
+      require 'pty'
+      PTY.spawn(env, 'bash', '-c', cmd) do |r, _w, _pid|
+        begin
+          r.each_line { |line| output << line }
+        rescue Errno::EIO
+        end
+      end
+      assert_includes output, "\e]8;;file://"
+      assert_includes output, "doc.tex:3:1:"
+      assert_includes output, "\e]8;;\e\\"
+    end
+  end
 end

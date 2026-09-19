@@ -51,6 +51,9 @@ module LaTeXConfig
       // Terminal color output: true (force), false (disable), or null (auto-detect)
       "color": null,
 
+      // Terminal OSC 8 clickable file/line hyperlinks: true (force), false (disable), or null (auto-detect)
+      "links": null,
+
       // Diagnostic color theme: "blush" (default), "catppuccin", "tokyo-night", "dracula", "nord", "ansi"
       "theme": "blush",
 

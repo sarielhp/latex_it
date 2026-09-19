@@ -7,6 +7,8 @@
 # (Emacs compilation-mode, Vim/Neovim, VS Code, CI log matchers).
 # ==============================================================================
 
+require 'uri'
+
 module LaTeXCompileFormat
   module_function
 
@@ -19,26 +21,32 @@ module LaTeXCompileFormat
 
   WARNING_HEADER_PATTERN = /^(?:LaTeX|Class|Package|\*)(?:\s+[-\w.@*]+)*\s+[Ww]arning:\s*/.freeze
 
-  def render(record, color: true)
-    loc = format_location(record[:file], record[:line], record[:col], color: color)
+  def render(record, color: true, link: false)
+    loc = format_location(record[:file], record[:line], record[:col], color: color, link: link)
     sev = format_severity(record[:tier], color: color)
     msg = format_message(record, color: color)
 
     "#{loc} #{sev} #{msg}"
   end
 
-  def format_location(file, line, col, color: true)
+  def format_location(file, line, col, color: true, link: false)
     active_line = (line && line.to_i.positive?) ? line.to_i : 1
     active_col = (col && col.to_i.positive?) ? col.to_i : nil
 
     loc_str = active_col ? "#{active_line}:#{active_col}" : active_line.to_s
+    raw_loc = "#{file}:#{loc_str}:"
 
-    if color
+    if link
+      loc_text = color ? Rainbow(raw_loc).cyan.bold.to_s : raw_loc
+      abs_path = URI::DEFAULT_PARSER.escape(File.expand_path(file.to_s))
+      uri = "file://#{abs_path}##{active_line}"
+      "\e]8;;#{uri}\e\\#{loc_text}\e]8;;\e\\"
+    elsif color
       file_str = Rainbow(file.to_s).bold.to_s
       coords_str = Rainbow(loc_str).cyan.bright.to_s
       "#{file_str}:#{coords_str}:"
     else
-      "#{file}:#{loc_str}:"
+      raw_loc
     end
   end
 

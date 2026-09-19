@@ -108,4 +108,46 @@ class TestCompileFormat < Minitest::Test
       Rainbow.enabled = orig
     end
   end
+
+  def test_render_hyperlink_format
+    rec = {
+      file: 'chap1.tex',
+      line: 42,
+      col: nil,
+      tier: 'alerts',
+      message: "LaTeX Warning: Label `sec:dup' multiply defined."
+    }
+
+    rendered = LaTeXCompileFormat.render(rec, color: false, link: true)
+    abs_path = URI::DEFAULT_PARSER.escape(File.expand_path('chap1.tex'))
+    expected_link = "\e]8;;file://#{abs_path}#42\e\\chap1.tex:42:\e]8;;\e\\"
+    assert_includes rendered, expected_link
+    assert_includes rendered, "warning: [alert] label `sec:dup' multiply defined"
+
+    # Stripping OSC 8 and ANSI yields exact plain compiler format
+    plain = rendered.gsub(/\e\]8;;[^\e]*\e\\/, '').gsub(/\e\[[0-9;]*m/, '')
+    assert_equal "chap1.tex:42: warning: [alert] label `sec:dup' multiply defined", plain
+  end
+
+  def test_render_hyperlink_with_color_uses_cyan_bold
+    rec = {
+      file: 'chap1.tex',
+      line: 42,
+      col: nil,
+      tier: 'errors',
+      message: 'Undefined control sequence.'
+    }
+
+    orig = Rainbow.enabled
+    begin
+      Rainbow.enabled = true
+      rendered = LaTeXCompileFormat.render(rec, color: true, link: true)
+      assert_includes rendered, "\e]8;;file://"
+      assert_includes rendered, "\e[1mchap1.tex:42:\e[0m"
+      plain = rendered.gsub(/\e\]8;;[^\e]*\e\\/, '').gsub(/\e\[[0-9;]*m/, '')
+      assert_equal "chap1.tex:42: error: undefined control sequence", plain
+    ensure
+      Rainbow.enabled = orig
+    end
+  end
 end

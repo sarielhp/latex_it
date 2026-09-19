@@ -247,7 +247,8 @@ module LatexCLI
       junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
       bib_extract: false,
       bib_extract_name: nil,
-      compile: cfg['compile'] == true
+      compile: cfg['compile'] == true,
+      link: cfg['links']
     }.merge(build_zip_options(cfg, extra_cli_files))
      .merge(build_arxiv_options(cfg))
   end
@@ -292,6 +293,8 @@ module LatexCLI
       when '-version' then '--version'
       when '--extract-bib' then '--bib-extract'
       when '-compile', '-cc', '--cc' then '--compile'
+      when '--links' then '--link'
+      when '--no-links' then '--no-link'
       else arg
       end
     end
@@ -403,6 +406,9 @@ module LatexCLI
     opts.separator ''
     opts.separator '  Environment, Theming & Configuration:'
     opts.on('--[no-]color', 'Enable or disable colored terminal output (default: auto)') { |v| options[:color] = v }
+    opts.on('--[no-]link', 'Enable or disable clickable terminal hyperlinks (default: auto-detect)') do |v|
+      options[:link] = v
+    end
     opts.on('--theme THEME', 'Set diagnostic color theme (e.g. blush, catppuccin, or "+1" to cycle)') { |v| options[:theme_arg] = v }
     opts.on('--list-themes', 'List available diagnostic color themes with previews and exit') { options[:list_themes] = true }
     opts.on('--[no-]lock', 'Enable or disable lockfile concurrency protection (default: enabled)') { |v| options[:lock] = v }
@@ -645,6 +651,7 @@ module LatexCLI
   def self.configure_environment(options)
     options[:color] = determine_color_enabled(options) if options[:color].nil?
     Rainbow.enabled = options[:color]
+    options[:link] = determine_links_enabled(options) if options[:link].nil?
 
     apply_theme_configuration(options)
     LaTeXUtils.reset_latex_environment! if options[:no_env]
@@ -661,6 +668,26 @@ module LatexCLI
     return false unless $stdout.tty?
 
     true
+  end
+
+  def self.determine_links_enabled(options)
+    return options[:link] unless options[:link].nil?
+    return false if options[:emacs] || ENV['INSIDE_EMACS']
+    return false if ENV['TERM'] == 'dumb' || ENV['TERM'] == 'unknown'
+    return false if ENV['NO_COLOR'] && !ENV['NO_COLOR'].empty?
+    return false unless $stdout.tty? && $stderr.tty?
+
+    osc8_capable_terminal?
+  end
+
+  def self.osc8_capable_terminal?
+    return true if ENV['KITTY_WINDOW_ID'] || ENV['KITTY_PID'] || ENV['TERM'] == 'xterm-kitty'
+    return true if ENV['TERMINFO'].to_s.include?('kitty')
+    return true if %w[iTerm.app vscode WezTerm ghostty foot warp].include?(ENV['TERM_PROGRAM'])
+    return true if ENV['WT_SESSION']
+    return true if ENV['VTE_VERSION'].to_i >= 5000
+
+    false
   end
 
   def self.apply_theme_configuration(options)

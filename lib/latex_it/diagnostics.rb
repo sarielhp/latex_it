@@ -935,7 +935,7 @@ module LaTeXDiagnostics
     records = collect_compile_records(errors: errors, alerts: alerts,
                                       warnings: warnings, whatevers: whatevers)
     records.sort_by { |r| [r[:index] || 0, r[:file] || '', r[:line] || 0, r[:col] || 0] }
-           .each { |r| io.puts LaTeXCompileFormat.render(r, color: @options[:color] != false) }
+           .each { |r| io.puts LaTeXCompileFormat.render(r, color: @options[:color] != false, link: @options[:link] == true) }
     records.size
   end
 

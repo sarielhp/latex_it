@@ -24,6 +24,7 @@ require 'optparse'
 require 'pathname'
 require 'shellwords'
 require 'tmpdir'
+require 'uri'
 
 require_relative 'lib/latex_it/version'
 require_relative 'lib/latex_it/color'

@@ -53,6 +53,7 @@ module LatexBundler
     shellwords
     tmpdir
     time
+    uri
   ].freeze
 
   def self.current_version

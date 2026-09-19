@@ -30,4 +30,25 @@ class TestCodeMetrics < Minitest::Test
     assert status.success?, "Standalone bundle verification failed:\n#{output}"
     assert_includes output, 'Bundle verified: Syntax OK'
   end
+
+  def test_standalone_bundle_compile_diagnostics_execution
+    bundle_bin = File.join(ROOT, 'tools', 'bundle')
+    bundle_code, status = Open3.capture2('ruby', bundle_bin)
+    assert status.success?, 'Failed to generate standalone bundle'
+
+    Dir.mktmpdir('bundle_exec_test') do |dir|
+      bundle_script = File.join(dir, 'latex_it')
+      File.write(bundle_script, bundle_code)
+      FileUtils.chmod(0755, bundle_script)
+
+      tex_file = File.join(dir, 'sample.tex')
+      File.write(tex_file, "\\documentclass{article}\n\\begin{document}\n\\badcmd\n\\end{document}\n")
+
+      out, run_status = Open3.capture2e(bundle_script, '-cc', '--link', 'sample.tex', chdir: dir)
+      assert_equal 1, run_status.exitstatus
+      refute_includes out, 'uninitialized constant'
+      refute_includes out, 'NameError'
+      assert_includes out, "\e]8;;file://"
+    end
+  end
 end

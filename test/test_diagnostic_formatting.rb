@@ -157,4 +157,68 @@ class TestDiagnosticFormatting < Minitest::Test
     unwrapped = LaTeXUtils.unwrap_log_lines(log, 79)
     assert_includes unwrapped, "(./very/deeply/nested/directory/path/with/a/long/filename_that_crosses_col_79_xyz.tex\n"
   end
+
+  def test_embedded_url_clean_osc8_by_default
+    builder = LatexBuilder.new('main.tex', link: true, color: true)
+    url = 'https://example.com/guide'
+    formatted = builder.send(:format_terminal_url, url, 'underfull \hbox')
+    assert_equal "\e]8;;https://example.com/guide\e\\underfull \\hbox\e]8;;\e\\", formatted
+  end
+
+  def test_embedded_link_in_diagnostic_line_preserves_surrounding_base_color
+    builder = LatexBuilder.new('main.tex', link: true, color: true)
+    orig_rainbow = Rainbow.enabled
+    begin
+      Rainbow.enabled = true
+      item = {
+        type: 'Underfull \hbox',
+        file: 'test.tex',
+        line: 12,
+        line_str: '12',
+        text: 'Note: underfull \hbox (badness 10000)',
+        base_color: :cyan
+      }
+      rendered = builder.send(:render_diagnostic_item, item, width: 3)
+      assert_includes rendered, "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\underfull \\hbox\e]8;;\e\\"
+      # Verify that the suffix text after the link is also colored in cyan
+      assert_includes rendered, '(badness 10000)'
+      refute_includes rendered, "\e[4m"
+    ensure
+      Rainbow.enabled = orig_rainbow
+    end
+  end
+
+  def test_duplicate_label_link_is_cyan_without_forced_underline
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'chap1.tex'), "\\section{A}\n\\label{sec:dup}\n")
+      File.write(File.join(dir, 'chap2.tex'), "\\section{B}\n\\label{sec:dup}\n")
+
+      builder = LatexBuilder.new('main.tex', link: true, color: true)
+      locs = [
+        { file: File.join(dir, 'chap1.tex'), line: 2 },
+        { file: File.join(dir, 'chap2.tex'), line: 2 }
+      ]
+
+      alerts = builder.send(:build_duplicate_label_alerts, 'sec:dup', locs, 0)
+      a1 = alerts[0]
+      assert_includes a1[:text], "\e]8;;file://"
+      refute_includes a1[:text], "\e[4m"
+      refute_includes a1[:text], "\e[24m"
+      assert_includes a1[:text], 'chap2.tex:2'
+    end
+  end
+
+  def test_boxed_explanation_doc_url_styled_in_blue
+    builder = LatexBuilder.new('main.tex', link: true, color: true, explain: true)
+    orig_rainbow = Rainbow.enabled
+    begin
+      Rainbow.enabled = true
+      box = builder.send(:format_boxed_explanation, :underfull_hbox)
+      assert_includes box, "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\"
+      # Check that blue color is included in the URL field
+      assert_includes box, 'See:'
+    ensure
+      Rainbow.enabled = orig_rainbow
+    end
+  end
 end

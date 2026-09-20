@@ -20,7 +20,11 @@ class TestCodeMetrics < Minitest::Test
     output, status = Open3.capture2e(*cmd)
 
     assert status.success?, "Code metrics violations found:\n#{output}"
-    assert_includes output, 'Code metrics check passed'
+    if output.include?('Ruby audit standard not installed')
+      skip 'Ruby audit standard not installed'
+    else
+      assert_includes output, 'Code metrics check passed'
+    end
   end
 
   def test_standalone_bundle_syntax

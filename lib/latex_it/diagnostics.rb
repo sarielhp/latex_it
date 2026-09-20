@@ -78,7 +78,7 @@ module LaTeXDiagnostics
     @options && @options[:link] == true && !@options[:emacs]
   end
 
-  def format_terminal_link(file, line_str, display_str)
+  def format_terminal_link(file, line_str, display_str, underline: false, color: nil)
     return display_str unless link_enabled? && file && !file.to_s.empty?
 
     target_line = line_str.to_s[/^\d+/] || '1'
@@ -87,20 +87,48 @@ module LaTeXDiagnostics
 
     abs_path = ::URI::DEFAULT_PARSER.escape(File.expand_path(real_file.to_s))
     uri = "file://#{abs_path}##{target_line}"
-    "\e]8;;#{uri}\e\\#{display_str}\e]8;;\e\\"
+    styled = display_str
+    if @options[:color] != false
+      styled = Rainbow(styled).send(color).bright.to_s if color && defined?(Rainbow)
+      styled = "\e[4m#{styled}\e[24m" if underline
+    end
+    "\e]8;;#{uri}\e\\#{styled}\e]8;;\e\\"
   end
 
   UNDERFULL_GUIDE_URL = 'https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/'
 
-  def format_terminal_url(url, display_str, underline: false)
+  def format_terminal_url(url, display_str, underline: false, color: nil)
     return display_str unless link_enabled? && url && !url.to_s.empty?
 
-    content = underline && @options[:color] != false ? "\e[4m#{display_str}\e[24m" : display_str
-    "\e]8;;#{url}\e\\#{content}\e]8;;\e\\"
+    styled = display_str
+    if @options[:color] != false
+      styled = Rainbow(styled).send(color).bright.to_s if color && defined?(Rainbow)
+      styled = "\e[4m#{styled}\e[24m" if underline
+    end
+    "\e]8;;#{url}\e\\#{styled}\e]8;;\e\\"
   end
+
+  OSC8_LINK_PATTERN = /(\e\]8;;[^\e]*\e\\.*?\e\]8;;\e\\)/.freeze
 
   def highlight_line_numbers(text, base_color, bright: false)
     return text if @options[:emacs]
+    return text if @options && @options[:color] == false
+
+    if text.include?("\e]8;;")
+      return text.split(OSC8_LINK_PATTERN).map do |segment|
+        if segment.start_with?("\e]8;;")
+          segment
+        else
+          highlight_line_numbers_segment(segment, base_color, bright: bright)
+        end
+      end.join
+    end
+
+    highlight_line_numbers_segment(text, base_color, bright: bright)
+  end
+
+  def highlight_line_numbers_segment(text, base_color, bright: false)
+    return '' if text.empty?
 
     pattern = /((?:input\s+)?lines?\s+)(\d+(?:--?\d+)?)|(\bl\.)(\d+)\b|(:)(\d+)(:)/i
     parts = []
@@ -441,8 +469,8 @@ module LaTeXDiagnostics
     return text unless link_enabled?
 
     if underfull_box?(item)
-      text.sub(/\bunderfull\s+\\hbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m, underline: true) }
-          .sub(/\bunderfull\s+\\vbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m, underline: true) }
+      text.sub(/\bunderfull\s+(?:\\hbox|line|box)\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m) }
+          .sub(/\bunderfull\s+(?:\\vbox|page|column)\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m) }
     else
       text
     end
@@ -1292,7 +1320,7 @@ module LaTeXDiagnostics
       *wrap_box_field(fix_label, expl[:fix], inner_width)
     ]
     if expl[:doc_url]
-      doc_link = format_terminal_url(expl[:doc_url], expl[:doc_url])
+      doc_link = format_terminal_url(expl[:doc_url], expl[:doc_url], color: :blue)
       box_lines.concat(wrap_box_field('See:', doc_link, inner_width))
     end
     box_lines << "└#{'─' * (cols - 2)}┘"
@@ -1407,7 +1435,7 @@ module LaTeXDiagnostics
         else
           linked_others = other_locs.map do |ol|
             disp = "#{format_display_path(ol[:file])}:#{ol[:line]}"
-            link_enabled? ? format_terminal_link(ol[:file], ol[:line].to_s, disp) : disp
+            link_enabled? ? format_terminal_link(ol[:file], ol[:line].to_s, disp, underline: false, color: :cyan) : disp
           end.join(', ')
           msg = "Alert: label '#{label_key}' duplicate (also at #{linked_others})"
         end

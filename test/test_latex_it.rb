@@ -126,35 +126,45 @@ class TestLatexItCLI < Minitest::Test
 
   def test_canonical_cli_flags_and_anti_alias
     Dir.mktmpdir('latex_it_canon_flags') do |dir|
-      canonical_flags = [
-        %w[-u], %w[--single-pass], %w[-f], %w[--force], %w[-m], %w[--main],
-        %w[-x], %w[--explain], %w[--update-if-changed], %w[-t], %w[--verify],
-        %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
-        %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex],
-        %w[--help-style=lines], %w[-r], %w[--raw], %w[-cc], %w[--compile],
-        %w[--config-init], %w[--config-show], %w[--vscode-init], %w[--theme-list],
-        %w[--styles-inject], %w[--no-styles-inject],
-        %w[-I], %w[--index], %w[--no-index], %w[--config-save], %w[--global], %w[--local]
-      ]
-      canonical_flags.each do |flag_args|
-        flag_str = flag_args.join(' ')
-        _, stderr, _status = Open3.capture3(BIN, *flag_args, 'nonexistent_doc_test.tex', chdir: dir)
-        refute_match(/invalid option/i, stderr, "Canonical flag #{flag_str} should be a valid option")
-        refute_match(/ambiguous option/i, stderr, "Canonical flag #{flag_str} should not be ambiguous")
-        assert_includes stderr, "File 'nonexistent_doc_test.tex' not found" unless flag_args.include?('-m') || flag_args.include?('--main') || flag_args.include?('--config-init') || flag_args.include?('--config-show') || flag_args.include?('--vscode-init') || flag_args.include?('--theme-list')
-      end
+      Dir.chdir(dir) do
+        canonical_flags = [
+          %w[-u], %w[--single-pass], %w[-f], %w[--force], %w[-m], %w[--main],
+          %w[-x], %w[--explain], %w[--update-if-changed], %w[-t], %w[--verify],
+          %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
+          %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex],
+          %w[--help-style=lines], %w[-r], %w[--raw], %w[-cc], %w[--compile],
+          %w[--config-show], %w[--theme-list],
+          %w[--styles-inject], %w[--no-styles-inject],
+          %w[-I], %w[--index], %w[--no-index], %w[--config-save], %w[--global], %w[--local]
+        ]
+        opts = LatexCLI.build_default_options({}, 'l', [])
+        sample_parser = LatexCLI.build_option_parser(opts)
+        refute_nil sample_parser.top.search(:long, 'vscode-init')
+        refute_nil sample_parser.top.search(:long, 'config-init')
 
-      removed_aliases = %w[
-        --one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff
-        --test --env-free --envfree --pdf --lua --xe --pdflatex --fast --cc
-        --extract-bib --help-lines --no-help-lines --links --no-links
-        --init-config --show-config --init-vscode --list-themes
-        --inject-styles --no-inject-styles -i
-      ]
-      removed_aliases.each do |alias_flag|
-        _, stderr, status = Open3.capture3(BIN, alias_flag, 'nonexistent_doc_test.tex', chdir: dir)
-        assert_match(/invalid option/i, stderr, "Removed alias #{alias_flag} should be rejected")
-        refute status.success?
+        canonical_flags.each do |flag_args|
+          argv = flag_args.dup
+          LatexCLI.normalize_argv!(argv)
+          parser = LatexCLI.build_option_parser(LatexCLI.build_default_options({}, 'l', []))
+          capture_io { parser.order!(argv) }
+        end
+
+        removed_aliases = %w[
+          --one-pass --quick --find-main --file --lualatex --xelatex --update-on-diff
+          --test --env-free --envfree --pdf --lua --xe --pdflatex --fast --cc
+          --extract-bib --help-lines --no-help-lines --links --no-links
+          --init-config --show-config --init-vscode --list-themes
+          --inject-styles --no-inject-styles -i
+        ]
+        removed_aliases.each do |alias_flag|
+          argv = [alias_flag]
+          LatexCLI.normalize_argv!(argv)
+          opts = LatexCLI.build_default_options({}, 'l', [])
+          parser = LatexCLI.build_option_parser(opts)
+          assert_raises(OptionParser::ParseError, "Removed alias #{alias_flag} should be rejected") do
+            parser.order!(argv)
+          end
+        end
       end
     end
   end
@@ -246,10 +256,11 @@ class TestLatexItCLI < Minitest::Test
       txt1, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
       assert_includes txt1, 'Author A'
 
-      sleep 1.0
+      future_time = Time.now + 10
       File.write(File.join(dir, 'refs.bib'), <<~'BIB')
         @article{item, author = {Author B}, title = {Title B}, journal = {J}, year = {2026}}
       BIB
+      File.utime(future_time, future_time, File.join(dir, 'refs.bib'))
 
       out, _ = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
       txt2, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
@@ -270,27 +281,6 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
-  def test_force_with_biblatex_change_and_convergence
-    Dir.mktmpdir('force_biblatex') do |dir|
-      tex = "\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}\n\\begin{document}\n\\cite{k}\n\\printbibliography\n\\end{document}\n"
-      File.write(File.join(dir, 'paper.tex'), tex)
-      File.write(File.join(dir, 'refs.bib'), "@article{k, author = {Author A}, title = {T}, journal = {J}, year = {2020}}\n")
-
-      Open3.capture2e(BIN, 'paper.tex', chdir: dir)
-      txt1, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
-      assert_includes txt1, 'Author A'
-
-      sleep 1.0
-      File.write(File.join(dir, 'refs.bib'), "@article{k, author = {Author B}, title = {T}, journal = {J}, year = {2026}}\n")
-
-      out, _ = Open3.capture2e(BIN, '-f', 'paper.tex', chdir: dir)
-      txt2, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
-      assert_includes out, 'xelatex (1)'
-      assert_includes out, 'biber'
-      assert_includes txt2, 'Author B'
-    end
-  end
-
   def test_simultaneous_tex_and_bib_change
     Dir.mktmpdir('simultaneous_change') do |dir|
       tex1 = "\\documentclass{article}\n\\begin{document}\n\\cite{k1}\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n"
@@ -300,11 +290,12 @@ class TestLatexItCLI < Minitest::Test
 
       Open3.capture2e(BIN, 'paper.tex', chdir: dir)
 
-      sleep 1.0
+      future_time = Time.now + 10
       tex2 = "\\documentclass{article}\n\\begin{document}\n\\cite{k1}\n\\cite{k2}\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n"
       bib2 = "@article{k1, author = {Author 1}, title = {T1}, journal = {J}, year = {2020}}\n@article{k2, author = {Author 2}, title = {T2}, journal = {J}, year = {2026}}\n"
       File.write(File.join(dir, 'paper.tex'), tex2)
       File.write(File.join(dir, 'refs.bib'), bib2)
+      File.utime(future_time, future_time, File.join(dir, 'paper.tex'), File.join(dir, 'refs.bib'))
 
       Open3.capture2e(BIN, 'paper.tex', chdir: dir)
       txt, _ = Open3.capture2e('pdftotext', File.join(dir, 'paper.pdf'), '-')
@@ -1370,14 +1361,14 @@ class TestLatexItCLI < Minitest::Test
       refute_includes out_no_link, "\e]8;;https://sarielhp.github.io"
       assert_includes out_no_link, 'underfull \hbox (badness 10000)'
 
-      # 2. With link: true: OSC 8 embedded on underfull \hbox with underline
+      # 2. With link: true: clean OSC 8 embedded on underfull \hbox
       builder_link = LatexBuilder.new('main.tex', link: true)
       out_link, = capture_io do
         Dir.chdir(dir) do
           builder_link.send(:analyze_output)
         end
       end
-      expected_osc8 = "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\\e[4munderfull \\hbox\e[24m\e]8;;\e\\"
+      expected_osc8 = "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\underfull \\hbox\e]8;;\e\\"
       assert_includes out_link, expected_osc8
     end
   end

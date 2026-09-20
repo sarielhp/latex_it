@@ -298,6 +298,7 @@ class TestDestructivePaths < Minitest::Test
 
   def test_review_cycle_run_with_auto_triage_prevents_shell_injection
     load File.expand_path('../tools/review_cycle', __dir__) unless defined?(MultiProfileReviewCycle)
+    skip 'MultiProfileReviewCycle standard not installed' unless defined?(MultiProfileReviewCycle)
     Dir.mktmpdir('review_cycle_pty_test') do |dir|
       out_file = File.join(dir, 'output.txt')
       marker = 'ARG_WITH_METAS_`echo evil`_${PATH}_;&|'

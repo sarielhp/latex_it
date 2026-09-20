@@ -19,7 +19,7 @@ module LaTeXUtils
   @initial_pwd = Dir.pwd
   # `figs/bak` is deliberately absent: the packager treats it as a user-owned
   # backup directory to exclude from bundles, so cleaning must not delete it.
-  JUNK_BUILD_DIRS = %w[junk styles/junk figs/junk refs/junk].freeze
+  JUNK_BUILD_DIRS = %w[junk .junk styles/junk styles/.junk figs/junk figs/.junk refs/junk refs/.junk].freeze
 
   # Every scratch file this tool writes lives under `junk/`, which is removed
   # wholesale via JUNK_BUILD_DIRS. These patterns therefore only ever run over
@@ -329,7 +329,9 @@ module LaTeXUtils
 
     with_pdf = candidates.select do |f|
       base = File.basename(f, '.tex')
-      File.exist?(File.join(dir, "#{base}.pdf")) || File.exist?(File.join(dir, 'junk', "#{base}.pdf"))
+      File.exist?(File.join(dir, "#{base}.pdf")) ||
+        File.exist?(File.join(dir, 'junk', "#{base}.pdf")) ||
+        File.exist?(File.join(dir, '.junk', "#{base}.pdf"))
     end
     return with_pdf.first if with_pdf.size == 1
 

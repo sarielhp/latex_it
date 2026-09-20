@@ -19,7 +19,7 @@ module LaTeXMacroHarvester
     \\(?:[gex]?def|let)\s*\\([a-zA-Z@]+)
   }x.freeze
 
-  EXCLUDED_DIRS = %w[junk .git .bws .gemini node_modules].freeze
+  EXCLUDED_DIRS = %w[junk .junk .git .bws .gemini node_modules].freeze
 
   @cache = {}
 
@@ -120,10 +120,11 @@ module LaTeXMacroHarvester
     fls_candidates = []
     if file_path && !file_path.to_s.strip.empty?
       stem = File.basename(file_path.to_s.strip, '.*')
+      fls_candidates << File.join(root, '.junk', "#{stem}.fls")
       fls_candidates << File.join(root, 'junk', "#{stem}.fls")
       fls_candidates << File.join(root, "#{stem}.fls")
     end
-    fls_candidates.concat(Dir.glob(File.join(root, 'junk', '*.fls')))
+    fls_candidates.concat(Dir.glob(File.join(root, '{junk,.junk}', '*.fls')))
 
     files = []
     fls_candidates.uniq.each do |fls|

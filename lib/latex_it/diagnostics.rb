@@ -1565,11 +1565,21 @@ module LaTeXDiagnostics
     end
   end
 
+  def diagnostics_junk_dir
+    @junk_dir || (respond_to?(:resolve_junk_dir, true) ? resolve_junk_dir : 'junk')
+  end
+
   def collect_source_candidates
     candidates = []
     candidates << @filename if @filename && File.file?(@filename)
-    if @bfilename && File.exist?("junk/#{@bfilename}.fls") && respond_to?(:extract_fls_dependencies, true)
-      candidates.concat(extract_fls_dependencies("junk/#{@bfilename}.fls").select { |f| f.end_with?('.tex') })
+    fls_candidates = [
+      File.join(diagnostics_junk_dir, "#{@bfilename}.fls"),
+      "junk/#{@bfilename}.fls",
+      ".junk/#{@bfilename}.fls"
+    ].uniq
+    fls_file = fls_candidates.find { |f| File.file?(f) }
+    if @bfilename && fls_file && respond_to?(:extract_fls_dependencies, true)
+      candidates.concat(extract_fls_dependencies(fls_file).select { |f| f.end_with?('.tex') })
     end
     candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
     patterns = (@options && @options[:exclude_source_tex]) || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS
@@ -1603,9 +1613,13 @@ module LaTeXDiagnostics
 
   def resolve_target_pdf
     return "#{@bfilename}.pdf" if @bfilename && File.file?("#{@bfilename}.pdf")
-    return "junk/#{@bfilename}.pdf" if @bfilename && File.file?("junk/#{@bfilename}.pdf")
 
-    nil
+    pdf_candidates = [
+      File.join(diagnostics_junk_dir, "#{@bfilename}.pdf"),
+      "junk/#{@bfilename}.pdf",
+      ".junk/#{@bfilename}.pdf"
+    ].uniq
+    pdf_candidates.find { |f| File.file?(f) }
   end
 
   def whatever_diagnostic?(item)

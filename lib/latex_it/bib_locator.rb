@@ -38,8 +38,12 @@ class LaTeXBibLocator
   end
 
   def collect_from_blg
-    blg_path = File.join(@search_dir, 'junk', "#{@bfilename}.blg")
-    return [] unless File.file?(blg_path)
+    candidates = [
+      File.join(@search_dir, '.junk', "#{@bfilename}.blg"),
+      File.join(@search_dir, 'junk', "#{@bfilename}.blg")
+    ]
+    blg_path = candidates.find { |p| File.file?(p) }
+    return [] unless blg_path
 
     found = []
     content = LaTeXUtils.safe_read(blg_path)

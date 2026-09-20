@@ -52,6 +52,7 @@ l --json paper.tex
 | `-e` | `--engine` | `x`,`l`,`p` | `x` (`xelatex`)| Compiler: `x` (`xelatex`), `l` (`lualatex`), `p` (`pdflatex`). |
 | `-c` | `--clean` | flag | `false` | Remove `junk/` artifacts before starting build. |
 | `-C` | `--clean-only` | flag | `false` | Remove `junk/` and root auxiliary files and exit immediately. |
+| *(none)* | `--junk-dir` | string | `junk` | Directory for temporary build artifacts (`junk` or `.junk`). |
 | `-x` | `--explain` | flag | `false` | Print boxed plain-English explanations on first diagnostic occurrence. |
 | `-a` | `--all` | flag | `false` | Display all diagnostics (disables warning folding and whatever suppression). |
 | `-W` | `--werror` | flag | `false` | Treat alerts and warnings as fatal errors (exit code 1). |
@@ -88,6 +89,7 @@ Global file: `~/.config/latex_it/config.jsonc`.
 {
   "engine": "xelatex",               // "xelatex" | "lualatex" | "pdflatex"
   "passes": 3,                       // 1 | 2 | 3
+  "junk_dir": "junk",                // "junk" | ".junk" (build artifact directory)
   "index": false,                    // boolean (makeindex)
   "update_on_diff": false,           // boolean (suppress PDF write if text unchanged)
   "time": false,                     // boolean (timing diagnostics)
@@ -104,7 +106,8 @@ Global file: `~/.config/latex_it/config.jsonc`.
   "suppress_warnings": false,        // boolean (hide standard warnings)
   "suppress_alerts": false,          // boolean (hide structural alerts)
   "bib_dirs": ["refs", "bib"],       // string[] (directories to scan for .bib files)
-  "junk_subdirs": true,              // boolean (mirror project subdirs into junk/)
+  "junk_subdirs": ["figs"],          // string[] (subdirs to pre-create in junk_dir)
+  "auto_mirror_subdirs": true,       // boolean (mirror project subdirs into junk_dir)
   "exclude_main_tex": ["preamble*"], // string[] (globs ignored for main file detection)
   "exclude_source_tex": ["styles/*"] // string[] (globs ignored for brace/syntax audit)
 }

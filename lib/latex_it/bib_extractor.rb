@@ -36,6 +36,10 @@ class LaTeXBibExtractor
 
   private
 
+  def junk_dir
+    @builder.respond_to?(:junk_dir) ? @builder.junk_dir : 'junk'
+  end
+
   def do_extract
     return false unless ensure_build_artifacts!
 
@@ -43,8 +47,8 @@ class LaTeXBibExtractor
     target_abs = File.expand_path(target_name)
     return false unless validate_target_safety!(target_abs)
 
-    FileUtils.mkdir_p('junk')
-    stage_file = File.join('junk', "#{@bfilename}_extract_tmp.bib")
+    FileUtils.mkdir_p(junk_dir)
+    stage_file = File.join(junk_dir, "#{@bfilename}_extract_tmp.bib")
     FileUtils.rm_f(stage_file)
 
     success = is_biblatex? ? extract_biblatex(stage_file) : extract_bibtex(stage_file)
@@ -54,8 +58,8 @@ class LaTeXBibExtractor
   end
 
   def ensure_build_artifacts!
-    aux_path = File.join('junk', "#{@bfilename}.aux")
-    bcf_path = File.join('junk', "#{@bfilename}.bcf")
+    aux_path = File.join(junk_dir, "#{@bfilename}.aux")
+    bcf_path = File.join(junk_dir, "#{@bfilename}.bcf")
     needs_build = @options[:force] || (!File.exist?(aux_path) && !File.exist?(bcf_path))
 
     return true unless needs_build
@@ -65,7 +69,7 @@ class LaTeXBibExtractor
   end
 
   def is_biblatex?
-    bcf_path = File.join('junk', "#{@bfilename}.bcf")
+    bcf_path = File.join(junk_dir, "#{@bfilename}.bcf")
     return false unless File.file?(bcf_path) && File.size(bcf_path).positive?
 
     content = LaTeXUtils.safe_read(bcf_path)
@@ -113,7 +117,7 @@ class LaTeXBibExtractor
     end
 
     env = build_bibinputs_env
-    bcf_base = File.join('junk', @bfilename)
+    bcf_base = File.join(junk_dir, @bfilename)
     cmd = ['biber', '--output-format=bibtex', '-O', stage_file, bcf_base]
     out, stat = Open3.capture2e(env, *cmd)
 
@@ -134,7 +138,7 @@ class LaTeXBibExtractor
       return false
     end
 
-    aux_path = File.join('junk', "#{@bfilename}.aux")
+    aux_path = File.join(junk_dir, "#{@bfilename}.aux")
     unless File.file?(aux_path)
       warn Rainbow("==> Error: Auxiliary file '#{aux_path}' not found.").red.bright
       return false
@@ -204,7 +208,7 @@ class LaTeXBibExtractor
   end
 
   def print_biblatex_hint(target_name)
-    bcf_path = File.join('junk', "#{@bfilename}.bcf")
+    bcf_path = File.join(junk_dir, "#{@bfilename}.bcf")
     return unless File.file?(bcf_path)
 
     bcf_content = LaTeXUtils.safe_read(bcf_path)
@@ -214,7 +218,7 @@ class LaTeXBibExtractor
   end
 
   def print_bibtex_hint(target_name)
-    aux_path = File.join('junk', "#{@bfilename}.aux")
+    aux_path = File.join(junk_dir, "#{@bfilename}.aux")
     return unless File.file?(aux_path)
 
     aux_content = LaTeXUtils.safe_read(aux_path)

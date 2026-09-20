@@ -120,6 +120,7 @@ l -B        # Extract cited references into local .bib file
 | `-u`, `--single-pass` | Run exactly one LaTeX pass without BibTeX or extra passes. |
 | `-c`, `--clean` | Remove temporary build files before compiling. |
 | `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
+| `--junk-dir DIR` | Directory for temporary build artifacts (default: `junk`, or auto-detect `.junk`). |
 | `-x`, `--explain` | Show plain-English explanation boxes for errors and warnings. |
 | `-a`, `--all` | Display all diagnostics, including suppressed minor warnings. |
 | `--update-if-changed` | Only update the target PDF if the text content actually changed. |

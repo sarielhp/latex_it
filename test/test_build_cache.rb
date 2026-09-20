@@ -330,4 +330,34 @@ class TestBuildCache < Minitest::Test
       refute_includes out3, 'Running pass 2'
     end
   end
+
+  def test_build_with_dot_junk_dir
+    Dir.mktmpdir('latex_it_dot_junk_build') do |dir|
+      tex_file = File.join(dir, 'doc.tex')
+      File.write(tex_file, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        Hello Dot Junk
+        \\end{document}
+      TEX
+
+      bin = File.expand_path('../latex_it', __dir__)
+      out, status = Open3.capture2e(bin, '--no-color', '--junk-dir', '.junk', 'doc.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
+      assert File.file?(File.join(dir, 'doc.pdf'))
+      assert File.file?(File.join(dir, '.junk', '.build_state.json')), 'Build state should be saved in .junk/'
+      assert File.file?(File.join(dir, '.junk', 'doc.pdf')), 'Target pdf artifact should be in .junk/'
+      refute File.directory?(File.join(dir, 'junk')), 'Normal junk/ directory should NOT have been created'
+
+      # Second run is up-to-date
+      out2, status2 = Open3.capture2e(bin, '--no-color', '--junk-dir', '.junk', 'doc.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus
+      assert_includes out2, 'up-to-date'
+
+      # Clean with -C removes .junk
+      out3, status3 = Open3.capture2e(bin, '-C', chdir: dir)
+      assert_equal 0, status3.exitstatus
+      refute File.directory?(File.join(dir, '.junk')), 'clean-only must wipe .junk/'
+    end
+  end
 end

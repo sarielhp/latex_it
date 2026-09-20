@@ -254,4 +254,74 @@ class TestLaTeXConfigAndConventions < Minitest::Test
       assert File.file?(File.join(dir, '.gitignore'))
     end
   end
+
+  def test_junk_dir_auto_detection_and_fallback
+    Dir.mktmpdir('latex_it_junk_detect') do |dir|
+      Dir.chdir(dir) do
+        File.write('paper.tex', "\\documentclass{article}\n")
+
+        # 1. Default when neither directory exists
+        builder = LatexBuilder.new('paper.tex', {})
+        assert_equal 'junk', builder.junk_dir
+
+        # 2. Auto-detect .junk when .junk exists and junk does not
+        FileUtils.mkdir_p('.junk')
+        builder_dot = LatexBuilder.new('paper.tex', {})
+        assert_equal '.junk', builder_dot.junk_dir
+
+        # 3. When both exist, prefer junk for backwards compatibility
+        FileUtils.mkdir_p('junk')
+        builder_both = LatexBuilder.new('paper.tex', {})
+        assert_equal 'junk', builder_both.junk_dir
+
+        # 4. Explicit configuration via config_junk_dir overrides auto-detection
+        builder_cfg = LatexBuilder.new('paper.tex', { config_junk_dir: '.junk' })
+        assert_equal '.junk', builder_cfg.junk_dir
+
+        # 5. Explicit CLI option overrides both
+        builder_cli = LatexBuilder.new('paper.tex', { junk_dir: '.custom_build' })
+        assert_equal '.custom_build', builder_cli.junk_dir
+
+        # 6. Normalizes paths with leading ./ and trailing /
+        builder_norm = LatexBuilder.new('paper.tex', { junk_dir: './.junk/' })
+        assert_equal '.junk', builder_norm.junk_dir
+      end
+    end
+  end
+
+  def test_clean_directory_removes_both_junk_and_dot_junk
+    Dir.mktmpdir('latex_it_clean_both') do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p(['junk', '.junk', 'styles/junk', 'styles/.junk'])
+        File.write('junk/temp.aux', 'test')
+        File.write('.junk/temp.aux', 'test')
+        File.write('styles/junk/s.aux', 'test')
+        File.write('styles/.junk/s.aux', 'test')
+
+        LaTeXUtils.clean_directory('.', false)
+
+        refute File.exist?('junk'), 'clean_directory must delete junk/'
+        refute File.exist?('.junk'), 'clean_directory must delete .junk/'
+        refute File.exist?('styles/junk'), 'clean_directory must delete styles/junk/'
+        refute File.exist?('styles/.junk'), 'clean_directory must delete styles/.junk/'
+      end
+    end
+  end
+
+  def test_config_save_junk_dir
+    Dir.mktmpdir('latex_it_save_junk') do |dir|
+      config_file = File.join(dir, '.l.jsonc')
+      options = {
+        config_save: true,
+        explicit_junk_dir: true,
+        junk_dir: '.junk'
+      }
+
+      success = LaTeXConfig.save_cli_options!(options, dir)
+      assert success
+      assert File.file?(config_file)
+      parsed = LaTeXConfig.load_merged_config(dir)
+      assert_equal '.junk', parsed['junk_dir']
+    end
+  end
 end

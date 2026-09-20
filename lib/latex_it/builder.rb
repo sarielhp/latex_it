@@ -23,7 +23,7 @@ require_relative 'brace_checker'
 class LatexBuilder
   include LaTeXDiagnostics
 
-  attr_reader :options, :filename, :bfilename, :bdir, :engine_name
+  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :junk_dir
 
   CACHE_ENV_KEYS = %w[
     LATEXOPTS LATEXOPTIONS TEXINPUTS PDFTEXINPUTS XETEXINPUTS LUATEXINPUTS
@@ -49,10 +49,29 @@ class LatexBuilder
     @filename = "#{@bfilename}.tex"
     @orig_stdout = $stdout
     @engine_name = LaTeXUtils.normalize_engine(@options[:engine] || @options[:config_engine] || 'xelatex')
-    @pdferr = "junk/err_#{@engine_name}"
+    @junk_dir = resolve_junk_dir
+    @pdferr = "#{@junk_dir}/err_#{@engine_name}"
     @biberrbase = 'err_bib'
-    @biberr = "junk/#{@biberrbase}"
+    @biberr = "#{@junk_dir}/#{@biberrbase}"
     @explained_categories = {}
+  end
+
+  def junk_dir
+    @junk_dir ||= resolve_junk_dir
+  end
+
+  def resolve_junk_dir
+    opts = @options || {}
+    configured = (opts[:junk_dir] || opts[:config_junk_dir]).to_s.strip.chomp('/')
+    configured = configured.delete_prefix('./')
+    return configured unless configured.empty?
+
+    check_dir = @bdir && !@bdir.empty? ? File.expand_path(@bdir) : '.'
+    dot_junk = File.join(check_dir, '.junk')
+    reg_junk = File.join(check_dir, 'junk')
+    return '.junk' if File.directory?(dot_junk) && !File.directory?(reg_junk)
+
+    'junk'
   end
 
   def interactive_tty?
@@ -115,7 +134,7 @@ class LatexBuilder
       end
     end
 
-    FileUtils.rm_f('junk/.build_state.json')
+    FileUtils.rm_f(File.join(@junk_dir, '.build_state.json'))
     clean_pass_logs
     junk_dir_create
     snapshot_build_inputs!
@@ -137,9 +156,13 @@ class LatexBuilder
   end
 
   def finalize_build_outputs(total_t0)
-    update_target_file("junk/#{@bfilename}.pdf", "#{@bfilename}.pdf", update_on_diff: @options[:update_on_diff])
-    update_target_file("junk/#{@bfilename}.bbl", "#{@bfilename}.bbl") if LaTeXUtils.bbl_has_entries?("junk/#{@bfilename}.bbl")
-    update_target_file("junk/#{@bfilename}.synctex.gz", "#{@bfilename}.synctex.gz")
+    junk_pdf = File.join(@junk_dir, "#{@bfilename}.pdf")
+    junk_bbl = File.join(@junk_dir, "#{@bfilename}.bbl")
+    junk_synctex = File.join(@junk_dir, "#{@bfilename}.synctex.gz")
+
+    update_target_file(junk_pdf, "#{@bfilename}.pdf", update_on_diff: @options[:update_on_diff])
+    update_target_file(junk_bbl, "#{@bfilename}.bbl") if LaTeXUtils.bbl_has_entries?(junk_bbl)
+    update_target_file(junk_synctex, "#{@bfilename}.synctex.gz")
 
     if @options[:time]
       total_t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -162,7 +185,7 @@ class LatexBuilder
     target_pdf = "#{@bfilename}.pdf"
     return false unless File.exist?(target_pdf) && File.size(target_pdf) > 0
 
-    state_file = 'junk/.build_state.json'
+    state_file = File.join(@junk_dir, '.build_state.json')
     return false unless File.exist?(state_file)
 
     state = JSON.parse(File.read(state_file)) rescue nil
@@ -261,22 +284,22 @@ class LatexBuilder
   end
 
   def needs_index_pass?
-    idx = "junk/#{@bfilename}.idx"
+    idx = File.join(@junk_dir, "#{@bfilename}.idx")
     return false unless File.file?(idx) && File.size(idx) > 0
 
-    Digest::SHA256.file(idx).hexdigest != @last_idx_hash || !File.file?("junk/#{@bfilename}.ind")
+    Digest::SHA256.file(idx).hexdigest != @last_idx_hash || !File.file?(File.join(@junk_dir, "#{@bfilename}.ind"))
   end
 
   def run_index_pass
     puts '' if @options[:trace] || @options[:raw]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
-    idx_file = "junk/#{@bfilename}.idx"
+    idx_file = File.join(@junk_dir, "#{@bfilename}.idx")
     return false unless File.file?(idx_file)
 
     @last_idx_hash = Digest::SHA256.file(idx_file).hexdigest
     cmd = ['makeindex', '-q', "#{@bfilename}.idx"]
-    out, status = Dir.chdir('junk') { capture_pass_output(cmd) }
-    File.write("junk/#{@bfilename}.ilg", out) unless out.empty?
+    out, status = Dir.chdir(@junk_dir) { capture_pass_output(cmd) }
+    File.write(File.join(@junk_dir, "#{@bfilename}.ilg"), out) unless out.empty?
 
     if @options[:time]
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -286,10 +309,10 @@ class LatexBuilder
   end
 
   def index_stale?(state = nil)
-    idx = "junk/#{@bfilename}.idx"
+    idx = File.join(@junk_dir, "#{@bfilename}.idx")
     return false unless File.file?(idx) && File.size(idx) > 0
 
-    ind = "junk/#{@bfilename}.ind"
+    ind = File.join(@junk_dir, "#{@bfilename}.ind")
     return true unless File.file?(ind)
     return Digest::SHA256.file(idx).hexdigest != state['idx_sha'] if state.is_a?(Hash) && state['idx_sha']
 
@@ -297,9 +320,9 @@ class LatexBuilder
   end
 
   def bib_files_newer_than_bbl?
-    fnbbl = "junk/#{@bfilename}.bbl"
+    fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
     return false unless File.exist?(fnbbl) && File.size(fnbbl) > 0
-    return false unless File.exist?("junk/#{@bfilename}.aux") || File.exist?("junk/#{@bfilename}.bcf")
+    return false unless File.exist?(File.join(@junk_dir, "#{@bfilename}.aux")) || File.exist?(File.join(@junk_dir, "#{@bfilename}.bcf"))
 
     bbl_mtime = File.mtime(fnbbl)
     discover_bib_files.any? { |b| File.mtime(b) > bbl_mtime }
@@ -320,7 +343,7 @@ class LatexBuilder
       abs = File.expand_path(path)
       if abs.start_with?(root_abs) && File.file?(abs)
         rel = abs.sub(%r{\A#{Regexp.escape(root_abs)}/?}, '')
-        next if rel.start_with?('junk/') || rel.empty?
+        next if rel.start_with?("#{@junk_dir}/") || rel.start_with?('junk/') || rel.start_with?('.junk/') || rel.empty?
 
         deps << rel
       end
@@ -333,25 +356,27 @@ class LatexBuilder
     @build_start_time = Time.now
     @input_snapshots = {}
     files = [@filename] + Dir['*.tex'].select { |f| File.file?(f) } + discover_bib_files
-    files.concat(extract_fls_dependencies("junk/#{@bfilename}.fls")) if File.exist?("junk/#{@bfilename}.fls")
+    fls_file = File.join(@junk_dir, "#{@bfilename}.fls")
+    files.concat(extract_fls_dependencies(fls_file)) if File.exist?(fls_file)
     files.uniq.each do |f|
       next unless File.file?(f)
 
       @input_snapshots[f] = { mtime: File.mtime(f).to_f, sha: (Digest::SHA256.file(f).hexdigest rescue nil) }
     end
-    state = JSON.parse(File.read('junk/.build_state.json')) rescue nil
+    state = JSON.parse(File.read(File.join(@junk_dir, '.build_state.json'))) rescue nil
     @last_bib_citations ||= state['citations'] if state.is_a?(Hash) && state['citations'].is_a?(Array)
   end
 
   def save_build_state!
     return if @cacheable_build == false
-    return unless File.exist?("junk/#{@bfilename}.pdf") && File.size("junk/#{@bfilename}.pdf") > 0
+    pdf_file = File.join(@junk_dir, "#{@bfilename}.pdf")
+    return unless File.exist?(pdf_file) && File.size(pdf_file) > 0
 
     deps = collect_active_dependencies
     sources, tainted = inspect_source_snapshots(deps)
 
     if tainted
-      FileUtils.rm_f('junk/.build_state.json')
+      FileUtils.rm_f(File.join(@junk_dir, '.build_state.json'))
       puts "      #{Rainbow('Note: Source files modified during compilation; re-run required.').yellow}" unless @options[:score]
       return
     end
@@ -364,15 +389,16 @@ class LatexBuilder
       'sources' => sources,
       'citations' => current_citation_keys
     }
-    state['idx_sha'] = Digest::SHA256.file("junk/#{@bfilename}.idx").hexdigest if File.file?("junk/#{@bfilename}.idx")
+    idx_file = File.join(@junk_dir, "#{@bfilename}.idx")
+    state['idx_sha'] = Digest::SHA256.file(idx_file).hexdigest if File.file?(idx_file)
 
-    File.write('junk/.build_state.json', JSON.generate(state))
+    File.write(File.join(@junk_dir, '.build_state.json'), JSON.generate(state))
   rescue StandardError => e
     warn "Warning: Could not save build state: #{e.message}" if @options[:verbose]
   end
 
   def collect_active_dependencies
-    fls_path = "junk/#{@bfilename}.fls"
+    fls_path = File.join(@junk_dir, "#{@bfilename}.fls")
     deps = extract_fls_dependencies(fls_path)
     deps << @filename if File.exist?(@filename)
     discover_bib_files.each { |b| deps << b }
@@ -426,13 +452,15 @@ class LatexBuilder
 
   def export_dependencies
     deps = []
-    if File.exist?('junk/.build_state.json')
-      state = JSON.parse(File.read('junk/.build_state.json')) rescue nil
+    state_file = File.join(@junk_dir, '.build_state.json')
+    if File.exist?(state_file)
+      state = JSON.parse(File.read(state_file)) rescue nil
       deps = state['sources'].keys if state.is_a?(Hash) && state['sources'].is_a?(Hash)
     end
 
-    if deps.empty? && File.exist?("junk/#{@bfilename}.fls")
-      deps = extract_fls_dependencies("junk/#{@bfilename}.fls")
+    fls_file = File.join(@junk_dir, "#{@bfilename}.fls")
+    if deps.empty? && File.exist?(fls_file)
+      deps = extract_fls_dependencies(fls_file)
     end
 
     if deps.empty?
@@ -440,7 +468,7 @@ class LatexBuilder
         setup_environment
         junk_dir_create
         run_latex_pass('_1')
-        deps = extract_fls_dependencies("junk/#{@bfilename}.fls")
+        deps = extract_fls_dependencies(fls_file)
       end
     end
 
@@ -522,10 +550,11 @@ class LatexBuilder
     @engine_name = resolve_engine
     LaTeXUtils.check_program(@engine_name)
 
-    @latex_flags = %w[-interaction=nonstopmode -synctex=1 -no-mktex=tfm -recorder -output-directory=junk -file-line-error]
-    @pdferr = "junk/err_#{@engine_name}"
-    @biberr = 'junk/err_bib'
-    @log, @loga = 'junk/log.txt', 'junk/log.txt.1'
+    @latex_flags = %w[-interaction=nonstopmode -synctex=1 -no-mktex=tfm -recorder] +
+                   ["-output-directory=#{@junk_dir}", '-file-line-error']
+    @pdferr = "#{@junk_dir}/err_#{@engine_name}"
+    @biberr = "#{@junk_dir}/err_bib"
+    @log, @loga = "#{@junk_dir}/log.txt", "#{@junk_dir}/log.txt.1"
   end
 
   def resolve_engine
@@ -549,18 +578,20 @@ class LatexBuilder
   end
 
   def junk_dir_create
-    FileUtils.mkdir_p('junk/junk')
-    target_subdirs = @options[:junk_subdirs] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS
-    target_subdirs.each { |dir| FileUtils.mkdir_p(File.join('junk', dir)) }
-    mirror_project_subdirs_to_junk if @options[:auto_mirror_subdirs] != false
+    dir = junk_dir
+    FileUtils.mkdir_p(File.join(dir, dir))
+    target_subdirs = (@options && @options[:junk_subdirs]) || LaTeXUtils::DEFAULT_JUNK_SUBDIRS
+    target_subdirs.each { |d| FileUtils.mkdir_p(File.join(dir, d)) }
+    mirror_project_subdirs_to_junk if @options.nil? || @options[:auto_mirror_subdirs] != false
   end
 
   def mirror_project_subdirs_to_junk
+    dir = junk_dir
     Dir.glob('*/').each do |d|
       clean_dir = d.chomp('/')
-      next if clean_dir.start_with?('junk', '.', 'backup')
+      next if clean_dir == dir || clean_dir.start_with?('junk', '.', 'backup')
 
-      FileUtils.mkdir_p(File.join('junk', clean_dir))
+      FileUtils.mkdir_p(File.join(dir, clean_dir))
     end
   end
 
@@ -569,9 +600,10 @@ class LatexBuilder
   end
 
   def paper_cleanup
-    if File.exist?("#{@bfilename}.aux") && !File.exist?("junk/#{@bfilename}.aux")
-      FileUtils.mkdir_p('junk')
-      FileUtils.cp("#{@bfilename}.aux", "junk/#{@bfilename}.aux", preserve: true)
+    aux_path = File.join(@junk_dir, "#{@bfilename}.aux")
+    if File.exist?("#{@bfilename}.aux") && !File.exist?(aux_path)
+      FileUtils.mkdir_p(@junk_dir)
+      FileUtils.cp("#{@bfilename}.aux", aux_path, preserve: true)
     end
 
     sync_bbl_before_compile
@@ -589,9 +621,9 @@ class LatexBuilder
 
   def sync_bbl_before_compile
     root_bbl = "#{@bfilename}.bbl"
-    junk_bbl = "junk/#{root_bbl}"
+    junk_bbl = File.join(@junk_dir, root_bbl)
     if File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
-      FileUtils.mkdir_p('junk')
+      FileUtils.mkdir_p(@junk_dir)
       if !File.exist?(junk_bbl) || File.mtime(root_bbl) > File.mtime(junk_bbl)
         FileUtils.cp(root_bbl, junk_bbl, preserve: true)
       end
@@ -601,7 +633,7 @@ class LatexBuilder
   end
 
   def sync_bbl_to_root
-    junk_bbl = "junk/#{@bfilename}.bbl"
+    junk_bbl = File.join(@junk_dir, "#{@bfilename}.bbl")
     root_bbl = "#{@bfilename}.bbl"
     return unless File.exist?(junk_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
 
@@ -763,7 +795,7 @@ class LatexBuilder
     return :biber if biber_detected
 
     if aux_contents.nil?
-      aux_files = Dir.glob('junk/**/*.aux')
+      aux_files = Dir.glob(File.join(@junk_dir, '**/*.aux'))
       return (@options[:bib] == true ? :bibtex : nil) if aux_files.empty?
 
       aux_contents = aux_files.map { |f| LaTeXUtils.safe_read(f) }.join("\n")
@@ -775,12 +807,13 @@ class LatexBuilder
   end
 
   def detect_biber_control_file
-    if File.exist?("junk/#{@bfilename}.bcf")
-      bcf_content = LaTeXUtils.safe_read("junk/#{@bfilename}.bcf")
+    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
+    if File.exist?(bcf_path)
+      bcf_content = LaTeXUtils.safe_read(bcf_path)
       return true if bcf_content.include?('<bcf:citekey') || @options[:bib] == true
     end
 
-    run_xml_path = "junk/#{@bfilename}.run.xml"
+    run_xml_path = File.join(@junk_dir, "#{@bfilename}.run.xml")
     if File.exist?(run_xml_path)
       run_xml_content = LaTeXUtils.safe_read(run_xml_path)
       return true if run_xml_content =~ /biber/i && (run_xml_content =~ /active="1"/ || @options[:bib] == true)
@@ -799,7 +832,7 @@ class LatexBuilder
   def detect_biber_aux(aux_contents)
     return false unless aux_contents.include?('\abx@aux@bcf')
 
-    bcf_path = "junk/#{@bfilename}.bcf"
+    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
     if File.exist?(bcf_path)
       bcf_content = LaTeXUtils.safe_read(bcf_path)
       bcf_content.include?('<bcf:citekey') || @options[:bib] == true
@@ -814,7 +847,7 @@ class LatexBuilder
     return false unless has_bibdata && needs_bib
     return true if @options[:bib] == true
 
-    has_bbl = LaTeXUtils.bbl_has_entries?("junk/#{@bfilename}.bbl") || LaTeXUtils.bbl_has_entries?("#{@bfilename}.bbl")
+    has_bbl = LaTeXUtils.bbl_has_entries?(File.join(@junk_dir, "#{@bfilename}.bbl")) || LaTeXUtils.bbl_has_entries?("#{@bfilename}.bbl")
     return false if has_bbl && !bib_files_exist_for_bibdata?(aux_contents)
 
     true
@@ -836,7 +869,7 @@ class LatexBuilder
   def run_bib_pass(tool, aux_contents = nil)
     puts '' if @options[:trace] || @options[:raw]
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
-    fnbbl = "junk/#{@bfilename}.bbl"
+    fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
     root_bbl = "#{@bfilename}.bbl"
     previous = bibliography_source(root_bbl, fnbbl)
     preserve_bibliography_backup(previous, root_bbl)
@@ -893,7 +926,7 @@ class LatexBuilder
 
     backup = "#{root_bbl}.bak"
     FileUtils.cp(previous, backup)
-    FileUtils.cp(previous, "junk/#{File.basename(backup)}")
+    FileUtils.cp(previous, File.join(@junk_dir, File.basename(backup)))
   end
 
   def restore_bibliography(junk_bbl, previous)
@@ -912,7 +945,7 @@ class LatexBuilder
   end
 
   def extract_bcf_bib_files
-    bcf_path = "junk/#{@bfilename}.bcf"
+    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
     return [] unless File.exist?(bcf_path)
 
     files = []
@@ -924,7 +957,7 @@ class LatexBuilder
 
   def extract_aux_bib_files(aux_contents = nil)
     files = []
-    sources = aux_contents ? [aux_contents] : Dir.glob('junk/**/*.aux').map { |aux| LaTeXUtils.safe_read(aux) }
+    sources = aux_contents ? [aux_contents] : Dir.glob(File.join(@junk_dir, '**/*.aux')).map { |aux| LaTeXUtils.safe_read(aux) }
     sources.each do |content|
       content.scan(/\\bibdata\{([^}]+)\}/) { |m| collect_bib_candidates(m.first, files) }
     end
@@ -943,31 +976,34 @@ class LatexBuilder
   end
 
   def execute_bibliography(tool)
-    discover_bib_files.each { |b| FileUtils.cp(b, 'junk/') }
+    discover_bib_files.each { |b| FileUtils.cp(b, File.join(@junk_dir, '')) }
     cmd = if tool == :biber
             ['biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename]
           else
             copy_style_files_for_bibtex
             ['bibtex', @bfilename]
           end
-    Dir.chdir('junk') { capture_pass_output(cmd) }
+    Dir.chdir(@junk_dir) { capture_pass_output(cmd) }
   end
 
   def copy_style_files_for_bibtex
     return unless File.directory?('styles')
 
-    FileUtils.mkdir_p('junk/styles')
-    Dir['styles/*'].each { |s| FileUtils.cp_r(s, 'junk/styles/') unless File.basename(s) == 'junk' }
+    FileUtils.mkdir_p(File.join(@junk_dir, 'styles'))
+    Dir['styles/*'].each do |s|
+      base = File.basename(s)
+      FileUtils.cp_r(s, File.join(@junk_dir, 'styles/')) unless base == @junk_dir || base == 'junk' || base == '.junk'
+    end
   end
 
   def compute_aux_hash
-    aux_files = Dir.glob('junk/**/*.aux').sort
+    aux_files = Dir.glob(File.join(@junk_dir, '**/*.aux')).sort
     aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
   end
 
   def current_citation_keys(aux_contents = nil)
     aux_str = aux_contents || compute_aux_hash
-    bcf_path = "junk/#{@bfilename}.bcf"
+    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
     bcf = File.file?(bcf_path) ? LaTeXUtils.safe_read(bcf_path) : nil
     LaTeXUtils.extract_citation_keys(aux_str, bcf)
   end
@@ -976,7 +1012,7 @@ class LatexBuilder
     return false if @options[:bib] == false
     return true if @options[:bib] == true
 
-    fnbbl = "junk/#{@bfilename}.bbl"
+    fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
     return true unless File.exist?(fnbbl)
 
     bbl_mtime = File.mtime(fnbbl)
@@ -1027,8 +1063,9 @@ class LatexBuilder
 
   def collect_brace_check_candidates
     candidates = []
-    if File.exist?("junk/#{@bfilename}.fls")
-      candidates.concat(extract_fls_dependencies("junk/#{@bfilename}.fls").select { |f| f.end_with?('.tex') })
+    fls_file = File.join(@junk_dir, "#{@bfilename}.fls")
+    if File.exist?(fls_file)
+      candidates.concat(extract_fls_dependencies(fls_file).select { |f| f.end_with?('.tex') })
     end
     candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
     patterns = @options[:exclude_source_tex] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS

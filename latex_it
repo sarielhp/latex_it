@@ -236,6 +236,9 @@ module LatexCLI
       bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
       auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
       junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
+      junk_dir: nil,
+      config_junk_dir: cfg['junk_dir'],
+      explicit_junk_dir: false,
       bib_extract: false, bib_extract_name: nil,
       compile: cfg['compile'] == true, llm: cfg['llm'] == true, json: cfg['json'] == true,
       raw: cfg['raw'] == true, link: cfg['links'],
@@ -353,6 +356,10 @@ module LatexCLI
     opts.separator '  Output Management & Cleaning:'
     opts.on('-c', '--clean', 'Clean temporary build files in junk/ (.aux, .bbl, .log) before compilation') { options[:clean] = true }
     opts.on('-C', '--clean-only', 'Clean auxiliary files in directory and exit without building') { options[:clean_only] = true }
+    opts.on('--junk-dir DIR', 'Directory for temporary build artifacts (default: junk or .junk)') do |v|
+      options[:junk_dir] = v
+      options[:explicit_junk_dir] = true
+    end
     opts.on('--update-if-changed', 'Only replace target PDF if extracted text changed (prevents viewer reloads)') do
       options[:update_on_diff] = true
       options[:explicit_update_on_diff] = true

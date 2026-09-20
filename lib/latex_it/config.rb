@@ -117,6 +117,9 @@ module LaTeXConfig
       // Directories searched for bibliography (.bib) files (in addition to root)
       "bib_dirs": ["refs", "bib", "bibliography"],
 
+      // Build artifact directory: "junk" (default) or ".junk"
+      "junk_dir": "junk",
+
       // Automatically mirror project subdirectories into junk/ for nested inputs
       "auto_mirror_subdirs": true,
 
@@ -406,6 +409,7 @@ module LaTeXConfig
     [:explicit_emacs, 'emacs', ->(opts) { opts[:emacs] }],
     [:explicit_help_style, 'help_style', ->(opts) { opts[:help_style] }],
     [:theme_arg, 'theme', ->(opts) { opts[:theme_arg] }],
+    [:explicit_junk_dir, 'junk_dir', ->(opts) { opts[:junk_dir] }],
     [:explicit_styles_inject, 'styles_inject', ->(opts) { opts[:inject_styles] }]
   ].freeze
 

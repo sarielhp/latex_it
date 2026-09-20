@@ -30,8 +30,12 @@ class LatexPackager
 
   private
 
+  def junk_dir
+    @builder.respond_to?(:junk_dir) ? @builder.junk_dir : 'junk'
+  end
+
   def do_package
-    fls_path = "junk/#{@bfilename}.fls"
+    fls_path = File.join(junk_dir, "#{@bfilename}.fls")
     unless File.exist?(fls_path)
       puts "==> Compiling #{@filename} to collect dependencies for zip..."
       return false unless @builder.run_in_current_directory!
@@ -65,7 +69,7 @@ class LatexPackager
       next unless line.start_with?('INPUT ')
 
       path = line.sub(/^INPUT\s+/, '').strip
-      next if path.empty? || path.start_with?('junk/') || system_texmf_file?(path)
+      next if path.empty? || path.start_with?("#{junk_dir}/") || path.start_with?('junk/') || path.start_with?('.junk/') || system_texmf_file?(path)
 
       clean_path = normalize_dep_path(path)
       next if clean_path == @filename || clean_path == "#{@bfilename}.pdf"
@@ -130,14 +134,20 @@ class LatexPackager
 
   def scan_bib_from_logs_and_aux
     candidates = []
-    blg_file = "junk/#{@bfilename}.blg"
-    if File.file?(blg_file)
+    blg_candidates = [
+      File.join(junk_dir, "#{@bfilename}.blg"),
+      "junk/#{@bfilename}.blg",
+      ".junk/#{@bfilename}.blg"
+    ].uniq
+    blg_file = blg_candidates.find { |f| File.file?(f) }
+    if blg_file
       blg_content = LaTeXUtils.safe_read(blg_file)
       blg_content.scan(/(?:Found BibTeX data source|Looking for bibtex file)\s+'([^']+)'/) { |m| candidates << m[0] }
       blg_content.scan(/Database file #\d+:\s*([^\s]+)/) { |m| candidates << m[0] }
     end
 
-    Dir.glob('junk/**/*.aux').each do |f|
+    aux_dirs = [junk_dir, 'junk', '.junk'].uniq
+    Dir.glob("{#{aux_dirs.join(',')}}/**/*.aux").uniq.each do |f|
       LaTeXUtils.safe_read(f).scan(/\\bibdata\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.each do |stem|
         cand = "#{stem.strip}.bib"
         candidates << cand if File.file?(cand)
@@ -150,8 +160,13 @@ class LatexPackager
     candidates = Dir.glob('*.bib') + Dir.glob('{refs,bib,bibliography}/**/*.bib')
     candidates.concat(scan_bib_from_logs_and_aux)
 
-    bcf_file = "junk/#{@bfilename}.bcf"
-    if File.file?(bcf_file)
+    bcf_candidates = [
+      File.join(junk_dir, "#{@bfilename}.bcf"),
+      "junk/#{@bfilename}.bcf",
+      ".junk/#{@bfilename}.bcf"
+    ].uniq
+    bcf_file = bcf_candidates.find { |f| File.file?(f) }
+    if bcf_file
       LaTeXUtils.safe_read(bcf_file).scan(/<bcf:datasource[^>]*>([^<]+)<\/bcf:datasource>/).flatten.each do |ds|
         candidates << ds if File.file?(ds)
       end
@@ -162,7 +177,7 @@ class LatexPackager
       expanded = File.expand_path(p)
       File.file?(p) && (expanded.start_with?(cwd + '/') || expanded == cwd || !p.start_with?('/'))
     end.reject do |p|
-      p =~ %r{(^|/)(junk|bak|old|archive)/} || p.end_with?('.bak', '~')
+      p =~ %r{(^|/)(junk|\.junk|bak|old|archive)/} || p.end_with?('.bak', '~')
     end
   end
 
@@ -233,11 +248,13 @@ class LatexPackager
   end
 
   def copy_target_outputs(stage_dir)
-    pdf_source = File.file?("#{@bfilename}.pdf") ? "#{@bfilename}.pdf" : "junk/#{@bfilename}.pdf"
-    FileUtils.cp(pdf_source, File.join(stage_dir, "#{@bfilename}.pdf")) if File.file?(pdf_source)
+    pdf_candidates = ["#{@bfilename}.pdf", File.join(junk_dir, "#{@bfilename}.pdf"), "junk/#{@bfilename}.pdf", ".junk/#{@bfilename}.pdf"].uniq
+    pdf_source = pdf_candidates.find { |f| File.file?(f) }
+    FileUtils.cp(pdf_source, File.join(stage_dir, "#{@bfilename}.pdf")) if pdf_source
 
-    bbl_source = File.file?("#{@bfilename}.bbl") ? "#{@bfilename}.bbl" : "junk/#{@bfilename}.bbl"
-    if File.file?(bbl_source) && LaTeXUtils.bbl_has_entries?(bbl_source)
+    bbl_candidates = ["#{@bfilename}.bbl", File.join(junk_dir, "#{@bfilename}.bbl"), "junk/#{@bfilename}.bbl", ".junk/#{@bfilename}.bbl"].uniq
+    bbl_source = bbl_candidates.find { |f| File.file?(f) }
+    if bbl_source && LaTeXUtils.bbl_has_entries?(bbl_source)
       FileUtils.cp(bbl_source, File.join(stage_dir, "#{@bfilename}.bbl"))
     end
   end

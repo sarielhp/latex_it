@@ -3,7 +3,11 @@
 
 target = '/home/sariel/prog/standards/workflow/bin/review_cycle'
 if File.exist?(target)
-  exec(target, *ARGV)
+  if __FILE__ == $PROGRAM_NAME
+    exec(target, *ARGV)
+  else
+    load target
+  end
 else
   warn "Review cycle standard not installed at #{target}"
   exit 0

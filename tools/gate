@@ -14,7 +14,7 @@ module QualityGate
     test_log_recognisers.rb test_deep_diagnostics.rb test_diagnostic_formatting.rb
     test_repair_failures.rb test_config.rb test_color_theme.rb
     test_author_verification.rb test_visual_verification.rb test_compatibility.rb
-    test_arxiv_worker.rb test_arxiv_fixups.rb test_sample_arxiv.rb
+    test_arxiv_worker.rb test_arxiv_fixups.rb test_sample_arxiv.rb test_bump.rb
   ].freeze
   MEDIUM_TESTS = %w[
     test_compile_mode.rb

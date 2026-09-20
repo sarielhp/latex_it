@@ -1174,8 +1174,7 @@ class TestLatexItCLI < Minitest::Test
       end
 
       plain = strip_ansi(out)
-      assert_includes plain, '(1 alert)'
-      assert_includes plain, '(1 warning)'
+      assert_includes plain, '(1 alert, 1 warning)'
       assert_includes plain, '35.00pt too wide'
       assert_includes plain, '10.00pt too wide'
       assert_includes plain, 'Errors: 0'
@@ -2004,6 +2003,55 @@ class TestLatexItCLI < Minitest::Test
         refute_includes output, 'Traceback'
         refute_includes output, 'from /'
       end
+    end
+  end
+
+  def test_group_diagnostics_by_file_with_ordered_tiers
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        (./chap1.tex
+        Overfull \\hbox (10.0pt too wide) in paragraph at lines 150--152
+        Overfull \\hbox (40.0pt too wide) in paragraph at lines 20--25
+        Overfull \\hbox (60.0pt too wide) in paragraph at lines 80--85
+        LaTeX Warning: Reference `sec:foo` undefined on page 1.
+        )
+        (./chap2.tex
+        Overfull \\hbox (5.0pt too wide) in paragraph at lines 30--32
+        )
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      builder = LatexBuilder.new('main.tex', {})
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+
+      plain = strip_ansi(out)
+
+      # Chap1 has 2 alerts (40pt, 60pt) and 2 warnings (10pt, ref undefined)
+      assert_includes plain, '── chap1.tex (2 alerts, 2 warnings) ──'
+      assert_equal 1, plain.scan(/── chap1\.tex/).size
+
+      # Chap2 has only 1 warning (5pt)
+      assert_includes plain, '── chap2.tex (1 warning) ──'
+      assert_equal 1, plain.scan(/── chap2\.tex/).size
+
+      # In chap1: alerts must come first (sorted by lines 20 then 80), then warnings (sorted by lines)
+      chap1_block = plain.split('── chap2.tex').first
+      alert20_pos = chap1_block.index('40.00pt too wide')
+      alert80_pos = chap1_block.index('60.00pt too wide')
+      warn10_pos = chap1_block.index('10.00pt too wide')
+      warn_ref_pos = chap1_block.index("undefined reference 'sec:foo'")
+
+      assert alert20_pos < alert80_pos, 'Alert on line 20 should come before alert on line 80'
+      assert alert80_pos < warn10_pos, 'All alerts should come before warnings'
     end
   end
 end

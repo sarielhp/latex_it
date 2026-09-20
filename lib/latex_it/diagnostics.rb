@@ -970,10 +970,13 @@ module LaTeXDiagnostics
     underfull_box?(item) && !underfull_vbox?(item)
   end
 
+  TIER_RANK = { 'errors' => 0, 'alerts' => 1, 'warnings' => 2, 'whatevers' => 3 }.freeze
+
   def diagnostic_item_sort_key(item)
     idx = item[:index] || 0
     target = item[:companion_to] ? format_display_path(item[:companion_to]) : format_display_path(item[:file])
     rank = item[:companion_to] ? 1 : 0
+    t_rank = TIER_RANK[tier_label_for(item)] || 2
     line_num = if item[:line].is_a?(Integer) && item[:line].positive?
                  item[:line]
                elsif item[:line_str].to_s =~ /\A(\d+)/
@@ -981,7 +984,7 @@ module LaTeXDiagnostics
                else
                  item[:line] || 0
                end
-    [target, rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, line_num, idx]
+    [target, rank, t_rank, format_display_path(item[:file]), idx.negative? ? 0 : 1, line_num, idx]
   end
 
   def sort_diagnostic_items(warnings, errors)
@@ -992,7 +995,7 @@ module LaTeXDiagnostics
     [all_sorted, total_warn_count, errors.size]
   end
 
-  def print_diagnostics_body(warnings, errors, fallback_lines: [], tier_label: nil, io: $stdout)
+  def print_diagnostics_body(warnings, errors = [], fallback_lines: [], tier_label: nil, io: $stdout)
     all_sorted, num_warnings, num_errors = sort_diagnostic_items(warnings, errors)
     max_width = all_sorted.map { |item| item[:line_str].to_s.length }.max || 0
 
@@ -1007,28 +1010,27 @@ module LaTeXDiagnostics
   end
 
   def count_items_by_header(all_sorted, tier_label)
-    counts = Hash.new(0)
+    counts = Hash.new { |h, k| h[k] = Hash.new(0) }
     all_sorted.each do |item|
       f = format_display_path(item[:file])
       lbl = tier_label_for(item, tier_label)
-      counts[[f, lbl]] += (item[:count] || 1)
+      counts[f][lbl] += (item[:count] || 1)
     end
     counts
   end
 
   def render_diagnostic_entry(item, max_width, current_header, tier_label = nil, header_counts = nil, io: $stdout)
     item_file = format_display_path(item[:file])
-    lbl = tier_label_for(item, tier_label)
-    header_key = @options[:emacs] ? item_file : [item_file, lbl]
+    header_key = item_file
 
     if header_key != current_header
       if @options[:emacs]
         io.puts ')' if current_header
         io.puts "(#{item_file}"
       else
-        count = header_counts ? header_counts[header_key] : 1
+        counts = header_counts ? header_counts[header_key] : { tier_label_for(item, tier_label) => 1 }
         io.puts ''
-        io.puts format_file_separator(item_file, lbl, count)
+        io.puts format_file_separator(item_file, counts)
       end
       current_header = header_key
     end
@@ -1126,7 +1128,7 @@ module LaTeXDiagnostics
       .flat_map { |tier, items| (items || []).map { |it| normalize_diagnostic(it, tier) } }
   end
 
-  def tier_label_for(item, tier_label)
+  def tier_label_for(item, tier_label = nil)
     return tier_label if tier_label
     return item[:tier] if item[:tier]
     return 'errors' if item[:err_block]
@@ -1136,19 +1138,46 @@ module LaTeXDiagnostics
     'warnings'
   end
 
-  def format_file_separator(item_file, tier_label, count)
-    count_str = format_tier_count_label(count, tier_label)
-    uncolored_prefix = "── #{item_file} (#{count_str}) "
+  TIER_SEVERITY_ORDER = %w[errors alerts warnings whatevers].freeze
+
+  def format_file_separator(item_file, tier_or_counts, count = nil)
+    counts = if tier_or_counts.is_a?(Hash)
+               tier_or_counts
+             else
+               { tier_or_counts.to_s => (count || 1) }
+             end
+
+    top_tier = TIER_SEVERITY_ORDER.find { |t| counts[t]&.positive? } || 'warnings'
+    color = tier_color(top_tier)
+
+    label_parts = []
+    uncolored_parts = []
+    TIER_SEVERITY_ORDER.each do |tier|
+      cnt = counts[tier]
+      next unless cnt && cnt.positive?
+
+      str = format_tier_count_label(cnt, tier)
+      uncolored_parts << str
+      label_parts << Rainbow(str).send(tier_color(tier)).bright
+    end
+
+    uncolored_label = uncolored_parts.empty? ? '1 diagnostic' : uncolored_parts.join(', ')
+    uncolored_prefix = "── #{item_file} (#{uncolored_label}) "
     cols = terminal_columns
     dash_count = [cols - uncolored_prefix.length, 3].max
     dashes = '─' * dash_count
 
-    color = tier_color(tier_label)
+    return "── #{item_file} (#{uncolored_label}) #{dashes}" if @options && @options[:color] == false
+
     lead = Rainbow('── ').send(color).bright
     disp_file = Rainbow(item_file).bold
     linked_file = format_file_banner_link(item_file, disp_file)
-    count_part = Rainbow(" (#{count_str}) ").send(color).bright
+
+    sep = Rainbow(', ').send(color).bright
+    inner_label = label_parts.join(sep)
+    count_part = Rainbow(' (').send(color).bright + inner_label + Rainbow(') ').send(color).bright
     tail = Rainbow(dashes).send(color).bright
+
     "#{lead}#{linked_file}#{count_part}#{tail}"
   end
 
@@ -1785,13 +1814,14 @@ module LaTeXDiagnostics
 
     fallback = errors.empty? ? content.lines.last(15) : []
     displayed_errors, cascade_info = throttle_errors(errors)
-    _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)
-    print_cascade_notice(cascade_info, io: io) if cascade_info
     if @options[:emacs] || @options[:all]
       raw_warns = extract_warnings(content, false)
       alert_items, regular_warns, whatever_items = partition_diagnostics(content, raw_warns)
-      render_non_error_tiers(alert_items, regular_warns, whatever_items, io: io)
+      render_grouped_tiers(displayed_errors, alert_items, regular_warns, whatever_items, fallback_lines: fallback, io: io)
+    else
+      _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, fallback_lines: fallback, tier_label: 'errors', io: io)
     end
+    print_cascade_notice(cascade_info, io: io) if cascade_info
 
     if @options[:verbose] || fallback.any? || errors.empty?
       io.puts "See #{loga} for full error details."
@@ -2010,35 +2040,49 @@ module LaTeXDiagnostics
     if errors > 0 || !err_items.empty?
       prepared_errors = prepare_error_items(err_items)
       displayed_errors, cascade_info = throttle_errors(prepared_errors)
-      _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
+      if @options[:emacs] || @options[:all]
+        render_grouped_tiers(displayed_errors, alert_items, reg_warns, what_items, io: $stdout)
+      else
+        _num_warnings, _num_errors = print_diagnostics_body([], displayed_errors, tier_label: 'errors')
+      end
       print_cascade_notice(cascade_info, io: $stdout) if cascade_info
-      render_non_error_tiers(alert_items, reg_warns, what_items) if @options[:emacs] || @options[:all]
       [prepared_errors.size, errors].max
     else
-      render_non_error_tiers(alert_items, reg_warns, what_items)
+      render_grouped_tiers([], alert_items, reg_warns, what_items, io: $stdout)
       errors
     end
   end
 
   def render_non_error_tiers(alert_items, reg_warns, what_items, io: $stdout)
+    render_grouped_tiers([], alert_items, reg_warns, what_items, io: io)
+  end
+
+  def render_grouped_tiers(error_items, alert_items, reg_warns, what_items, fallback_lines: [], io: $stdout)
     suppress_alerts = @options[:suppress_alerts] == true
     suppress_warnings = @options[:suppress_warnings] == true
     suppress_whatevers = @options[:suppress_whatevers] != false
 
-    print_diagnostics_body([], alert_items, tier_label: 'alerts', io: io) if !suppress_alerts && !alert_items.empty?
-    print_diagnostics_body(reg_warns, [], tier_label: 'warnings', io: io) if !suppress_warnings && !reg_warns.empty?
-    render_whatevers_tier(what_items, io: io) if !suppress_whatevers && !what_items.empty?
-  end
-
-  def render_whatevers_tier(what_items, io: $stdout)
-    formatted = what_items.map do |wh|
-      wh_copy = wh.dup
-      wh_copy[:base_color] = :cyan
-      wh_copy[:tier] = 'whatevers'
-      wh_copy[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan, file: wh[:file])
-      wh_copy
+    items_to_display = []
+    error_items.each { |e| (it = e.dup)[:tier] = 'errors'; it[:base_color] ||= :red; items_to_display << it }
+    unless suppress_alerts
+      alert_items.each { |a| (it = a.dup)[:tier] = 'alerts'; it[:base_color] ||= :red; items_to_display << it }
     end
-    print_diagnostics_body(formatted, [], tier_label: 'whatevers', io: io)
+    unless suppress_warnings
+      reg_warns.each { |w| (it = w.dup)[:tier] = 'warnings'; w[:base_color] ||= :yellow; items_to_display << it }
+    end
+    unless suppress_whatevers
+      what_items.each do |wh|
+        it = wh.dup
+        it[:base_color] = :cyan
+        it[:tier] = 'whatevers'
+        it[:formatted] = format_diagnostic_line(wh[:line_str], wh[:text], :cyan, file: wh[:file])
+        items_to_display << it
+      end
+    end
+
+    return if items_to_display.empty? && fallback_lines.empty?
+
+    print_diagnostics_body(items_to_display, [], fallback_lines: fallback_lines, io: io)
   end
 
   def summarize_and_check_werror(errors, alerts, warnings, whatevers)

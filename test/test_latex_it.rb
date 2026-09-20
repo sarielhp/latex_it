@@ -1294,6 +1294,61 @@ class TestLatexItCLI < Minitest::Test
     end
   end
 
+  def test_boxed_explanation_for_underfull_line
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        Underfull \\hbox (badness 10000) in paragraph at lines 256--256
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      builder = LatexBuilder.new('main.tex', explain: true)
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+
+      plain = strip_ansi(out)
+      assert_includes plain, '256: Note: underfull \hbox (badness 10000)'
+      assert_includes plain, 'Diagnostic Explanation: Note: Underfull \hbox (Loose Line)'
+      assert_includes plain, 'TeX stretched inter-word spacing excessively'
+      assert_includes plain, 'Might fix: Remove trailing \\\\ before blank lines'
+      assert_includes plain, 'See: https://github.com/sarielhp/latex_it/tree/master/docs/guides/underfull_boxes'
+    end
+  end
+
+  def test_boxed_explanation_for_underfull_vbox
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        Underfull \\vbox (badness 10000) has occurred while \\output is active []
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      builder = LatexBuilder.new('main.tex', explain: true)
+      out, = capture_io do
+        Dir.chdir(dir) do
+          builder.send(:analyze_output)
+        end
+      end
+
+      plain = strip_ansi(out)
+      assert_includes plain, 'Diagnostic Explanation: Warning: Underfull \vbox (Vertical Stretch)'
+      assert_includes plain, 'TeX could not stretch vertical whitespace'
+      assert_includes plain, 'Might fix: Add \\raggedbottom to preamble'
+      assert_includes plain, 'See: https://github.com/sarielhp/latex_it/tree/master/docs/guides/underfull_boxes'
+    end
+  end
+
   def test_multiply_defined_label_pinpointing_in_diagnostics
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, 'junk'))

@@ -30,7 +30,7 @@ class TestDiagnosticFormatting < Minitest::Test
 
     # 4. Underfull box badness
     cleaned_under = builder.send(:clean_box_diagnostic, 'Underfull \hbox (badness 10000) in paragraph at lines 169--171', :note)
-    assert_equal 'Note: underfull line (badness 10000)', cleaned_under
+    assert_equal 'Note: underfull \hbox (badness 10000)', cleaned_under
   end
 
   def test_duplicate_ranges_collapsed

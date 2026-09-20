@@ -499,10 +499,10 @@ module LaTeXDiagnostics
              format('%.2fpt too %s%s', pt_val, dimension, suffix)
            elsif box_line =~ /\(badness (\d+)\)/i
              badness = Regexp.last_match(1)
-             "underfull line (badness #{badness})"
+             box_kind = (box_line =~ /\\(vbox)\b/i) ? '\vbox' : '\hbox'
+             "underfull #{box_kind} (badness #{badness})"
            else
-             clean = box_line.sub(/\\(?:hbox|vbox)\s*/, '')
-                             .sub(/\s*(?:detected at line \d+|in paragraph at lines \d+(?:--\d+)?|in alignment at lines \d+(?:--\d+)?)\.?/, '')
+             clean = box_line.sub(/\s*(?:detected at line \d+|in paragraph at lines \d+(?:--\d+)?|in alignment at lines \d+(?:--\d+)?)\.?/, '')
                              .strip
              clean.empty? ? box_line : clean
            end
@@ -926,6 +926,28 @@ module LaTeXDiagnostics
     (t.include?('Overfull') && t.include?('hbox')) || txt =~ /\AOverfull\s+\\hbox/i
   end
 
+  def underfull_box?(item)
+    t = item[:type].to_s
+    txt = item[:text].to_s
+    raw = item[:raw_text].to_s
+    (t.include?('Underfull') && (t.include?('hbox') || t.include?('vbox'))) ||
+      txt =~ /\bunderfull\s+(?:line|box|\\hbox|\\vbox)/i ||
+      raw =~ /\AUnderfull\s+\\(?:hbox|vbox)/i
+  end
+
+  def underfull_vbox?(item)
+    t = item[:type].to_s
+    txt = item[:text].to_s
+    raw = item[:raw_text].to_s
+    (t.include?('Underfull') && t.include?('vbox')) ||
+      txt =~ /\bunderfull\s+(?:page|column|\\vbox)/i ||
+      raw =~ /\AUnderfull\s+\\vbox/i
+  end
+
+  def underfull_hbox?(item)
+    underfull_box?(item) && !underfull_vbox?(item)
+  end
+
   def diagnostic_item_sort_key(item)
     idx = item[:index] || 0
     target = item[:companion_to] ? format_display_path(item[:companion_to]) : format_display_path(item[:file])
@@ -1211,12 +1233,14 @@ module LaTeXDiagnostics
 
     top_title = "─ Diagnostic Explanation: #{expl[:title]} "
     dash_count = [cols - 2 - top_title.length, 1].max
+    fix_label = expl[:fix_label] || (category.to_s.start_with?('underfull') ? 'Might fix:' : 'Fix:')
     box_lines = [
       "┌#{top_title}#{'─' * dash_count}┐",
       *wrap_box_field('Why:', expl[:why], inner_width),
-      *wrap_box_field('Fix:', expl[:fix], inner_width),
-      "└#{'─' * (cols - 2)}┘"
+      *wrap_box_field(fix_label, expl[:fix], inner_width)
     ]
+    box_lines.concat(wrap_box_field('See:', expl[:doc_url], inner_width)) if expl[:doc_url]
+    box_lines << "└#{'─' * (cols - 2)}┘"
 
     render_colored_box(box_lines)
   end
@@ -1262,6 +1286,8 @@ module LaTeXDiagnostics
     txt = item[:text].to_s
     return :multiply_defined_label if txt.include?('multiply defined')
     return classify_overfull_category(item) if overfull_hbox?(item)
+    return :underfull_vbox if underfull_vbox?(item)
+    return :underfull_hbox if underfull_hbox?(item)
     ref_cat = reference_or_cite_category(txt)
     return ref_cat if ref_cat
 

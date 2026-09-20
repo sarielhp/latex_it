@@ -37,8 +37,10 @@ require_relative 'lib/latex_it/flattener'
 require_relative 'lib/latex_it/meta_extractor'
 require_relative 'lib/latex_it/bib_locator'
 require_relative 'lib/latex_it/macro_harvester'
+require_relative 'lib/latex_it/diagnostic_record'
 require_relative 'lib/latex_it/error_catalog'
 require_relative 'lib/latex_it/compile_format'
+require_relative 'lib/latex_it/presenters'
 require_relative 'lib/latex_it/diagnostics'
 require_relative 'lib/latex_it/builder'
 require_relative 'lib/latex_it/packager'
@@ -235,7 +237,8 @@ module LatexCLI
       auto_mirror_subdirs: cfg.key?('auto_mirror_subdirs') ? (cfg['auto_mirror_subdirs'] == true) : true,
       junk_subdirs: cfg['junk_subdirs'] || LaTeXUtils::DEFAULT_JUNK_SUBDIRS,
       bib_extract: false, bib_extract_name: nil,
-      compile: cfg['compile'] == true, raw: cfg['raw'] == true, link: cfg['links'],
+      compile: cfg['compile'] == true, llm: cfg['llm'] == true, json: cfg['json'] == true,
+      raw: cfg['raw'] == true, link: cfg['links'],
       index: cfg['index'] == true, explicit_index: false, config_save: false, config_scope: nil,
       explicit_passes: false, explicit_update_on_diff: false, explicit_time: false,
       explicit_raw: false, explicit_trace: false, explicit_werror: false,
@@ -267,7 +270,13 @@ module LatexCLI
 
   def self.normalize_argv!(argv)
     normalize_bib_extract_args!(argv)
-    argv.map! { |arg| arg == '-cc' ? '--compile' : arg }
+    argv.map! do |arg|
+      case arg
+      when '-cc' then '--compile'
+      when '-llm' then '--llm'
+      else arg
+      end
+    end
   end
 
   def self.normalize_bib_extract_args!(argv)
@@ -424,6 +433,18 @@ module LatexCLI
       ['Format diagnostics in GNU standard compiler format (file:line:col: severity: message)']
     )
     opts.top.append(sw, [], ['compile'])
+    opts.on('--llm', '--agent', 'Format diagnostics for LLMs and AI agents (plaintext, folded warnings, silent success)') do
+      options[:llm] = true
+      options[:compile] = true
+      options[:color] = false
+      options[:link] = false
+    end
+    opts.on('--json', 'Output structured compilation and diagnostic results as JSON') do
+      options[:json] = true
+      options[:compile] = true
+      options[:color] = false
+      options[:link] = false
+    end
     opts.on('--config-init', 'Create a local .l.jsonc configuration template in the current directory and exit') do
       LaTeXConfig.create_local_template!('.')
       exit 0

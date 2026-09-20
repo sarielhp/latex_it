@@ -56,7 +56,7 @@ class LatexBuilder
   end
 
   def interactive_tty?
-    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:trace] && !@options[:score] && !@options[:raw]
+    $stdout.tty? && ENV['TERM'] != 'dumb' && !@options[:emacs] && !@options[:trace] && !@options[:score] && !@options[:raw] && !llm_mode? && !json_mode?
   end
 
   def run!
@@ -102,9 +102,17 @@ class LatexBuilder
     paper_cleanup
 
     if targets_up_to_date?
-      puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -f' to force rebuild)"
-      analyze_output if diagnostics_requested?
-      return true
+      if json_mode?
+        analyze_output
+        return true
+      elsif llm_mode?
+        analyze_output if @options[:all] || @options[:werror]
+        return true
+      else
+        puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -f' to force rebuild)"
+        analyze_output if diagnostics_requested?
+        return true
+      end
     end
 
     FileUtils.rm_f('junk/.build_state.json')

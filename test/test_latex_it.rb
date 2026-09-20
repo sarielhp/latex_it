@@ -133,6 +133,7 @@ class TestLatexItCLI < Minitest::Test
           %w[--no-env], %w[-W], %w[--werror], ['-e', 'xelatex'], ['-e', 'l'], ['-e', 'p'],
           %w[--engine=xelatex], %w[--engine=lualatex], %w[--engine=pdflatex],
           %w[--help-style=lines], %w[-r], %w[--raw], %w[-cc], %w[--compile],
+          %w[-llm], %w[--llm], %w[--agent], %w[--json],
           %w[--config-show], %w[--theme-list],
           %w[--styles-inject], %w[--no-styles-inject],
           %w[-I], %w[--index], %w[--no-index], %w[--config-save], %w[--global], %w[--local]

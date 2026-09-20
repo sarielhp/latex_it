@@ -1076,12 +1076,22 @@ module LaTeXDiagnostics
     @options && @options[:compile] == true
   end
 
+  def llm_mode?
+    @options && (@options[:llm] == true || @options[:agent] == true)
+  end
+
+  def json_mode?
+    @options && @options[:json] == true
+  end
+
   def normalize_diagnostic(item, tier)
+    cat = item[:category] || item.dig(:catalog, :category) || (respond_to?(:diagnostic_category, true) ? diagnostic_category(item) : nil)
     {
       file: compile_display_file(item),
       line: normalized_line(item),
       col: normalized_col(item),
       tier: tier.to_s,
+      category: cat,
       message: normalized_message(item),
       token: item[:token] || item.dig(:catalog, :token),
       hint: item.dig(:catalog, :hint),
@@ -1805,6 +1815,16 @@ module LaTeXDiagnostics
   end
 
   def report_compile_mode_errors(errors, content, io: $stderr)
+    if json_mode?
+      report_json_mode_errors(errors, content, io: $stdout)
+      exit 1
+    end
+
+    if llm_mode?
+      report_llm_mode_errors(errors, content, io: io)
+      exit 1
+    end
+
     displayed_errors, cascade_info = throttle_errors(errors)
     alerts = []
     warns = []
@@ -1823,6 +1843,27 @@ module LaTeXDiagnostics
     )
     emit_compile_cascade_notice(cascade_info, io: io)
     exit 1
+  end
+
+  def report_llm_mode_errors(errors, content, io: $stderr)
+    log_tail = errors.empty? ? content : nil
+    records = errors.map { |e| normalize_diagnostic(e, 'errors') }
+    presenter = LaTeXAgentPresenter.new(@options)
+    presenter.render_diagnostics(errors: records, log_tail: log_tail, file: @filename, io: io)
+  end
+
+  def report_json_mode_errors(errors, content, io: $stdout)
+    records = errors.map { |e| normalize_diagnostic(e, 'errors') }
+    result = LaTeXDiagnosticResult.new(
+      success: false,
+      exit_code: 1,
+      pdf_path: nil,
+      records: records,
+      summary: { errors: records.size, alerts: 0, warnings: 0, whatevers: 0 },
+      log_tail: errors.empty? ? content.to_s.lines.last(10).join : nil
+    )
+    presenter = LaTeXJsonPresenter.new(@options)
+    presenter.render_result(result, io: io)
   end
 
   def report_errors(loga, io: $stderr)
@@ -2038,7 +2079,9 @@ module LaTeXDiagnostics
     warnings = reg_warns.sum { |i| i[:count] || 1 }
     whatevers = what_items.sum { |i| i[:count] || 1 }
 
-    if errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
+    if json_mode?
+      errors = render_json_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    elsif errors > 0 || alerts > 0 || warnings > 0 || whatevers > 0
       errors = render_diagnostics_tiers(err_items, alert_items, reg_warns, what_items, errors)
     end
 
@@ -2046,6 +2089,14 @@ module LaTeXDiagnostics
   end
 
   def render_compile_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    if json_mode?
+      return render_json_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    end
+
+    if llm_mode?
+      return render_llm_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    end
+
     prepared_errors = prepare_error_items(err_items)
     displayed_errors, cascade_info = throttle_errors(prepared_errors)
     has_errors = errors > 0 || !prepared_errors.empty?
@@ -2059,6 +2110,55 @@ module LaTeXDiagnostics
       io: $stderr
     )
     emit_compile_cascade_notice(cascade_info, io: $stderr)
+    [prepared_errors.size, errors].max
+  end
+
+  def render_llm_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    prepared_errors = prepare_error_items(err_items)
+    err_records = prepared_errors.map { |e| normalize_diagnostic(e, 'errors') }
+    alt_records = alert_items.map { |a| normalize_diagnostic(a, 'alerts') }
+    wrn_records = reg_warns.map { |w| normalize_diagnostic(w, 'warnings') }
+    wht_records = what_items.map { |wh| normalize_diagnostic(wh, 'whatevers') }
+
+    presenter = LaTeXAgentPresenter.new(@options)
+    presenter.render_diagnostics(
+      errors: err_records,
+      alerts: alt_records,
+      warnings: wrn_records,
+      whatevers: wht_records,
+      file: @filename,
+      io: $stderr
+    )
+    [prepared_errors.size, errors].max
+  end
+
+  def render_json_mode_tiers(err_items, alert_items, reg_warns, what_items, errors)
+    prepared_errors = prepare_error_items(err_items)
+    has_errors = errors > 0 || !prepared_errors.empty?
+    has_werrors = @options[:werror] && (alert_items.any? || reg_warns.any?)
+    failed = has_errors || has_werrors
+
+    err_records = prepared_errors.map { |e| normalize_diagnostic(e, 'errors') }
+    alt_records = alert_items.map { |a| normalize_diagnostic(a, 'alerts') }
+    wrn_records = reg_warns.map { |w| normalize_diagnostic(w, 'warnings') }
+    wht_records = what_items.map { |wh| normalize_diagnostic(wh, 'whatevers') }
+
+    all_records = err_records + alt_records + wrn_records + wht_records
+    pdf_file = "#{@bfilename}.pdf"
+    result = LaTeXDiagnosticResult.new(
+      success: !failed,
+      exit_code: failed ? 1 : 0,
+      pdf_path: (!failed && File.exist?(pdf_file)) ? pdf_file : nil,
+      records: all_records,
+      summary: {
+        errors: err_records.size,
+        alerts: alt_records.size,
+        warnings: wrn_records.size,
+        whatevers: wht_records.size
+      }
+    )
+    presenter = LaTeXJsonPresenter.new(@options)
+    presenter.render_result(result, io: $stdout)
     [prepared_errors.size, errors].max
   end
 
@@ -2140,7 +2240,7 @@ module LaTeXDiagnostics
     return unless @options[:werror] && (alerts.positive? || warnings.positive?)
 
     if compile_mode?
-      warn 'latex_it: error: warnings being treated as errors (--werror)'
+      warn 'latex_it: error: warnings being treated as errors (--werror)' unless json_mode?
     else
       puts Rainbow("\n[Werror] Warnings treated as fatal errors.").red.bright
     end

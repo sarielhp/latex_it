@@ -1371,14 +1371,14 @@ class TestLatexItCLI < Minitest::Test
       refute_includes out_no_link, "\e]8;;https://sarielhp.github.io"
       assert_includes out_no_link, 'underfull \hbox (badness 10000)'
 
-      # 2. With link: true: OSC 8 embedded on underfull \hbox
+      # 2. With link: true: OSC 8 embedded on underfull \hbox with underline
       builder_link = LatexBuilder.new('main.tex', link: true)
       out_link, = capture_io do
         Dir.chdir(dir) do
           builder_link.send(:analyze_output)
         end
       end
-      expected_osc8 = "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\underfull \\hbox\e]8;;\e\\"
+      expected_osc8 = "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\\e[4munderfull \\hbox\e[24m\e]8;;\e\\"
       assert_includes out_link, expected_osc8
     end
   end

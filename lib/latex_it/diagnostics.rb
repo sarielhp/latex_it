@@ -92,10 +92,11 @@ module LaTeXDiagnostics
 
   UNDERFULL_GUIDE_URL = 'https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/'
 
-  def format_terminal_url(url, display_str)
+  def format_terminal_url(url, display_str, underline: false)
     return display_str unless link_enabled? && url && !url.to_s.empty?
 
-    "\e]8;;#{url}\e\\#{display_str}\e]8;;\e\\"
+    content = underline && @options[:color] != false ? "\e[4m#{display_str}\e[24m" : display_str
+    "\e]8;;#{url}\e\\#{content}\e]8;;\e\\"
   end
 
   def highlight_line_numbers(text, base_color, bright: false)
@@ -440,8 +441,8 @@ module LaTeXDiagnostics
     return text unless link_enabled?
 
     if underfull_box?(item)
-      text.sub(/\bunderfull\s+\\hbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m) }
-          .sub(/\bunderfull\s+\\vbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m) }
+      text.sub(/\bunderfull\s+\\hbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m, underline: true) }
+          .sub(/\bunderfull\s+\\vbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m, underline: true) }
     else
       text
     end
@@ -1241,7 +1242,8 @@ module LaTeXDiagnostics
     full_prefix = "#{prefix} "
     wrapped = LaTeXUtils.wrap_text(text, width: inner_width, prefix: full_prefix)
     wrapped.lines.map do |ln|
-      "│ #{ln.chomp.ljust(inner_width)} │"
+      pad = [inner_width - LaTeXUtils.visible_width(ln.chomp), 0].max
+      "│ #{ln.chomp}#{' ' * pad} │"
     end
   end
 

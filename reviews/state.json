@@ -104,6 +104,19 @@
       "timestamp": "2026-09-12T17:21:23Z",
       "files_edited": 8,
       "summary": "reviews/archive/008_summary.md"
+    },
+    {
+      "number": "009",
+      "profile": "systems",
+      "model": "Gemini 3.8 Flash (Tier 0 Workhorse)",
+      "tier": "tier0",
+      "backend": "gemini",
+      "findings": 8,
+      "outcome": "remediated",
+      "log": "reviews/logs/review_009_systems.log",
+      "timestamp": "2026-09-20T03:52:20Z",
+      "files_edited": 0,
+      "summary": "reviews/archive/009_summary.md"
     }
   ]
 }

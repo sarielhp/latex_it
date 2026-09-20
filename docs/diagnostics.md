@@ -183,7 +183,81 @@ l --emacs paper.tex
 
 ---
 
-## 6. Error Reference Catalog
+## 6. AI Agent & LLM Mode (`-llm` / `--agent`) and Structured JSON (`--json`)
+
+Autonomous AI coding agents (Claude Code, Antigravity, OpenCode, Cursor, Aider) interact with build systems through terminal execution. Standard TeX output wastes tokens, floods context windows with secondary warnings, and breaks regex log parsers with ANSI escapes.
+
+`latex_it` provides the dedicated `-llm` (or `--agent`) profile tailored for agent interaction:
+
+```bash
+# Run in token-optimized agent mode
+l -llm paper.tex
+```
+
+### Key Behaviors of `--llm` Mode
+
+1. **Plaintext Guarantee**: Zero ANSI color escape sequences (`\e[...]`) and zero OSC 8 terminal hyperlinks (`\e]8;;...`). Plaintext parses cleanly and avoids wasting 15–25 tokens per diagnostic line.
+2. **Silence on Clean Success**: If compilation succeeds with no actionable diagnostics or if targets are already up-to-date, `latex_it` exits `0` with completely empty stdout and stderr, consuming zero agent context tokens.
+3. **Warning Category Folding**: When a document has dozens of identical warnings (such as 50 missing citations from an empty bibliography), `--llm` displays the first **2** occurrences with exact `file:line:col` and folds the remaining occurrences into a single summary note:
+   ```text
+   paper.tex:12: warning: [alert] undefined citation 'knuth1984'
+   paper.tex:15: warning: [alert] undefined citation 'lamport1994'
+   latex_it: note: 48 more undefined citations in paper.tex (pass -a to show all)
+   ```
+4. **Suppression of Underfull Boxes**: Low-level micro-notes (`whatevers`) are suppressed by default unless `-a` is explicitly passed.
+5. **Actionable Unparsed Crash Reporting**: When a TeX engine crashes with an unclassified syntax or memory failure, `--llm` mode extracts the last 8 lines of the compiler log into a GNU-compliant error block:
+   ```text
+   paper.tex:1: error: compilation failed with unclassified error
+   paper.tex:1: note: compiler log tail:
+   > ! Emergency stop.
+   > <read 2> \relax
+   > l.42 \include{missing}
+   ```
+
+### Structured JSON Mode (`--json`)
+
+For automated pipelines, programmatic IDE integrations, or external tool bridges, `--json` outputs a single structured JSON object to stdout:
+
+```bash
+l --json paper.tex
+```
+
+Example JSON response:
+```json
+{
+  "success": true,
+  "exit_code": 0,
+  "pdf_path": "paper.pdf",
+  "summary": {
+    "errors": 0,
+    "alerts": 0,
+    "warnings": 1,
+    "whatevers": 0
+  },
+  "diagnostics": [
+    {
+      "file": "paper.tex",
+      "line": 42,
+      "col": 1,
+      "tier": "warnings",
+      "category": "undefined_citation",
+      "message": "undefined citation 'knuth1984'",
+      "token": "knuth1984"
+    }
+  ]
+}
+```
+
+### FAQ: Why a CLI Flag Instead of an MCP Server?
+
+- **Token Economy**: Standard GNU compiler lines take ~75% fewer tokens than JSON-RPC envelopes and nested JSON objects. LLMs are natively trained on compiler outputs and understand them immediately.
+- **Zero Setup Friction**: All serious coding agents have built-in shell execution tools. `l -llm` requires zero configuration files, daemon lifecycles, or port bindings.
+- **Sandbox Compatibility**: Agents running inside Bubblewrap (`bws`), Docker, or temporary git worktrees run `l -llm` inside their execution sandbox natively. Host-level MCP daemons cannot easily access isolated sandboxes.
+- **Programmatic Bridge**: If an MCP tool server is ever required for non-shell chat environments (e.g. Claude Desktop), `--json` provides the complete structured backend in a single flag.
+
+---
+
+## 7. Error Reference Catalog
 
 For an in-depth catalog of 55 common LaTeX compilation errors, their root causes, and minimal reproducer examples:
 

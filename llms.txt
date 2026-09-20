@@ -1,0 +1,47 @@
+# latex_it
+
+> Standalone Ruby tool for compiling LaTeX documents with automated multi-pass convergence, junk file isolation, and token-optimized diagnostics for humans and AI agents.
+
+`latex_it` (often invoked via symlink `l`) compiles LaTeX documents using `xelatex`, `lualatex`, or `pdflatex`. It eliminates directory clutter by isolating temporary build files into `junk/` and provides token-optimized, 4-tier diagnostics.
+
+## Quick Start for LLMs & AI Agents
+
+When editing or compiling LaTeX documents, autonomous coding agents should invoke:
+```bash
+l -llm paper.tex
+```
+
+Key features of `-llm` mode:
+- **Zero Token Waste**: Silent exit 0 on clean or cached builds (0 bytes output).
+- **Plaintext Guarantee**: Zero ANSI escapes (`\e[...]`), zero OSC 8 terminal hyperlinks (`\e]8;;`).
+- **GNU Compliant**: Diagnostics formatted as `file:line:col: severity: message`.
+- **Warning Category Folding**: Collapses high-frequency warnings (e.g. 50 missing citations) to 2 examples + count note.
+- **Underfull Box Suppression**: Low-level micro-notes are suppressed by default.
+- **Actionable Log Tail**: Extracts the last 8 lines of TeX log on unclassified compiler crashes.
+
+## Common Commands
+
+- `l -llm [file.tex]`: Recommended compile command for AI agents.
+- `l -llm -a [file.tex]`: Agent compile with all folded warnings and notes unsuppressed.
+- `l --json [file.tex]`: Emit structured JSON result on stdout.
+- `l -x [file.tex]`: Human explanation mode showing plain-English cause/fix boxes.
+- `l -f [file.tex]`: Force rebuild bypassing up-to-date checks.
+- `l -u [file.tex]`: Single-pass compile without bibliography updates.
+- `l -C`: Clean auxiliary build files.
+- `l -z`: Create self-contained portable zip archive of the paper.
+- `l --arxiv`: Prepare submission-ready, flattened arXiv package.
+
+## Diagnostic Hierarchy
+
+- **Errors**: Fatal compilation failures (exits 1).
+- **Alerts**: Silent structural corruption (e.g., inverted `\label` before `\caption`, overfull hbox >= 24pt, multiply-defined labels). Always visible.
+- **Warnings**: Standard layout and reference notices (missing citations, overfull hboxes).
+- **Whatevers**: Harmless micro-noise (<= 2.5pt overfull hboxes, hyperref bookmark stripping); suppressed by default (`l -a` to inspect).
+
+## Key Links
+
+- [Documentation](https://sarielhp.github.io/latex_it/): Full online documentation.
+- [Diagnostics Guide](https://sarielhp.github.io/latex_it/docs/diagnostics.html): Detailed explanation of 4-tier diagnostics, Alerts, Whatevers, and `-llm` mode.
+- [Error Reference Catalog](https://sarielhp.github.io/latex_it/docs/errors/): Catalog of 55 TeX/LaTeX errors with root causes and fixes.
+- [Configuration](https://sarielhp.github.io/latex_it/docs/configuration.html): Unified `.l.jsonc` project configuration.
+- [GitHub Repository](https://github.com/sarielhp/latex_it): Source code and issues.

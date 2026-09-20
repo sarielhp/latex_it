@@ -114,6 +114,8 @@ l -B        # Extract cited references into local .bib file
 | `--vscode-init` | Generate `.vscode/tasks.json` and `settings.json` for VS Code integration. |
 | `--theme-list` | List available diagnostic color themes with terminal previews. |
 | `-cc`, `--compile` | Format diagnostics in strict GNU standard (`file:line:col: severity: message`). |
+| `-llm`, `--agent` | Token-optimized mode for AI agents (zero ANSI, folded warnings, silent on success). |
+| `--json` | Output structured compilation and diagnostic results as JSON. |
 | `-h`, `--help` | Show condensed help summary of everyday options. |
 | `-H`, `--help-all` | Show complete list of command-line options with detailed explanations. |
 
@@ -150,6 +152,28 @@ For technical details, configuration options, and advanced features, see:
 - **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and environment variables.
 - **[docs/architecture.md](docs/architecture.md)**: Internal design, build lifecycle, and modular Ruby structure.
 - **[docs/sandbox_testing.md](docs/sandbox_testing.md)**: Sandboxed testing (`bws_run`), portable paper bundles (`-z`), and REVTeX 4.0 support.
+
+---
+
+## Frequently Asked Questions (FAQ)
+
+### Why a CLI flag (`l -llm`) instead of an MCP (Model Context Protocol) server?
+
+1. **Token Economy**: Standard GNU compiler plaintext (`file:line: error: message`) takes ~75% fewer tokens than JSON-RPC envelopes or deeply nested structured JSON. LLMs are natively trained on trillions of tokens of compiler outputs and parse them effortlessly.
+2. **Zero Configuration**: Autonomous coding agents (Claude Code, Cursor, Antigravity, OpenCode, Aider) already have terminal / shell tools. `l -llm` works immediately with zero configuration files, daemon setup, or background process management.
+3. **Sandbox & Git Compatibility**: Agents frequently run inside isolated sandboxes (Bubblewrap `bws`, Docker containers, temporary worktrees). A CLI command runs directly inside the sandbox where files and compiler environments reside, whereas daemon-based MCP servers run outside and struggle with path mapping and permissions.
+4. **Programmatic Support via `--json`**: For workflows that strictly require structured payloads, `latex_it --json` emits clean JSON on stdout, making it trivial to build a 20-line standalone MCP bridge without adding daemon bloat to `latex_it`.
+
+### How should AI coding agents invoke `latex_it`?
+
+AI agents should invoke:
+```bash
+l -llm paper.tex
+```
+- On clean builds or up-to-date targets, it exits `0` with **zero output**, consuming zero context window tokens.
+- Output is pure plaintext: **zero ANSI color escape codes** and **zero OSC 8 terminal hyperlinks**.
+- High-repetition warnings (e.g. 50 missing citations) are automatically folded into the first 2 instances plus a summary note, preventing context blowout.
+- If unclassified compilation failures occur, the compiler log-tail is extracted automatically.
 
 ---
 

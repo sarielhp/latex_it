@@ -93,6 +93,14 @@ Any modifications to compilation logic must honor the following invariants:
    - Unpacks bundle into `/tmp/latex_it_verify_XXXX` sandbox.
    - Compiles with `latex_it --no-env` (wiping ambient `TEXINPUTS`, `BIBINPUTS`, `TEXMFHOME`).
    - Compares PDF text layout against bundled PDF with `pdftotext -layout`.
+6. **Agent & LLM Compilation Profile (`-llm` / `--agent`)**:
+   - Autonomous coding agents must invoke `l -llm [file.tex]`.
+   - Guaranteed plaintext: zero ANSI escape codes (`\e[...]`), zero OSC 8 terminal hyperlinks (`\e]8;;`).
+   - 100% silent `exit 0` on clean builds and cached up-to-date targets.
+   - Automatic warning folding (2 examples + count note for undefined citations, undefined references, and overfull boxes).
+   - Low-severity notes (`whatevers`) suppressed by default.
+   - Automatic log-tail fallback on unclassified compiler crashes.
+   - Structured JSON output available via `--json`.
 
 ---
 

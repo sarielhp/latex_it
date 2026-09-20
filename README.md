@@ -6,11 +6,12 @@
   <a href="https://sarielhp.github.io/latex_it/docs/gallery.html"><strong>Diagnostic Gallery</strong></a>
 </p>
 
-`latex_it` (often invoked as `l`) is a standalone Ruby script and automated build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
+`latex_it` (invoked as `l`) is a standalone build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
 
-Like `latexmk`, it handles multi-pass compilation and bibliography dependencies automatically — but it is designed specifically to eliminate the two biggest headaches of LaTeX workflows:
-1. **Cluttered directories**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are isolated in a `junk/` directory, keeping your working tree clean.
-2. **Cryptic output**: Low-level engine noise is filtered out, separating real errors and layout flaws from harmless background warnings and offering plain-English suggestions for fixes.
+Like `latexmk`, it automates multi-pass convergence and bibliography processing, but adds three core architectural differences:
+1. **Directory isolation**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are confined to a `junk/` directory; only final outputs (`.pdf`, `.bbl`, `.synctex.gz`) remain in the working tree.
+2. **4-tier diagnostic filtering**: Separates fatal errors and silent structural corruptions (**Alerts**) from standard warnings and harmless sub-millimeter layout noise (**Whatevers**).
+3. **Dual human and agent interfaces**: Supports interactive terminal diagnostics with explanatory hints (`-x`), strict GNU compiler mode (`-cc`), and token-optimized plaintext for autonomous AI coding agents (`-llm`).
 
 <p align="center">
   <a href="docs/gallery.html"><img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
@@ -67,6 +68,7 @@ Common everyday commands:
 ```bash
 lw          # Fast incremental rebuild (reuses cached state)
 l -f        # Force a rebuild even if files haven't changed
+l -llm      # Token-optimized plaintext build for AI coding agents
 l -r        # Print raw compiler output (debug mode)
 l -C        # Clean auxiliary and temporary files
 l -x        # Show plain-English explanations for errors and warnings
@@ -77,18 +79,35 @@ l -B        # Extract cited references into local .bib file
 
 ## Key Features
 
-- **Zero-dependency standalone script**: Written in pure Ruby (`#!/usr/bin/env ruby`) using standard libraries. Distributed as a single self-contained executable with no gem compilation or virtualenv setup required.
-- **Clean directories**: All intermediate files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, etc.) are kept in `junk/`. Only your final `.pdf`, `.bbl`, and `.synctex.gz` stay in the working directory.
+- **Standalone executable**: Pure Ruby using standard libraries. Distributed as a single file with no gem installation, bundle management, or virtual environment required.
+- **Directory isolation**: All intermediate files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, etc.) remain in `junk/`. Subdirectories are mirrored automatically.
 - **Automatic detection**:
-  - Finds your main `.tex` file if omitted (checks `.mainfile`, folder name, and `\begin{document}`).
-  - Selects the right engine (`xelatex`, `lualatex`, or `pdflatex`) from magic comments or loaded packages.
-  - Automatically runs Biber or BibTeX when citations or `.bib` files change.
-- **Fast incremental builds**: Tracks file checksums and exits immediately if nothing changed, avoiding redundant compiler passes.
-- **Intelligent 4-tier diagnostics (Alerts & Whatevers)**: Standard LaTeX treats a $0.5\text{mm}$ line overflow with the same gravity as a broken citation, while silently producing a broken PDF when `\label` is placed before `\caption`. `latex_it` introduces two specialized tiers:
-  - **Alerts**: Catches critical flaws that compile with exit code 0 but silently ruin published papers (e.g. inverted `\label` binding to the wrong section, or massive $\ge 24\text{pt}$ line spillages).
-  - **Whatevers**: Suppresses harmless sub-millimeter cosmetic noise (like $\le 2.5\text{pt}$ micro-overflows and hyperref bookmark stripping) to cure warning fatigue, while counting them in the summary line (`l -a` to inspect).
-  [Learn more about Alerts & Whatevers](docs/diagnostics.html#why-alerts-and-whatevers).
-- **arXiv packaging**: Run `l --arxiv` to produce a flattened, comment-free zip archive ready for upload to arXiv (see [docs/arxiv.md](docs/arxiv.md)).
+  - Resolves root `.tex` file if omitted (checks `.mainfile`, directory name, and `\begin{document}`).
+  - Selects compiler (`xelatex`, `lualatex`, or `pdflatex`) via magic comments, loaded packages, or CLI flags.
+  - Detects and runs Biber or BibTeX when citations or `.bib` sources change.
+- **Deterministic incremental builds**: Tracks dependency checksums in `junk/.build_state.json` and exits in 0 passes when outputs are current.
+- **4-tier diagnostic filtering**:
+  - **Alerts**: Highlights structural bugs that exit 0 but corrupt document output (such as an inverted `\label` before `\caption` binding cross-references to the wrong section, duplicate labels, or large $\ge 24\text{pt}$ overflows). Treated as fatal when `-W` is supplied.
+  - **Whatevers**: Suppresses sub-millimeter layout overflow notices ($\le 2.5\text{pt}$) and Unicode bookmark removals from terminal output, reporting totals in the summary line (`l -a` to inspect).
+  See [docs/diagnostics.md](docs/diagnostics.md) for details.
+- **AI agent & LLM profile (`-llm`)**: Plaintext GNU compiler diagnostics (`file:line:col: severity: msg`) with zero ANSI or hyperlink escapes, silent clean builds (0 bytes on exit 0), warning category folding (collapsing 50 citation warnings to 2 + count), and structured `--json` output.
+- **arXiv packaging (`--arxiv`)**: Produces flattened, comment-stripped zip archives verified against an isolated sandbox compiler (see [docs/arxiv.md](docs/arxiv.md)).
+
+---
+
+## Feature Comparison
+
+| Capability | `latex_it` | `latexmk` | `rubber` | Standard IDEs (VS Code / Overleaf) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Intermediate file isolation** | Automatic (`junk/` subdirs mirrored; only `.pdf`, `.bbl`, `.synctex.gz` exported) | Manual (`-outdir`; can break relative `\input` paths) | Manual (`--into`) | Root directory or local `.aux` clutter |
+| **Multi-pass convergence** | Dependency tracking (`.fls`) + SHA256 build state (1–3 passes) | Re-run loop on `.log`/`.aux` changes | Rule-based dependency tree | Fixed passes or background re-compilation |
+| **Silent structural flaw detection** | **Alerts**: Inverted `\label` before `\caption`, duplicate labels, large overflows | None (exits 0; buried in log) | None (exits 0; buried in log) | None (treated as successful compile) |
+| **Sub-millimeter noise suppression** | **Whatevers**: $\le 2.5\text{pt}$ overfulls counted in summary, hidden by default | Emits every warning to log | Emits every warning to log | Displays full warning count in problems pane |
+| **AI agent & LLM mode (`-llm`)** | Built-in: pure plaintext, folded warnings, silent on clean success | None (raw log or verbose stdout) | None | None |
+| **Structured JSON output** | Built-in (`--json`) | None | None | Varies (IDE internal API) |
+| **Submission packaging** | Built-in (`--arxiv`, `-z`): comment stripping, flattening, sandbox audit | External scripts required | None | Overleaf export (unflattened zip) |
+| **Text-diff PDF guard** | Optional (`--update-if-changed`): avoids viewer reload on non-visual edits | None | None | None |
+| **Runtime dependencies** | Pure Ruby standard library (single standalone executable) | Perl + TeX Live | Python + TeX Live | Electron / Qt / Browser |
 
 ---
 
@@ -180,4 +199,4 @@ l -llm paper.tex
 
 ## Credits
 
-Program, documentation and everything else really, were written using AI tools (mainly `antigravity-cli`).
+Program and documentation were developed using AI tools (primarily `antigravity-cli`).

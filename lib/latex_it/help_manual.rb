@@ -341,7 +341,13 @@ module LaTeXHelpManual
       '  --vscode-init',
       '      Create VS Code tasks.json and settings.json in .vscode/ for LaTeX Workshop and exit.',
       '      Example:',
-      '        l --vscode-init'
+      '        l --vscode-init',
+      '',
+      '  --gitignore-init',
+      '      Create or add standard LaTeX, SyncTeX, and junk/ rules to .gitignore and exit.',
+      '      Additive: preserves existing rules and only appends missing entries.',
+      '      Example:',
+      '        l --gitignore-init'
     ].join("\n")
   end
 

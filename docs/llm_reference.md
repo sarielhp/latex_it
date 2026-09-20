@@ -75,6 +75,7 @@ l --json paper.tex
 | `--alert-hbox` | float (pt) | `24.0` | Overfull `\hbox` size in pt promoted to **Alert**. |
 | `--whatever-pt` | float (pt) | `2.5` | Overfull `\hbox` size in pt demoted to **Whatever** (suppressed). |
 | `-cc` | `--compile` | flag | `false` | GNU standard compiler output (`file:line:col: severity: msg`). |
+| *(none)* | `--gitignore-init` | flag | `false` | Additive setup: create or add standard LaTeX & `junk/` rules to `.gitignore`. |
 
 ---
 

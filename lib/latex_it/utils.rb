@@ -413,6 +413,7 @@ module LaTeXUtils
     lines << '     l -m                           Print detected main LaTeX file and exit'
     lines << '     l --config-init                Generate a starter .l.jsonc configuration file'
     lines << '     l --vscode-init                Generate .vscode/tasks.json and settings.json for VS Code'
+    lines << '     l --gitignore-init             Generate or update .gitignore with standard LaTeX & junk/ rules'
     lines.join("\n")
   end
 

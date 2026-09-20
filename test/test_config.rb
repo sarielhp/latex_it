@@ -203,4 +203,55 @@ class TestLaTeXConfigAndConventions < Minitest::Test
       assert File.file?(File.join(dir, '.vscode', 'settings.json'))
     end
   end
+
+  def test_init_gitignore_creates_new_file
+    Dir.mktmpdir('latex_it_gi_new') do |dir|
+      _target, action = LaTeXConfig.init_gitignore!(dir)
+      assert_equal :created, action
+
+      gi = File.join(dir, '.gitignore')
+      assert File.file?(gi)
+      content = File.read(gi)
+      assert_includes content, 'junk/'
+      assert_includes content, '.junk/'
+      assert_includes content, '*.synctex.gz'
+      assert_includes content, '*.aux'
+      assert_includes content, '*.bbl'
+      assert_includes content, '# *.pdf'
+    end
+  end
+
+  def test_init_gitignore_additive_and_idempotent
+    Dir.mktmpdir('latex_it_gi_add') do |dir|
+      gi = File.join(dir, '.gitignore')
+      File.write(gi, "custom_secret.env\n*.aux\njunk/\n")
+
+      _target, action = LaTeXConfig.init_gitignore!(dir)
+      assert_equal :updated, action
+
+      content = File.read(gi)
+      assert_includes content, 'custom_secret.env'
+      assert_includes content, '# Added by latex_it --gitignore-init'
+      assert_includes content, '.junk/'
+      assert_includes content, '*.synctex.gz'
+
+      # junk/ should not be duplicated in the addition block
+      added_section = content.split('# Added by latex_it --gitignore-init').last
+      refute_match(%r{^junk/?$}, added_section)
+
+      # Idempotency: second run when fully populated does not add anything
+      _target2, action2 = LaTeXConfig.init_gitignore!(dir)
+      assert_equal :unchanged, action2
+    end
+  end
+
+  def test_cli_gitignore_init_flag
+    Dir.mktmpdir('latex_it_cli_gi') do |dir|
+      bin = File.expand_path('../latex_it', __dir__)
+      out, status = Open3.capture2(bin, '--gitignore-init', chdir: dir)
+      assert_equal 0, status.exitstatus
+      assert_includes out, 'Created'
+      assert File.file?(File.join(dir, '.gitignore'))
+    end
+  end
 end

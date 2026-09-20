@@ -268,6 +268,97 @@ module LaTeXConfig
     [tasks_path, settings_path]
   end
 
+  GITIGNORE_LATEX_ENTRIES = %w[
+    junk/
+    .junk/
+    *.synctex.gz
+    *.synctex(busy)
+    *.aux
+    *.bbl
+    *.blg
+    *.log
+    *.out
+    *.toc
+    *.fls
+    *.fdb_latexmk
+    *.bcf
+    *.run.xml
+    *.nav
+    *.snm
+    *.vrb
+    *.idx
+    *.ind
+    *.ilg
+  ].freeze
+
+  DEFAULT_GITIGNORE_TEMPLATE = <<~GITIGNORE
+    # ==============================================================================
+    # latex_it build isolation
+    # ==============================================================================
+    junk/
+    .junk/
+    *.synctex.gz
+    *.synctex(busy)
+
+    # ==============================================================================
+    # Standard LaTeX auxiliary files (latexmk / auxiliary engine noise)
+    # ==============================================================================
+    *.aux
+    *.bbl
+    *.blg
+    *.log
+    *.out
+    *.toc
+    *.fls
+    *.fdb_latexmk
+    *.bcf
+    *.run.xml
+    *.nav
+    *.snm
+    *.vrb
+    *.idx
+    *.ind
+    *.ilg
+
+    # Editor and OS noise
+    *~
+    *.swp
+    .DS_Store
+
+    # ==============================================================================
+    # Target PDF: Commented out by default.
+    # Uncomment below if you prefer NOT to track the compiled PDF in git:
+    # ==============================================================================
+    # *.pdf
+  GITIGNORE
+
+  def self.init_gitignore!(dir = '.')
+    target = File.join(dir, '.gitignore')
+    if !File.exist?(target)
+      File.write(target, DEFAULT_GITIGNORE_TEMPLATE)
+      puts "      Created #{target} with standard latex_it and LaTeX ignore rules."
+      return [target, :created]
+    end
+
+    existing_lines = File.read(target).lines.map(&:strip)
+    normalized_existing = existing_lines.map { |l| l.delete_prefix('/').delete_suffix('/') }
+
+    missing = GITIGNORE_LATEX_ENTRIES.reject do |entry|
+      norm = entry.delete_prefix('/').delete_suffix('/')
+      normalized_existing.include?(norm)
+    end
+
+    if missing.empty?
+      puts "      #{target} is already up-to-date."
+      return [target, :unchanged]
+    end
+
+    addition = "\n# Added by latex_it --gitignore-init\n" + missing.join("\n") + "\n"
+    File.open(target, 'a') { |f| f.write(addition) }
+    puts "      Updated #{target} (+#{missing.size} #{missing.size == 1 ? 'entry' : 'entries'} added)."
+    [target, :updated]
+  end
+
   def self.update_jsonc_key(content, key, val)
     json_val = val.is_a?(String) ? val.to_json : (val.nil? ? 'null' : val.to_s)
     key_pattern = /"#{Regexp.escape(key)}"\s*:\s*(?:"(?:[^"\\]|\\.)*"|true|false|null|-?\d+(?:\.\d+)?)/

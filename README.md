@@ -131,6 +131,7 @@ l -B        # Extract cited references into local .bib file
 | `--config-init` | Generate a local `.l.jsonc` configuration template. |
 | `--config-show` | Show active configuration sources and resolved settings. |
 | `--vscode-init` | Generate `.vscode/tasks.json` and `settings.json` for VS Code integration. |
+| `--gitignore-init` | Generate or add standard LaTeX & `junk/` rules to `.gitignore`. |
 | `--theme-list` | List available diagnostic color themes with terminal previews. |
 | `-cc`, `--compile` | Format diagnostics in strict GNU standard (`file:line:col: severity: message`). |
 | `-llm`, `--agent` | Token-optimized mode for AI agents (zero ANSI, folded warnings, silent on success). |

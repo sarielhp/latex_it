@@ -142,6 +142,7 @@ class TestLatexItCLI < Minitest::Test
         sample_parser = LatexCLI.build_option_parser(opts)
         refute_nil sample_parser.top.search(:long, 'vscode-init')
         refute_nil sample_parser.top.search(:long, 'config-init')
+        refute_nil sample_parser.top.search(:long, 'gitignore-init')
 
         canonical_flags.each do |flag_args|
           argv = flag_args.dup

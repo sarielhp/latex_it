@@ -101,6 +101,7 @@ Any modifications to compilation logic must honor the following invariants:
    - Low-severity notes (`whatevers`) suppressed by default.
    - Automatic log-tail fallback on unclassified compiler crashes.
    - Structured JSON output available via `--json`.
+   - Complete token-optimized technical reference: see [docs/llm_reference.md](llm_reference.md).
 
 ---
 

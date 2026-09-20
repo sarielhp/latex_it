@@ -140,6 +140,7 @@ The installer creates several convenient shortcuts based on the executable name:
 
 For technical details, configuration options, and advanced features, see:
 
+- **[docs/llm_reference.md](docs/llm_reference.md)**: Token-optimized complete technical reference for AI agents and LLMs (flags, exit codes, config schema, error remedies).
 - **[docs/vim.md](docs/vim.md)**: Vi, Vim, and Neovim Quickfix integration (`:make`), errorformat, and compiler plugin.
 - **[docs/emacs.md](docs/emacs.md)**: GNU Emacs and AUCTeX error jumping, compilation buffer, and elisp configuration.
 - **[docs/vscode.md](docs/vscode.md)**: Visual Studio Code native tasks (`Ctrl+Shift+B`), problem matcher, and LaTeX Workshop setup.

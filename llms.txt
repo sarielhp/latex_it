@@ -40,6 +40,7 @@ Key features of `-llm` mode:
 
 ## Key Links
 
+- [Complete Technical Reference for LLMs](docs/llm_reference.md): Dense, token-optimized specification of all CLI flags, configuration schemas, exit codes, and diagnostic contracts.
 - [Documentation](https://sarielhp.github.io/latex_it/): Full online documentation.
 - [Diagnostics Guide](https://sarielhp.github.io/latex_it/docs/diagnostics.html): Detailed explanation of 4-tier diagnostics, Alerts, Whatevers, and `-llm` mode.
 - [Error Reference Catalog](https://sarielhp.github.io/latex_it/docs/errors/): Catalog of 55 TeX/LaTeX errors with root causes and fixes.

@@ -1,1 +1,4 @@
-review_cycle
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+load File.expand_path('review_cycle', __dir__)

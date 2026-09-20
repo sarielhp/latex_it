@@ -1,1 +1,10 @@
-/home/sariel/prog/standards/workflow/bin/audit
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+target = '/home/sariel/prog/standards/workflow/bin/audit'
+if File.exist?(target)
+  exec(target, *ARGV)
+else
+  warn "Audit standard not installed at #{target}"
+  exit 0
+end

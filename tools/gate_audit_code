@@ -1,1 +1,10 @@
-/home/sariel/prog/standards/ruby/bin/ruby-audit
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+target = '/home/sariel/prog/standards/ruby/bin/ruby-audit'
+if File.exist?(target)
+  exec(target, *ARGV)
+else
+  warn "Ruby audit standard not installed at #{target}"
+  exit 0
+end

@@ -90,6 +90,14 @@ module LaTeXDiagnostics
     "\e]8;;#{uri}\e\\#{display_str}\e]8;;\e\\"
   end
 
+  UNDERFULL_GUIDE_URL = 'https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/'
+
+  def format_terminal_url(url, display_str)
+    return display_str unless link_enabled? && url && !url.to_s.empty?
+
+    "\e]8;;#{url}\e\\#{display_str}\e]8;;\e\\"
+  end
+
   def highlight_line_numbers(text, base_color, bright: false)
     return text if @options[:emacs]
 
@@ -427,11 +435,24 @@ module LaTeXDiagnostics
     lines << "#{indent}#{arrow} #{hint_colored}"
   end
 
+  def format_diagnostic_item_text(item)
+    text = item[:text].to_s
+    return text unless link_enabled?
+
+    if underfull_box?(item)
+      text.sub(/\bunderfull\s+\\hbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m) }
+          .sub(/\bunderfull\s+\\vbox\b/i) { |m| format_terminal_url(UNDERFULL_GUIDE_URL, m) }
+    else
+      text
+    end
+  end
+
   def render_diagnostic_item(item, width: 0)
     return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog], repeat_count: item[:repeat_count] || 1, item: item) if item[:err_block]
 
     base_color = item[:base_color] || :yellow
-    out = format_diagnostic_line(item[:line_str], item[:text], base_color, width: width, file: item[:file])
+    display_text = format_diagnostic_item_text(item)
+    out = format_diagnostic_line(item[:line_str], display_text, base_color, width: width, file: item[:file])
     if @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
       indent = ' ' * (width.positive? ? width + 2 : 2)
       out += "\n" + item[:extra_lines].map do |el|
@@ -1239,7 +1260,10 @@ module LaTeXDiagnostics
       *wrap_box_field('Why:', expl[:why], inner_width),
       *wrap_box_field(fix_label, expl[:fix], inner_width)
     ]
-    box_lines.concat(wrap_box_field('See:', expl[:doc_url], inner_width)) if expl[:doc_url]
+    if expl[:doc_url]
+      doc_link = format_terminal_url(expl[:doc_url], expl[:doc_url])
+      box_lines.concat(wrap_box_field('See:', doc_link, inner_width))
+    end
     box_lines << "└#{'─' * (cols - 2)}┘"
 
     render_colored_box(box_lines)

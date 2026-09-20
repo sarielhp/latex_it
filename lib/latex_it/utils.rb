@@ -469,7 +469,7 @@ module LaTeXUtils
   end
 
   def self.strip_ansi(str)
-    str.to_s.gsub(/\e\[[0-9;]*[a-zA-Z]/, '')
+    str.to_s.gsub(/\e\]8;;[^\e]*\e\\/, '').gsub(/\e\[[0-9;]*[a-zA-Z]/, '')
   end
 
   def self.visible_width(str)

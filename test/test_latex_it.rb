@@ -1318,7 +1318,7 @@ class TestLatexItCLI < Minitest::Test
       assert_includes plain, 'Diagnostic Explanation: Note: Underfull \hbox (Loose Line)'
       assert_includes plain, 'TeX stretched inter-word spacing excessively'
       assert_includes plain, 'Might fix: Remove trailing \\\\ before blank lines'
-      assert_includes plain, 'See: https://github.com/sarielhp/latex_it/tree/master/docs/guides/underfull_boxes'
+      assert_includes plain, 'See: https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/'
     end
   end
 
@@ -1345,7 +1345,41 @@ class TestLatexItCLI < Minitest::Test
       assert_includes plain, 'Diagnostic Explanation: Warning: Underfull \vbox (Vertical Stretch)'
       assert_includes plain, 'TeX could not stretch vertical whitespace'
       assert_includes plain, 'Might fix: Add \\raggedbottom to preamble'
-      assert_includes plain, 'See: https://github.com/sarielhp/latex_it/tree/master/docs/guides/underfull_boxes'
+      assert_includes plain, 'See: https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/'
+    end
+  end
+
+  def test_underfull_box_terminal_hyperlink_when_link_enabled
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, 'junk'))
+      log_file = File.join(dir, 'junk', 'err_xelatex')
+      log_content = <<~LOG
+        This is XeTeX, Version 3.141592653
+        (./main.tex
+        Underfull \\hbox (badness 10000) in paragraph at lines 256--256
+        )
+      LOG
+      File.write(log_file, log_content)
+
+      # 1. Without link: plain text, no OSC 8 link to guide
+      builder_no_link = LatexBuilder.new('main.tex', link: false)
+      out_no_link, = capture_io do
+        Dir.chdir(dir) do
+          builder_no_link.send(:analyze_output)
+        end
+      end
+      refute_includes out_no_link, "\e]8;;https://sarielhp.github.io"
+      assert_includes out_no_link, 'underfull \hbox (badness 10000)'
+
+      # 2. With link: true: OSC 8 embedded on underfull \hbox
+      builder_link = LatexBuilder.new('main.tex', link: true)
+      out_link, = capture_io do
+        Dir.chdir(dir) do
+          builder_link.send(:analyze_output)
+        end
+      end
+      expected_osc8 = "\e]8;;https://sarielhp.github.io/latex_it/docs/guides/underfull_boxes/\e\\underfull \\hbox\e]8;;\e\\"
+      assert_includes out_link, expected_osc8
     end
   end
 

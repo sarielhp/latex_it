@@ -7,10 +7,18 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/sarielhp/latex_it/releases/latest"><img src="https://img.shields.io/github/v/release/sarielhp/latex_it?color=blue&label=release" alt="Release"></a>
+  <a href="https://www.ruby-lang.org"><img src="https://img.shields.io/badge/ruby-%3E%3D%202.7-red.svg" alt="Ruby >= 2.7"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg" alt="Platform">
+  <img src="https://img.shields.io/badge/engines-XeLaTeX%20%7C%20LuaLaTeX%20%7C%20pdfLaTeX-blueviolet.svg" alt="Engines">
+  <a href="docs/llm_reference.md"><img src="https://img.shields.io/badge/AI%20Agents-Claude%20%7C%20Cursor%20%7C%20Aider-success.svg" alt="AI Agents"></a>
+</p>
+
+<p align="center">
   <img src="docs/images/l_vs_latex_demo.gif" alt="latex_it Terminal Demo: Pinpointed Error Diagnostic &amp; Fix" width="100%">
 </p>
 
-`latex_it` (invoked as `l`) is a standalone build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
+`latex_it` (invoked as `l`) brings modern compiler diagnostics (like Rust or Typst) to traditional LaTeX workflows (`xelatex`, `lualatex`, and `pdflatex`), while keeping the workspace clean and fully compatible with arXiv submission.
 
 Like `latexmk`, it automates multi-pass convergence and bibliography processing, but adds three core architectural differences:
 1. **Directory isolation**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are confined to a `junk/` directory; only final outputs (`.pdf`, `.bbl`, `.synctex.gz`) remain in the working tree.
@@ -81,6 +89,23 @@ l -r        # Print raw compiler output (debug mode)
 l -C        # Clean auxiliary and temporary files
 l -x        # Show plain-English explanations for errors and warnings
 l -B        # Extract cited references into local .bib file
+```
+
+### Using with AI Coding Agents (Claude Code, Cursor, Aider, OpenCode)
+
+`latex_it` provides first-class support for autonomous coding agents. While standard TeX compilers output hundreds of lines of confusing terminal tracebacks that consume context tokens and mislead LLMs, `l -llm` provides token-optimized, strict GNU compiler output:
+
+- **0 tokens on success**: Exits `0` silently with zero stdout/stderr on clean builds or up-to-date targets.
+- **Precise line & column diagnostics**: Emits exact `file:line:col: error: message` headers so agents jump straight to the fix.
+- **Warning folding**: Automatically collapses 50+ repeated citation or layout warnings into the first 2 instances plus count.
+
+**Drop-in configuration for your project's `CLAUDE.md`, `.cursorrules`, or system prompt:**
+
+```markdown
+### LaTeX Compilation Rule
+When compiling or checking LaTeX documents, always use `l -llm <file>.tex` instead of `pdflatex` or `latexmk`:
+- Runs in token-optimized mode (silent on clean build; exact file:line:col diagnostics on failure).
+- Confines auxiliary build artifacts to `junk/` automatically.
 ```
 
 ---

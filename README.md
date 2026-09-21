@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/sarielhp/latex_it/actions/workflows/ci.yml"><img src="https://github.com/sarielhp/latex_it/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/sarielhp/latex_it/releases/latest"><img src="https://img.shields.io/github/v/release/sarielhp/latex_it?color=blue&label=release" alt="Release"></a>
   <a href="https://www.ruby-lang.org"><img src="https://img.shields.io/badge/ruby-%3E%3D%202.7-red.svg" alt="Ruby >= 2.7"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg" alt="Platform">

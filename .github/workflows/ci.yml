@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        ruby: [ '3.0', '3.1', '3.2', '3.3' ]
+        include:
+          - os: ubuntu-22.04
+            ruby: '2.7'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Verify bundle integrity & syntax
+        run: ./tools/bundle --check
+
+      - name: Check code metrics and cognitive complexity
+        run: ./tools/gate_audit_code
+
+      - name: Run fast test suite
+        run: ./tools/gate --fast

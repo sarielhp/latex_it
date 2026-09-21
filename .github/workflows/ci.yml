@@ -15,9 +15,6 @@ jobs:
       matrix:
         os: [ ubuntu-latest ]
         ruby: [ '3.0', '3.1', '3.2', '3.3' ]
-        include:
-          - os: ubuntu-22.04
-            ruby: '2.7'
 
     steps:
       - name: Checkout repository
@@ -27,6 +24,9 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
+
+      - name: Install test dependencies
+        run: gem install minitest rainbow --no-document
 
       - name: Verify bundle integrity & syntax
         run: ./tools/bundle --check

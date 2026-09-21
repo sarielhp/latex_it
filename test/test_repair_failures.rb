@@ -250,15 +250,17 @@ class TestRepairFailures < Minitest::Test
 
   def test_latex_pass_signal_termination_detected_and_handled
     with_project do |builder|
-      builder.send(:setup_environment)
-      signaled_stat = Struct.new(:exitstatus, :termsig, :signaled?, :success?).new(nil, 11, true, false)
-      builder.stub(:capture_pass_output, ['', signaled_stat]) do
-        builder.stub(:report_errors, ->(_lgx) { @reported = true }) do
-          _out, err = capture_io do
-            refute builder.send(:run_latex_pass, '_1')
+      LaTeXUtils.stub(:check_program, nil) do
+        builder.send(:setup_environment)
+        signaled_stat = Struct.new(:exitstatus, :termsig, :signaled?, :success?).new(nil, 11, true, false)
+        builder.stub(:capture_pass_output, ['', signaled_stat]) do
+          builder.stub(:report_errors, ->(_lgx) { @reported = true }) do
+            _out, err = capture_io do
+              refute builder.send(:run_latex_pass, '_1')
+            end
+            assert @reported, 'report_errors was not called on fatal signal'
+            assert_includes err, 'LaTeX engine terminated by signal 11 (fatal crash).'
           end
-          assert @reported, 'report_errors was not called on fatal signal'
-          assert_includes err, 'LaTeX engine terminated by signal 11 (fatal crash).'
         end
       end
     end

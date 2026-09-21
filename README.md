@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/sarielhp/latex_it/actions/workflows/ci.yml"><img src="https://github.com/sarielhp/latex_it/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/sarielhp/latex_it/releases/latest"><img src="https://img.shields.io/github/v/release/sarielhp/latex_it?color=blue&label=release" alt="Release"></a>
-  <a href="https://www.ruby-lang.org"><img src="https://img.shields.io/badge/ruby-%3E%3D%202.7-red.svg" alt="Ruby >= 2.7"></a>
+  <a href="https://www.ruby-lang.org"><img src="https://img.shields.io/badge/ruby-%3E%3D%203.0-red.svg" alt="Ruby >= 3.0"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg" alt="Platform">
   <img src="https://img.shields.io/badge/engines-XeLaTeX%20%7C%20LuaLaTeX%20%7C%20pdfLaTeX-blueviolet.svg" alt="Engines">
   <a href="docs/llm_reference.md"><img src="https://img.shields.io/badge/AI%20Agents-Claude%20%7C%20Cursor%20%7C%20Aider-success.svg" alt="AI Agents"></a>
@@ -62,7 +62,7 @@ cd latex_it
 ### Requirements
 
 - **Operating System**: **Linux** (primary target; macOS is supported/functional via Homebrew/MacTeX; Windows requires WSL).
-- **Ruby**: 2.7 or newer.
+- **Ruby**: 3.0 or newer.
 - **TeX Distribution**: TeX Live, MacTeX, or compatible (`xelatex`, `lualatex`, or `pdflatex`).
 - **Optional**: `poppler-utils` (provides `pdftotext` for `-d` / `--diff` text diffing; `brew install poppler` on macOS).
 

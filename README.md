@@ -31,8 +31,8 @@ Like `latexmk`, it automates multi-pass convergence and bibliography processing,
 Standard TeX compiler logs bury the root cause under dozens of lines of internal state, often missing the exact line where an unclosed macro or brace began. `latex_it` intercepts and correlates token streams in real time to pinpoint the source and column immediately:
 
 <p align="center">
-  <a href="docs/gallery.html"><img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
-  <em>Explore more real-world examples in the <a href="docs/gallery.html">Diagnostic Showcase Gallery</a>.</em>
+  <a href="https://sarielhp.github.io/latex_it/docs/gallery.html"><img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
+  <em>Explore more real-world examples in the <a href="https://sarielhp.github.io/latex_it/docs/gallery.html">Diagnostic Showcase Gallery</a>.</em>
 </p>
 
 ---

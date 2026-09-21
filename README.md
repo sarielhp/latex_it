@@ -6,12 +6,20 @@
   <a href="https://sarielhp.github.io/latex_it/docs/gallery.html"><strong>Diagnostic Gallery</strong></a>
 </p>
 
+<p align="center">
+  <img src="docs/images/l_vs_latex_demo.gif" alt="latex_it Terminal Demo: Pinpointed Error Diagnostic &amp; Fix" width="100%">
+</p>
+
 `latex_it` (invoked as `l`) is a standalone build tool for LaTeX documents (`xelatex`, `lualatex`, and `pdflatex`).
 
 Like `latexmk`, it automates multi-pass convergence and bibliography processing, but adds three core architectural differences:
 1. **Directory isolation**: Intermediate build files (`.aux`, `.log`, `.toc`, etc.) are confined to a `junk/` directory; only final outputs (`.pdf`, `.bbl`, `.synctex.gz`) remain in the working tree.
 2. **4-tier diagnostic filtering**: Separates fatal errors and silent structural corruptions (**Alerts**) from standard warnings and harmless sub-millimeter layout noise (**Whatevers**).
 3. **Dual human and agent interfaces**: Supports interactive terminal diagnostics with explanatory hints (`-x`), strict GNU compiler mode (`-cc`), and token-optimized plaintext for autonomous AI coding agents (`-llm`).
+
+### Instant Diagnostics vs. Standard TeX Logs
+
+Standard TeX compiler logs bury the root cause under dozens of lines of internal state, often missing the exact line where an unclosed macro or brace began. `latex_it` intercepts and correlates token streams in real time to pinpoint the source and column immediately:
 
 <p align="center">
   <a href="docs/gallery.html"><img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>

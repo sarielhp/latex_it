@@ -1,0 +1,89 @@
+# ==============================================================================
+# Demo Scenario: Standard LaTeX vs latex_it (l) - Sequential Comparison
+# ==============================================================================
+output: "../docs/images/l_vs_latex_demo.gif"
+
+settings:
+  width: 1200
+  height: 648
+  font_size: 18
+  theme: "Catppuccin Mocha"
+  typing_speed: "35ms"
+  padding: 20
+  prompt: "❯ "
+
+files:
+  example.tex: |
+    \documentclass{article}
+    \usepackage{amsmath}
+
+    \begin{document}
+    \section{Optimization}
+    Consider the following loss function:
+    \begin{equation}
+      \min_{x \ge 0} \frac{1}{2 + \sqrt{x} = y
+    \end{equation}
+
+    Notice how LaTeX handles missing braces in math macros.
+    \end{document}
+
+steps:
+  # 1. Intro title card: Large letters "latex_it" and GitHub URL
+  - banner:
+      title: "latex_it"
+      subtitle: "Fast, friendly, pinpointed LaTeX diagnostics"
+      url: "https://github.com/sarielhp/latex_it"
+      delay_after: 1.8s
+
+  # 2. Clear screen and inspect source code with syntax highlighting
+  - type: "clear"
+    delay_after: 0.4s
+
+  - type: "batcat --paging=never -l latex example.tex"
+    delay_after: 2.2s
+
+  # 3. Compile with standard LaTeX: raw cryptic traceback
+  - type: "pdflatex -interaction=nonstopmode example.tex"
+    delay_after: 2.0s
+
+  # 4. Clear the screen
+  - type: "clear"
+    delay_after: 0.5s
+
+  # 5. Compile with latex_it (l): instant pinpointed diagnosis & hint
+  - type: "l example.tex"
+    delay_after: 3.2s
+
+  # 6. Fix with vim like a human developer!
+  # Open vim directly on line 8 where the error occurred
+  - type: "vim +8 example.tex"
+    delay_after: 1.0s
+
+  # Jump to '=' on the line
+  - type: "f="
+    enter: false
+    delay_after: 0.3s
+
+  # Insert missing closing brace '}'
+  - type: "i}"
+    enter: false
+    delay_after: 0.5s
+
+  # Return to normal mode
+  - escape: true
+    delay_after: 0.3s
+
+  # Save and exit vim
+  - type: ":wq"
+    delay_after: 0.9s
+
+  # 7. Recompile with l -cc: instant clean success message
+  - type: "l -cc example.tex"
+    delay_after: 2.5s
+
+  # 8. Outro card: Large letters "latex_it" and GitHub URL
+  - banner:
+      title: "latex_it"
+      subtitle: "Fast, friendly, pinpointed LaTeX diagnostics"
+      url: "https://github.com/sarielhp/latex_it"
+      delay_after: 3.2s

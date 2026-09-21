@@ -1,0 +1,360 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ==============================================================================
+# tools/generate_demo_gif
+#
+# Flexible terminal demo GIF generator using VHS (charmbracelet/vhs).
+# Translates declarative YAML scenarios into animated terminal recordings.
+# ==============================================================================
+
+require 'fileutils'
+require 'open3'
+require 'optparse'
+require 'tmpdir'
+require 'yaml'
+
+module DemoRecorder
+  DEFAULT_SCENARIO = File.expand_path('../demos/l_vs_latex.yml', __dir__)
+
+  # Resolves executable dependencies and environment paths
+  class Environment
+    attr_reader :vhs_path, :ttyd_path, :ffmpeg_path
+
+    def initialize
+      @ffmpeg_path = find_binary('ffmpeg', ['/usr/bin/ffmpeg', '/bin/ffmpeg'])
+      @vhs_path = find_binary('vhs', ['/tmp/gobin/vhs', File.expand_path('~/.go/bin/vhs'), File.expand_path('~/bin/vhs')])
+      @ttyd_path = find_binary('ttyd', ['/tmp/ttyd', File.expand_path('~/bin/ttyd')])
+    end
+
+    def validate!
+      missing = []
+      missing << 'ffmpeg (install with: apt-get install ffmpeg)' unless @ffmpeg_path
+      missing << 'vhs (run: go install github.com/charmbracelet/vhs@latest)' unless @vhs_path
+      missing << 'ttyd (download from https://github.com/tsl0922/ttyd/releases)' unless @ttyd_path
+
+      return if missing.empty?
+
+      warn "Error: Missing required dependencies:\n  - " + missing.join("\n  - ")
+      exit 1
+    end
+
+    def path_env
+      dirs = [
+        File.dirname(@vhs_path),
+        File.dirname(@ttyd_path),
+        '/tmp/gobin',
+        '/tmp/cfonts/node_modules/.bin',
+        File.expand_path('~/bin'),
+        File.expand_path('..', __dir__),
+        ENV.fetch('PATH', '')
+      ].compact.uniq
+      dirs.join(':')
+    end
+
+    private
+
+    def find_binary(name, candidate_paths = [])
+      candidate_paths.each do |path|
+        return path if path && File.executable?(path)
+      end
+
+      out, status = Open3.capture2('which', name)
+      trimmed = out.strip
+      return trimmed if status.success? && !trimmed.empty? && File.executable?(trimmed)
+
+      nil
+    end
+  end
+
+  # Represents the parsed scenario data
+  class Scenario
+    attr_reader :output_path, :settings, :files, :steps
+
+    def initialize(data, base_dir, cli_options = {})
+      @data = data
+      @base_dir = base_dir
+      @settings = (@data['settings'] || {}).dup
+      apply_cli_overrides(cli_options)
+      @files = @data['files'] || {}
+      @steps = @data['steps'] || []
+      resolve_output_path(cli_options[:output])
+    end
+
+    def self.load_file(path, cli_options = {})
+      raise ArgumentError, "Scenario file not found: #{path}" unless File.exist?(path)
+
+      data = YAML.safe_load(File.read(path)) || {}
+      new(data, File.dirname(File.expand_path(path)), cli_options)
+    end
+
+    def self.load_default(cli_options = {})
+      if File.exist?(DEFAULT_SCENARIO)
+        load_file(DEFAULT_SCENARIO, cli_options)
+      else
+        raise ArgumentError, "Default scenario not found at #{DEFAULT_SCENARIO}"
+      end
+    end
+
+    private
+
+    def apply_cli_overrides(cli_options)
+      @settings['theme'] = cli_options[:theme] if cli_options[:theme]
+      @settings['width'] = cli_options[:width] if cli_options[:width]
+      @settings['height'] = cli_options[:height] if cli_options[:height]
+      @settings['font_size'] = cli_options[:font_size] if cli_options[:font_size]
+      @settings['typing_speed'] = cli_options[:speed] if cli_options[:speed]
+      @settings['playback_speed'] = cli_options[:playback_speed] if cli_options[:playback_speed]
+    end
+
+    def resolve_output_path(cli_output)
+      raw = cli_output || @data['output'] || 'demo.gif'
+      @output_path = File.absolute_path(raw, @base_dir)
+    end
+  end
+
+  # Compiles scenario definitions into VHS .tape directives
+  class TapeBuilder
+    def initialize(scenario, work_dir)
+      @scenario = scenario
+      @work_dir = work_dir
+      @settings = scenario.settings
+      @lines = []
+    end
+
+    def build
+      emit_header
+      emit_bootstrap
+      @scenario.steps.each { |step| process_step(step) }
+      @lines.join("\n") + "\n"
+    end
+
+    private
+
+    def emit_header
+      w = @settings['width'] || 1000
+      h = @settings['height'] || 540
+      font_size = @settings['font_size'] || 15
+      theme = @settings['theme'] || 'Catppuccin Mocha'
+      speed = @settings['typing_speed'] || '35ms'
+      padding = @settings['padding'] || 16
+      playback = @settings['playback_speed']
+
+      @lines << %(Output "#{@scenario.output_path}")
+      @lines << "Set FontSize #{font_size}"
+      @lines << "Set Width #{w}"
+      @lines << "Set Height #{h}"
+      @lines << "Set Padding #{padding}"
+      @lines << %(Set Theme "#{theme}")
+      @lines << "Set TypingSpeed #{speed}"
+      @lines << "Set PlaybackSpeed #{playback}" if playback
+      @lines << 'Set Shell "bash"'
+      @lines << ''
+    end
+
+    def emit_bootstrap
+      prompt = @settings['prompt'] || '❯ '
+
+      @lines << 'Hide'
+      @lines << %(Type "export PS1='#{prompt}'")
+      @lines << 'Enter'
+      @lines << %(Type "command -v batcat >/dev/null 2>&1 && alias bat=batcat")
+      @lines << 'Enter'
+      @lines << %(Type "cd '#{@work_dir}' && clear")
+      @lines << 'Enter'
+      @lines << 'Sleep 200ms'
+      @lines << 'Show'
+      @lines << ''
+    end
+
+    def process_step(step)
+      if step.is_a?(String)
+        emit_type_command(step, '1.5s')
+      elsif step.key?('type')
+        delay = step['delay_after'] || '1.5s'
+        emit_type_command(step['type'], delay, speed: step['speed'], enter: step['enter'])
+      elsif step.key?('sleep')
+        @lines << "Sleep #{step['sleep']}"
+        @lines << ''
+      elsif step.key?('clear')
+        emit_type_command('clear', step['delay_after'] || '200ms')
+      elsif step.key?('banner')
+        process_banner(step['banner'])
+      elsif step.key?('escape')
+        delay = step['delay_after'] || '300ms'
+        @lines << 'Escape'
+        @lines << "Sleep #{delay}"
+        @lines << ''
+      elsif step.key?('key')
+        delay = step['delay_after'] || '200ms'
+        @lines << step['key']
+        @lines << "Sleep #{delay}"
+        @lines << ''
+      end
+    end
+
+    def process_banner(b)
+      @banner_counter ||= 0
+      @banner_counter += 1
+      title = b['title'] || 'latex_it'
+      sub = b['subtitle']
+      url = b['url'] || 'https://github.com/sarielhp/latex_it'
+      delay = b['delay_after'] || '3s'
+
+      banner_filename = "_banner_#{@banner_counter}.sh"
+      banner_path = File.join(@work_dir, banner_filename)
+      script = [
+        '#!/usr/bin/env bash',
+        'clear',
+        'echo ""',
+        %(if command -v cfonts >/dev/null 2>&1; then),
+        %(  cfonts "#{escape_quotes(title)}" -f block -g cyan,magenta -a left -s),
+        %(elif command -v figlet >/dev/null 2>&1; then),
+        %(  echo -e "  \\e[1;36m\$(figlet -f slant '#{escape_quotes(title)}')\\e[0m"),
+        %(else),
+        %(  echo -e "  \\e[1;36m=== #{escape_quotes(title)} ===\\e[0m"),
+        %(fi),
+        sub ? %(echo -e "\n  \\e[1;33m#{escape_quotes(sub)}\\e[0m") : nil,
+        %(echo -e "  \\e[1;34m#{escape_quotes(url)}\\e[0m\n")
+      ].compact.join("\n") + "\n"
+      File.write(banner_path, script)
+
+      @lines << 'Hide'
+      @lines << %(Type "bash #{banner_filename}")
+      @lines << 'Enter'
+      @lines << 'Sleep 100ms'
+      @lines << 'Show'
+      @lines << "Sleep #{delay}"
+      @lines << ''
+    end
+
+    def emit_type_command(cmd, delay, speed: nil, enter: true)
+      @lines << "Set TypingSpeed #{speed}" if speed
+      @lines << %(Type "#{escape_quotes(cmd)}")
+      @lines << 'Enter' unless enter == false
+      @lines << "Set TypingSpeed #{@settings['typing_speed'] || '35ms'}" if speed
+      @lines << "Sleep #{delay}"
+      @lines << ''
+    end
+
+    def escape_quotes(str)
+      str.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+    end
+  end
+
+  # Orchestrates directory setup, tape generation, and VHS execution
+  class Runner
+    def initialize(scenario, env, options = {})
+      @scenario = scenario
+      @env = env
+      @options = options
+    end
+
+    def run
+      Dir.mktmpdir('latex_it_demo_') do |tmpdir|
+        setup_workspace_files(tmpdir)
+        tape_content = TapeBuilder.new(@scenario, tmpdir).build
+
+        if @options[:preview]
+          puts tape_content
+          return 0
+        end
+
+        execute_tape(tape_content, tmpdir)
+      end
+    end
+
+    private
+
+    def setup_workspace_files(dir)
+      @scenario.files.each do |rel_path, content|
+        target = File.join(dir, rel_path)
+        FileUtils.mkdir_p(File.dirname(target))
+        File.write(target, content)
+      end
+    end
+
+    def execute_tape(content, dir)
+      tape_path = File.join(dir, 'session.tape')
+      File.write(tape_path, content)
+
+      FileUtils.cp(tape_path, @options[:keep_tape_path]) if @options[:keep_tape_path]
+      FileUtils.mkdir_p(File.dirname(@scenario.output_path))
+
+      puts "==> Running VHS to render: #{@scenario.output_path}"
+      env = { 'PATH' => @env.path_env }
+      success = system(env, @env.vhs_path, tape_path)
+      status = $?.exitstatus || (success ? 0 : 1)
+
+      unless success
+        warn "Error: VHS execution failed (exit #{status})"
+        return status
+      end
+
+      report_result
+    end
+
+    def report_result
+      if File.exist?(@scenario.output_path) && File.size(@scenario.output_path).positive?
+        size_kb = (File.size(@scenario.output_path) / 1024.0).round(1)
+        puts "✔ Demo GIF generated successfully: #{@scenario.output_path} (#{size_kb} KB)"
+        0
+      else
+        warn "Error: VHS completed but output file not found: #{@scenario.output_path}"
+        1
+      end
+    end
+  end
+
+  # Parses CLI arguments
+  class CLI
+    def self.run(argv = ARGV)
+      options = {}
+      parser = build_option_parser(options)
+      parser.parse!(argv)
+
+      env = Environment.new
+      env.validate! unless options[:preview]
+
+      scenario = resolve_scenario(options)
+      runner = Runner.new(scenario, env, options)
+      exit(runner.run)
+    rescue OptionParser::ParseError, ArgumentError => e
+      warn "Error: #{e.message}"
+      exit 1
+    end
+
+    def self.build_option_parser(options)
+      OptionParser.new do |opts|
+        opts.banner = 'Usage: tools/generate_demo_gif [options]'
+        opts.separator ''
+        opts.separator 'Options:'
+
+        opts.on('-s', '--scenario FILE', 'Scenario YAML file (default: demos/l_vs_latex.yml)') { |v| options[:scenario] = v }
+        opts.on('-o', '--output FILE', 'Output GIF path') { |v| options[:output] = v }
+        opts.on('--theme THEME', 'Terminal color theme (e.g. Catppuccin Mocha, nord)') { |v| options[:theme] = v }
+        opts.on('--width WIDTH', Integer, 'Terminal width in pixels') { |v| options[:width] = v }
+        opts.on('--height HEIGHT', Integer, 'Terminal height in pixels') { |v| options[:height] = v }
+        opts.on('--font-size SIZE', Integer, 'Terminal font size') { |v| options[:font_size] = v }
+        opts.on('--speed SPEED', 'Typing speed (e.g. 40ms)') { |v| options[:speed] = v }
+        opts.on('--playback-speed SPEED', Float, 'Video playback speed (e.g. 0.5 for half-speed)') { |v| options[:playback_speed] = v }
+        opts.on('--keep-tape [PATH]', 'Save generated .tape file') { |v| options[:keep_tape_path] = v || 'demo.tape' }
+        opts.on('--preview', 'Print compiled .tape directives without running VHS') { options[:preview] = true }
+        opts.on('-h', '--help', 'Show this help message') do
+          puts opts
+          exit 0
+        end
+      end
+    end
+
+    def self.resolve_scenario(options)
+      if options[:scenario]
+        Scenario.load_file(options[:scenario], options)
+      else
+        Scenario.load_default(options)
+      end
+    end
+  end
+end
+
+DemoRecorder::CLI.run if $PROGRAM_NAME == __FILE__

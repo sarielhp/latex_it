@@ -123,21 +123,19 @@ class LatexBuilder
     if targets_up_to_date?
       if json_mode?
         analyze_output
-        return true
       elsif llm_mode?
         analyze_output if @options[:all] || @options[:werror]
-        return true
       else
         puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -f' to force rebuild)"
         analyze_output if diagnostics_requested?
-        return true
       end
+      return true
     end
 
+    snapshot_build_inputs!
     FileUtils.rm_f(File.join(@junk_dir, '.build_state.json'))
     clean_pass_logs
     junk_dir_create
-    snapshot_build_inputs!
     total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
 
     unless run_convergence_loop
@@ -221,13 +219,8 @@ class LatexBuilder
     end
   end
 
-  def log_pass_start(engine, pass, first: false)
-    log_activity_start(engine, "Building #{@bfilename}.pdf (#{engine} pass #{pass})...", suffix: " (#{pass})", first: first)
-  end
-
-  def log_bib_start(tool, first: false)
-    log_activity_start(tool, "Running #{tool} on #{@bfilename}...", first: first)
-  end
+  def log_pass_start(engine, pass, first: false) = log_activity_start(engine, "Building #{@bfilename}.pdf (#{engine} pass #{pass})...", suffix: " (#{pass})", first: first)
+  def log_bib_start(tool, first: false) = log_activity_start(tool, "Running #{tool} on #{@bfilename}...", first: first)
 
   def check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
     return [true, false] unless bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux)
@@ -279,9 +272,7 @@ class LatexBuilder
     true
   end
 
-  def log_index_start(first: false)
-    log_activity_start('makeindex', "Running makeindex on #{@bfilename}...", first: first)
-  end
+  def log_index_start(first: false) = log_activity_start('makeindex', "Running makeindex on #{@bfilename}...", first: first)
 
   def needs_index_pass?
     idx = File.join(@junk_dir, "#{@bfilename}.idx")
@@ -364,7 +355,10 @@ class LatexBuilder
       @input_snapshots[f] = { mtime: File.mtime(f).to_f, sha: (Digest::SHA256.file(f).hexdigest rescue nil) }
     end
     state = JSON.parse(File.read(File.join(@junk_dir, '.build_state.json'))) rescue nil
-    @last_bib_citations ||= state['citations'] if state.is_a?(Hash) && state['citations'].is_a?(Array)
+    if state.is_a?(Hash)
+      @last_bib_citations ||= state['citations'] if state['citations'].is_a?(Array)
+      @last_bib_sources ||= state['sources'] if state['sources'].is_a?(Hash)
+    end
   end
 
   def save_build_state!
@@ -446,9 +440,7 @@ class LatexBuilder
     ['*.bib'] + dirs.map { |d| "#{d.to_s.chomp('/')}/*.bib" }
   end
 
-  def bib_files_on_disk
-    Dir[*bib_globs].select { |f| File.file?(f) }
-  end
+  def bib_files_on_disk = Dir[*bib_globs].select { |f| File.file?(f) }
 
   def export_dependencies
     deps = []
@@ -459,9 +451,7 @@ class LatexBuilder
     end
 
     fls_file = File.join(@junk_dir, "#{@bfilename}.fls")
-    if deps.empty? && File.exist?(fls_file)
-      deps = extract_fls_dependencies(fls_file)
-    end
+    deps = extract_fls_dependencies(fls_file) if deps.empty? && File.exist?(fls_file)
 
     if deps.empty?
       with_lock do
@@ -494,11 +484,7 @@ class LatexBuilder
   def project_tmp_dir
     @project_tmp_dir ||= begin
       dir = File.join(Dir.tmpdir, "latex_it_#{Process.uid}")
-      begin
-        Dir.mkdir(dir, 0o700)
-      rescue Errno::EEXIST
-        nil
-      end
+      (Dir.mkdir(dir, 0o700) rescue nil)
       verify_private_dir!(dir)
       dir
     end
@@ -624,9 +610,7 @@ class LatexBuilder
     junk_bbl = File.join(@junk_dir, root_bbl)
     if File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(root_bbl)
       FileUtils.mkdir_p(@junk_dir)
-      if !File.exist?(junk_bbl) || File.mtime(root_bbl) > File.mtime(junk_bbl)
-        FileUtils.cp(root_bbl, junk_bbl, preserve: true)
-      end
+      FileUtils.cp(root_bbl, junk_bbl, preserve: true) if !File.exist?(junk_bbl) || File.mtime(root_bbl) > File.mtime(junk_bbl)
     elsif @options[:trace] && File.exist?(junk_bbl) && !File.exist?(root_bbl) && LaTeXUtils.bbl_has_entries?(junk_bbl)
       FileUtils.cp(junk_bbl, root_bbl, preserve: true)
     end
@@ -743,13 +727,8 @@ class LatexBuilder
     latexopts = ENV['LATEXOPTS'] || ''
     latexoptions = ENV['LATEXOPTIONS'] || ''
 
-    cfilename = if !latexoptions.empty?
-                  "#{latexoptions} #{RUNTIME_HOOK}\\input{#{@filename}}"
-                elsif !latexopts.empty?
-                  "#{latexopts}#{RUNTIME_HOOK}\\input{#{@filename}}"
-                else
-                  "#{RUNTIME_HOOK}\\input{#{@filename}}"
-                end
+    prefix = !latexoptions.empty? ? "#{latexoptions} " : latexopts
+    cfilename = "#{prefix}#{RUNTIME_HOOK}\\input{#{@filename}}"
 
     [@engine_name] + @latex_flags + [cfilename]
   end
@@ -777,15 +756,13 @@ class LatexBuilder
   end
 
   def format_compilation_failure(status)
-    msg = 'Latex compilation failed!'
-    colored_msg = (@options && @options[:color] == false) ? msg : Rainbow(msg).red.bright
-    "#{colored_msg} (Status: #{status})"
+    msg = (@options && @options[:color] == false) ? 'Latex compilation failed!' : Rainbow('Latex compilation failed!').red.bright
+    "#{msg} (Status: #{status})"
   end
 
   def format_engine_crash(signal)
-    msg = 'Latex engine terminated by signal'
-    colored_msg = (@options && @options[:color] == false) ? msg : Rainbow(msg).red.bright
-    "#{colored_msg} #{signal} (fatal crash)"
+    msg = (@options && @options[:color] == false) ? 'Latex engine terminated by signal' : Rainbow('Latex engine terminated by signal').red.bright
+    "#{msg} #{signal} (fatal crash)"
   end
 
   def detect_bib_tool(aux_contents = nil)
@@ -808,15 +785,12 @@ class LatexBuilder
 
   def detect_biber_control_file
     bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
-    if File.exist?(bcf_path)
-      bcf_content = LaTeXUtils.safe_read(bcf_path)
-      return true if bcf_content.include?('<bcf:citekey') || @options[:bib] == true
-    end
+    return true if File.exist?(bcf_path) && (LaTeXUtils.safe_read(bcf_path).include?('<bcf:citekey') || @options[:bib] == true)
 
     run_xml_path = File.join(@junk_dir, "#{@bfilename}.run.xml")
     if File.exist?(run_xml_path)
-      run_xml_content = LaTeXUtils.safe_read(run_xml_path)
-      return true if run_xml_content =~ /biber/i && (run_xml_content =~ /active="1"/ || @options[:bib] == true)
+      content = LaTeXUtils.safe_read(run_xml_path)
+      return true if content =~ /biber/i && (content =~ /active="1"/ || @options[:bib] == true)
     end
 
     false
@@ -833,12 +807,9 @@ class LatexBuilder
     return false unless aux_contents.include?('\abx@aux@bcf')
 
     bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
-    if File.exist?(bcf_path)
-      bcf_content = LaTeXUtils.safe_read(bcf_path)
-      bcf_content.include?('<bcf:citekey') || @options[:bib] == true
-    else
-      @options[:bib] == true
-    end
+    return @options[:bib] == true unless File.exist?(bcf_path)
+
+    LaTeXUtils.safe_read(bcf_path).include?('<bcf:citekey') || @options[:bib] == true
   end
 
   def detect_bibtex_aux(aux_contents)
@@ -917,9 +888,7 @@ class LatexBuilder
     true
   end
 
-  def bibliography_source(primary, secondary)
-    [primary, secondary].find { |f| LaTeXUtils.bbl_has_entries?(f) }
-  end
+  def bibliography_source(primary, secondary) = [primary, secondary].find { |f| LaTeXUtils.bbl_has_entries?(f) }
 
   def preserve_bibliography_backup(previous, root_bbl)
     return unless previous
@@ -949,18 +918,14 @@ class LatexBuilder
     return [] unless File.exist?(bcf_path)
 
     files = []
-    LaTeXUtils.safe_read(bcf_path).scan(/<bcf:datasource[^>]*>(.*?)<\/bcf:datasource>/) do |m|
-      collect_bib_candidates(m.first.strip, files)
-    end
+    LaTeXUtils.safe_read(bcf_path).scan(/<bcf:datasource[^>]*>(.*?)<\/bcf:datasource>/) { |m| collect_bib_candidates(m.first.strip, files) }
     files
   end
 
   def extract_aux_bib_files(aux_contents = nil)
     files = []
     sources = aux_contents ? [aux_contents] : Dir.glob(File.join(@junk_dir, '**/*.aux')).map { |aux| LaTeXUtils.safe_read(aux) }
-    sources.each do |content|
-      content.scan(/\\bibdata\{([^}]+)\}/) { |m| collect_bib_candidates(m.first, files) }
-    end
+    sources.each { |content| content.scan(/\\bibdata\{([^}]+)\}/) { |m| collect_bib_candidates(m.first, files) } }
     files
   end
 
@@ -1015,14 +980,22 @@ class LatexBuilder
     fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
     return true unless File.exist?(fnbbl)
 
+    log = LaTeXUtils.safe_read(loga)
+    return true if (tool == :biber && log =~ /Please \(re\)run Biber/i) || log =~ /Package natbib Warning: Citation\(s\) may have changed/i
+
+    bcf = File.join(@junk_dir, "#{@bfilename}.bcf")
     bbl_mtime = File.mtime(fnbbl)
-    bib_files = discover_bib_files(aux_contents)
-    return true if bib_files.any? { |b| File.mtime(b) > bbl_mtime }
+    return true if tool == :biber && File.exist?(bcf) && File.mtime(bcf) > bbl_mtime
+    return true if discover_bib_files(aux_contents).any? { |b| bib_file_changed?(b, bbl_mtime) }
 
-    current_cites = current_citation_keys(aux_contents)
-    return true if @last_bib_citations && current_cites != @last_bib_citations
+    @last_bib_citations && current_citation_keys(aux_contents) != @last_bib_citations
+  end
 
-    false
+  def bib_file_changed?(path, bbl_mtime)
+    return true if File.mtime(path) > bbl_mtime
+
+    last_sha = @last_bib_sources&.dig(path, 'sha')
+    last_sha && (@input_snapshots&.dig(path, :sha) || (Digest::SHA256.file(path).hexdigest rescue nil)) != last_sha
   end
 
   def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
@@ -1062,11 +1035,8 @@ class LatexBuilder
   end
 
   def collect_brace_check_candidates
-    candidates = []
     fls_file = File.join(@junk_dir, "#{@bfilename}.fls")
-    if File.exist?(fls_file)
-      candidates.concat(extract_fls_dependencies(fls_file).select { |f| f.end_with?('.tex') })
-    end
+    candidates = File.exist?(fls_file) ? extract_fls_dependencies(fls_file).select { |f| f.end_with?('.tex') } : []
     candidates.concat(Dir['*.tex', '*/*.tex'].select { |f| File.file?(f) })
     patterns = @options[:exclude_source_tex] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS
     candidates.uniq.reject do |f|

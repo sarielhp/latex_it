@@ -269,5 +269,97 @@ class TestBibIntegration < Minitest::Test
       assert_equal 1, status.exitstatus, 'Expected compilation to halt on bib syntax error'
     end
   end
+
+  def test_biber_reruns_when_bbl_stale_after_citation_removed_with_force
+    Dir.mktmpdir('biber_stale_bbl_test') do |dir|
+      tex1 = <<~'TEX'
+        \documentclass{article}
+        \usepackage[backend=biber]{biblatex}
+        \addbibresource{refs.bib}
+        \begin{document}
+        Citing: \cite{itemA} and \cite{missingKey}.
+        \printbibliography
+        \end{document}
+      TEX
+      bib = <<~'BIB'
+        @article{itemA,
+          author = {Author, Real},
+          title = {A Valid Title},
+          journal = {Journal},
+          year = {2020}
+        }
+      BIB
+      File.write(File.join(dir, 'main.tex'), tex1)
+      File.write(File.join(dir, 'refs.bib'), bib)
+
+      bin_path = File.expand_path('../latex_it', __dir__)
+      # Pass 1: compiles with missingKey
+      out1, _ = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert File.exist?(File.join(dir, 'main.bbl')), 'Expected main.bbl to be created'
+      assert_includes out1, 'missingKey'
+
+      # Now fix main.tex by removing the citation to missingKey
+      tex2 = <<~'TEX'
+        \documentclass{article}
+        \usepackage[backend=biber]{biblatex}
+        \addbibresource{refs.bib}
+        \begin{document}
+        Citing: \cite{itemA}.
+        \printbibliography
+        \end{document}
+      TEX
+      File.write(File.join(dir, 'main.tex'), tex2)
+      # refs.bib is NOT touched, so its mtime is older than main.bbl!
+
+      # Recompile with -cc -f (as reported by user)
+      out2, status2 = Open3.capture2e(bin_path, '-cc', '-f', 'main.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus
+      refute_includes out2, 'Please (re)run Biber', 'Biber should have rerun to convergence'
+      refute_includes out2, 'missingKey', 'Stale missing database entry must not be reported'
+    end
+  end
+
+  def test_biber_reruns_when_bib_file_hash_changes_even_with_older_mtime
+    Dir.mktmpdir('biber_bib_hash_test') do |dir|
+      tex = <<~'TEX'
+        \documentclass{article}
+        \usepackage[backend=biber]{biblatex}
+        \addbibresource{refs.bib}
+        \begin{document}
+        Citing: \cite{itemA}.
+        \printbibliography
+        \end{document}
+      TEX
+      bib1 = <<~'BIB'
+        @article{itemA,
+          author = {Initial, Author},
+          title = {Initial Title},
+          journal = {Journal},
+          year = {2020}
+        }
+      BIB
+      File.write(File.join(dir, 'main.tex'), tex)
+      File.write(File.join(dir, 'refs.bib'), bib1)
+
+      bin_path = File.expand_path('../latex_it', __dir__)
+      out1, status1 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status1.exitstatus
+      pdf_path = File.join(dir, 'main.pdf')
+      txt1, _ = Open3.capture2('pdftotext', pdf_path, '-')
+      assert_includes txt1, 'Initial Title'
+
+      # Update refs.bib content, but forcibly backdate its mtime to be older than main.bbl!
+      bib2 = bib1.sub('Initial Title', 'Updated Title')
+      File.write(File.join(dir, 'refs.bib'), bib2)
+      bbl_path = File.join(dir, 'main.bbl')
+      past_time = File.mtime(bbl_path) - 100
+      File.utime(past_time, past_time, File.join(dir, 'refs.bib'))
+
+      out2, status2 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus
+      txt2, _ = Open3.capture2('pdftotext', pdf_path, '-')
+      assert_includes txt2, 'Updated Title', 'Biber should rerun because .bib content hash changed'
+    end
+  end
 end
 

@@ -86,32 +86,31 @@ module VersionBumper
     false
   end
 
+  def self.pid_is_bwrap?(pid)
+    comm = (File.read("/proc/#{pid}/comm").strip rescue nil)
+    return true if comm == 'bwrap'
+
+    first_arg = (File.read("/proc/#{pid}/cmdline").split("\0").first rescue nil)
+    return true if first_arg && File.basename(first_arg) == 'bwrap'
+
+    false
+  end
+
+  def self.parent_pid_of(pid)
+    status = (File.read("/proc/#{pid}/status") rescue '')
+    match = status.match(/^PPid:\s+(\d+)/)
+    match ? match[1].to_i : 0
+  end
+
   def self.bubblewrap_ancestor_process?
     pid = Process.pid
     while pid && pid > 0
-      comm_file = "/proc/#{pid}/comm"
-      if File.file?(comm_file)
-        comm = (File.read(comm_file).strip rescue nil)
-        return true if comm == 'bwrap'
-      end
+      return true if pid_is_bwrap?(pid)
 
-      cmdline_file = "/proc/#{pid}/cmdline"
-      if File.file?(cmdline_file)
-        first_arg = (File.read(cmdline_file).split("\0").first rescue nil)
-        return true if first_arg && File.basename(first_arg) == 'bwrap'
-      end
+      parent = parent_pid_of(pid)
+      break if parent == pid || parent <= 0
 
-      status_file = "/proc/#{pid}/status"
-      break unless File.file?(status_file)
-
-      status = (File.read(status_file) rescue '')
-      match = status.match(/^PPid:\s+(\d+)/)
-      break unless match
-
-      parent_pid = match[1].to_i
-      break if parent_pid == pid || parent_pid <= 0
-
-      pid = parent_pid
+      pid = parent
     end
     false
   rescue StandardError

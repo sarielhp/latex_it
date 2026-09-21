@@ -187,8 +187,10 @@ class TestRepairFailures < Minitest::Test
         end
         @extract_calls = 0
         capture_io do
-          Open3.stub(:capture2e, command) do
-            refute LatexPackager.new(builder).send(:verify_pdf_diff, 'paper.pdf', 'junk/paper.pdf')
+          LaTeXUtils.stub(:command_available?, true) do
+            Open3.stub(:capture2e, command) do
+              refute LatexPackager.new(builder).send(:verify_pdf_diff, 'paper.pdf', 'junk/paper.pdf')
+            end
           end
         end
       end

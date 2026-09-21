@@ -25,7 +25,15 @@ class TestCompileMode < Minitest::Test
 
       out, status = Open3.capture2e(@bin_path, '--compile', 'clean.tex', chdir: dir)
       assert_equal 0, status.exitstatus, "Expected exit 0. Output: #{out}"
-      assert_empty out.strip, "Expected zero stdout/stderr on clean build, got: #{out}"
+      assert_includes out, 'Compilation succeeded.'
+
+      out_cc, status_cc = Open3.capture2e(@bin_path, '-cc', 'clean.tex', chdir: dir)
+      assert_equal 0, status_cc.exitstatus
+      assert_includes out_cc, 'Compilation succeeded.'
+
+      out_llm, status_llm = Open3.capture2e(@bin_path, '-cc', '-llm', 'clean.tex', chdir: dir)
+      assert_equal 0, status_llm.exitstatus
+      assert_empty out_llm.strip, "Expected silent success when -llm is used with -cc, got: #{out_llm}"
     end
   end
 

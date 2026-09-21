@@ -19,11 +19,12 @@ require_relative 'utils'
 require_relative 'compatibility'
 require_relative 'diagnostics'
 require_relative 'brace_checker'
+require_relative 'bib_manager'
 
 class LatexBuilder
   include LaTeXDiagnostics
 
-  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :junk_dir
+  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :junk_dir, :biberr, :input_snapshots, :bib_manager
 
   CACHE_ENV_KEYS = %w[
     LATEXOPTS LATEXOPTIONS TEXINPUTS PDFTEXINPUTS XETEXINPUTS LUATEXINPUTS
@@ -53,6 +54,7 @@ class LatexBuilder
     @pdferr = "#{@junk_dir}/err_#{@engine_name}"
     @biberrbase = 'err_bib'
     @biberr = "#{@junk_dir}/#{@biberrbase}"
+    @bib_manager = LaTeXBibManager.new(self)
     @explained_categories = {}
   end
 
@@ -121,14 +123,7 @@ class LatexBuilder
     paper_cleanup
 
     if targets_up_to_date?
-      if json_mode?
-        analyze_output
-      elsif llm_mode?
-        analyze_output if @options[:all] || @options[:werror]
-      else
-        puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -f' to force rebuild)"
-        analyze_output if diagnostics_requested?
-      end
+      handle_cached_up_to_date_build
       return true
     end
 
@@ -147,6 +142,19 @@ class LatexBuilder
     interactive_tty? ? LaTeXIndicator.stop(clear: true) : (puts('') unless @options[:compile])
     finalize_build_outputs(total_t0)
     true
+  end
+
+  def handle_cached_up_to_date_build
+    if json_mode?
+      analyze_output
+    elsif llm_mode?
+      analyze_output if @options[:all] || @options[:werror]
+    elsif compile_mode?
+      analyze_output if diagnostics_requested?
+    else
+      puts "      #{Rainbow("All targets (#{@bfilename}.pdf) are up-to-date.").green} (Use 'l -f' to force rebuild)"
+      analyze_output if diagnostics_requested?
+    end
   end
 
   def clean_pass_logs
@@ -236,6 +244,14 @@ class LatexBuilder
     run_index_pass
   end
 
+  def handle_convergence_bib_step(bib_ran, pass, curr_aux)
+    bib_tool = detect_bib_tool(curr_aux)
+    _bib_ok, bib_ran_now = check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
+    return [false, false] if bib_fatal?
+
+    [true, bib_ran_now]
+  end
+
   def run_convergence_loop
     @cacheable_build = true
     max_passes = @options[:passes] || 3
@@ -250,9 +266,8 @@ class LatexBuilder
       break if @options[:single_pass]
 
       curr_aux = compute_aux_hash
-      bib_tool = detect_bib_tool(curr_aux)
-      bib_ok, bib_ran_now = check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
-      return false if @bib_fatal
+      status_ok, bib_ran_now = handle_convergence_bib_step(bib_ran, pass, curr_aux)
+      return false unless status_ok
 
       if bib_ran_now
         bib_ran = true
@@ -310,14 +325,7 @@ class LatexBuilder
     File.mtime(idx) > File.mtime(ind)
   end
 
-  def bib_files_newer_than_bbl?
-    fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
-    return false unless File.exist?(fnbbl) && File.size(fnbbl) > 0
-    return false unless File.exist?(File.join(@junk_dir, "#{@bfilename}.aux")) || File.exist?(File.join(@junk_dir, "#{@bfilename}.bcf"))
-
-    bbl_mtime = File.mtime(fnbbl)
-    discover_bib_files.any? { |b| File.mtime(b) > bbl_mtime }
-  end
+  def bib_files_newer_than_bbl? = bib_manager.bib_files_newer_than_bbl?
 
   def extract_fls_dependencies(fls_path)
     return [] unless File.exist?(fls_path)
@@ -356,8 +364,8 @@ class LatexBuilder
     end
     state = JSON.parse(File.read(File.join(@junk_dir, '.build_state.json'))) rescue nil
     if state.is_a?(Hash)
-      @last_bib_citations ||= state['citations'] if state['citations'].is_a?(Array)
-      @last_bib_sources ||= state['sources'] if state['sources'].is_a?(Hash)
+      bib_manager.last_bib_citations ||= state['citations'] if state['citations'].is_a?(Array)
+      bib_manager.last_bib_sources ||= state['sources'] if state['sources'].is_a?(Hash)
     end
   end
 
@@ -434,13 +442,8 @@ class LatexBuilder
     Digest::SHA256.hexdigest(JSON.generate(payload))
   end
 
-  # Single source of truth for bibliography file locations on disk.
-  def bib_globs
-    dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
-    ['*.bib'] + dirs.map { |d| "#{d.to_s.chomp('/')}/*.bib" }
-  end
-
-  def bib_files_on_disk = Dir[*bib_globs].select { |f| File.file?(f) }
+  def bib_globs = bib_manager.bib_globs
+  def bib_files_on_disk = bib_manager.bib_files_on_disk
 
   def export_dependencies
     deps = []
@@ -765,238 +768,22 @@ class LatexBuilder
     "#{msg} #{signal} (fatal crash)"
   end
 
-  def detect_bib_tool(aux_contents = nil)
-    return nil if @options[:bib] == false
-
-    biber_detected = detect_biber_control_file
-    return :biber if biber_detected
-
-    if aux_contents.nil?
-      aux_files = Dir.glob(File.join(@junk_dir, '**/*.aux'))
-      return (@options[:bib] == true ? :bibtex : nil) if aux_files.empty?
-
-      aux_contents = aux_files.map { |f| LaTeXUtils.safe_read(f) }.join("\n")
-    elsif aux_contents.empty?
-      return (@options[:bib] == true ? :bibtex : nil)
-    end
-
-    detect_bib_tool_from_aux(aux_contents)
+  def bib_manager
+    @bib_manager ||= LaTeXBibManager.new(self)
   end
 
-  def detect_biber_control_file
-    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
-    return true if File.exist?(bcf_path) && (LaTeXUtils.safe_read(bcf_path).include?('<bcf:citekey') || @options[:bib] == true)
+  def bib_fatal? = bib_manager.bib_fatal
+  def detect_bib_tool(aux_contents = nil) = bib_manager.detect_bib_tool(aux_contents)
+  def discover_bib_files(aux_contents = nil) = bib_manager.discover_bib_files(aux_contents)
+  def run_bib_pass(tool, aux_contents = nil) = bib_manager.run_bib_pass(tool, aux_contents)
 
-    run_xml_path = File.join(@junk_dir, "#{@bfilename}.run.xml")
-    if File.exist?(run_xml_path)
-      content = LaTeXUtils.safe_read(run_xml_path)
-      return true if content =~ /biber/i && (content =~ /active="1"/ || @options[:bib] == true)
-    end
+  def compute_aux_hash = bib_manager.compute_aux_hash
 
-    false
-  end
-
-  def detect_bib_tool_from_aux(aux_contents)
-    return :biber if detect_biber_aux(aux_contents)
-    return :bibtex if detect_bibtex_aux(aux_contents)
-
-    @options[:bib] == true ? :bibtex : nil
-  end
-
-  def detect_biber_aux(aux_contents)
-    return false unless aux_contents.include?('\abx@aux@bcf')
-
-    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
-    return @options[:bib] == true unless File.exist?(bcf_path)
-
-    LaTeXUtils.safe_read(bcf_path).include?('<bcf:citekey') || @options[:bib] == true
-  end
-
-  def detect_bibtex_aux(aux_contents)
-    has_bibdata = aux_contents =~ /\\bibdata\{/
-    needs_bib = aux_contents =~ /\\citation/ || @options[:bib] == true
-    return false unless has_bibdata && needs_bib
-    return true if @options[:bib] == true
-
-    has_bbl = LaTeXUtils.bbl_has_entries?(File.join(@junk_dir, "#{@bfilename}.bbl")) || LaTeXUtils.bbl_has_entries?("#{@bfilename}.bbl")
-    return false if has_bbl && !bib_files_exist_for_bibdata?(aux_contents)
-
-    true
-  end
-
-  def bib_files_exist_for_bibdata?(aux_contents)
-    targets = aux_contents.scan(/\\bibdata\{([^}]+)\}/).flatten.flat_map { |s| s.split(',') }.map(&:strip)
-    return true if targets.empty?
-
-    configured_dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
-    bib_dirs = (['.'] + configured_dirs + ENV['BIBINPUTS'].to_s.split(':')).reject(&:empty?)
-    targets.any? do |target|
-      bib_dirs.any? do |d|
-        File.file?(File.join(d, "#{target}.bib")) || File.file?(File.join(d, target))
-      end
-    end
-  end
-
-  def run_bib_pass(tool, aux_contents = nil)
-    puts '' if @options[:trace] || @options[:raw]
-    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
-    fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
-    root_bbl = "#{@bfilename}.bbl"
-    previous = bibliography_source(root_bbl, fnbbl)
-    preserve_bibliography_backup(previous, root_bbl)
-    FileUtils.rm_f(fnbbl)
-
-    result = execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
-    @last_bib_citations = current_citation_keys(aux_contents)
-
-    if @options[:time]
-      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
-    end
-    result
-  end
-
-  def execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
-    @bib_fatal = false
-    begin
-      bib_out, status = execute_bibliography(tool)
-    rescue Errno::ENOENT => e
-      File.write(@biberr, e.message)
-      restore_bibliography(fnbbl, previous)
-      warn "\nBibliography tool unavailable: #{e.message}"
-      @bib_fatal = true
-      return false
-    end
-    File.write(@biberr, bib_out)
-
-    status_ok = status.respond_to?(:success?) ? status.success? : (status == 0)
-    has_entries = LaTeXUtils.bbl_has_entries?(fnbbl)
-    if LaTeXUtils.bib_fatal_error?(tool, bib_out, status_ok)
-      restore_bibliography(fnbbl, previous)
-      warn "\nBibliography process failed or produced no valid entries. See #{@biberr}."
-      @bib_fatal = true
-      return false
-    end
-
-    unless has_entries
-      restore_bibliography(fnbbl, previous) if previous
-      warn "\nBibliography process failed or produced no valid entries. See #{@biberr}." if @options[:verbose] || @options[:trace]
-      return false
-    end
-
-    update_target_file(fnbbl, root_bbl) if @options[:trace] || File.exist?(root_bbl)
-    true
-  end
-
-  def bibliography_source(primary, secondary) = [primary, secondary].find { |f| LaTeXUtils.bbl_has_entries?(f) }
-
-  def preserve_bibliography_backup(previous, root_bbl)
-    return unless previous
-
-    backup = "#{root_bbl}.bak"
-    FileUtils.cp(previous, backup)
-    FileUtils.cp(previous, File.join(@junk_dir, File.basename(backup)))
-  end
-
-  def restore_bibliography(junk_bbl, previous)
-    return FileUtils.rm_f(junk_bbl) unless previous
-
-    backup = "#{@bfilename}.bbl.bak"
-    source = File.file?(backup) ? backup : previous
-    FileUtils.cp(source, junk_bbl) unless source == junk_bbl
-  end
-
-  def discover_bib_files(aux_contents = nil)
-    bibs = bib_files_on_disk
-    bibs.concat(extract_aux_bib_files(aux_contents))
-    bibs.concat(extract_bcf_bib_files)
-    bibs.uniq
-  end
-
-  def extract_bcf_bib_files
-    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
-    return [] unless File.exist?(bcf_path)
-
-    files = []
-    LaTeXUtils.safe_read(bcf_path).scan(/<bcf:datasource[^>]*>(.*?)<\/bcf:datasource>/) { |m| collect_bib_candidates(m.first.strip, files) }
-    files
-  end
-
-  def extract_aux_bib_files(aux_contents = nil)
-    files = []
-    sources = aux_contents ? [aux_contents] : Dir.glob(File.join(@junk_dir, '**/*.aux')).map { |aux| LaTeXUtils.safe_read(aux) }
-    sources.each { |content| content.scan(/\\bibdata\{([^}]+)\}/) { |m| collect_bib_candidates(m.first, files) } }
-    files
-  end
-
-  def collect_bib_candidates(bibdata_str, files)
-    configured_dirs = @options[:bib_dirs] || LaTeXUtils::DEFAULT_BIB_DIRS
-    prefixes = [''] + configured_dirs.map { |d| "#{d.chomp('/')}/" }
-    prefixes += ENV['BIBINPUTS'].to_s.split(':').reject(&:empty?).map { |d| "#{d.chomp('/')}/" }
-    bibdata_str.split(',').map(&:strip).each do |name|
-      stem = name.delete_suffix('.bib')
-      match = prefixes.map { |pfx| "#{pfx}#{stem}.bib" }.find { |cand| File.file?(cand) }
-      files << match if match
-    end
-  end
-
-  def execute_bibliography(tool)
-    discover_bib_files.each { |b| FileUtils.cp(b, File.join(@junk_dir, '')) }
-    cmd = if tool == :biber
-            ['biber', '--output_safechars', '--input-directory', '.', '--output-directory', '.', @bfilename]
-          else
-            copy_style_files_for_bibtex
-            ['bibtex', @bfilename]
-          end
-    Dir.chdir(@junk_dir) { capture_pass_output(cmd) }
-  end
-
-  def copy_style_files_for_bibtex
-    return unless File.directory?('styles')
-
-    FileUtils.mkdir_p(File.join(@junk_dir, 'styles'))
-    Dir['styles/*'].each do |s|
-      base = File.basename(s)
-      FileUtils.cp_r(s, File.join(@junk_dir, 'styles/')) unless base == @junk_dir || base == 'junk' || base == '.junk'
-    end
-  end
-
-  def compute_aux_hash
-    aux_files = Dir.glob(File.join(@junk_dir, '**/*.aux')).sort
-    aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
-  end
-
-  def current_citation_keys(aux_contents = nil)
-    aux_str = aux_contents || compute_aux_hash
-    bcf_path = File.join(@junk_dir, "#{@bfilename}.bcf")
-    bcf = File.file?(bcf_path) ? LaTeXUtils.safe_read(bcf_path) : nil
-    LaTeXUtils.extract_citation_keys(aux_str, bcf)
-  end
-
-  def needs_bib_pass?(tool, loga, aux_contents = nil)
-    return false if @options[:bib] == false
-    return true if @options[:bib] == true
-
-    fnbbl = File.join(@junk_dir, "#{@bfilename}.bbl")
-    return true unless File.exist?(fnbbl)
-
-    log = LaTeXUtils.safe_read(loga)
-    return true if (tool == :biber && log =~ /Please \(re\)run Biber/i) || log =~ /Package natbib Warning: Citation\(s\) may have changed/i
-
-    bcf = File.join(@junk_dir, "#{@bfilename}.bcf")
-    bbl_mtime = File.mtime(fnbbl)
-    return true if tool == :biber && File.exist?(bcf) && File.mtime(bcf) > bbl_mtime
-    return true if discover_bib_files(aux_contents).any? { |b| bib_file_changed?(b, bbl_mtime) }
-
-    @last_bib_citations && current_citation_keys(aux_contents) != @last_bib_citations
-  end
-
-  def bib_file_changed?(path, bbl_mtime)
-    return true if File.mtime(path) > bbl_mtime
-
-    last_sha = @last_bib_sources&.dig(path, 'sha')
-    last_sha && (@input_snapshots&.dig(path, :sha) || (Digest::SHA256.file(path).hexdigest rescue nil)) != last_sha
-  end
+  def current_citation_keys(aux_contents = nil) = bib_manager.current_citation_keys(aux_contents)
+  def needs_bib_pass?(tool, loga, aux_contents = nil) = bib_manager.needs_bib_pass?(tool, loga, aux_contents)
+  def copy_style_files_for_bibtex = bib_manager.copy_style_files_for_bibtex
+  def collect_bib_candidates(bibdata_str, files) = bib_manager.collect_bib_candidates(bibdata_str, files)
+  def extract_aux_bib_files(aux_contents = nil) = bib_manager.extract_aux_bib_files(aux_contents)
 
   def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
     curr_aux_hash ||= compute_aux_hash
@@ -1093,4 +880,9 @@ class LatexBuilder
   ensure
     FileUtils.rm_f(tmp) if tmp && File.exist?(tmp)
   end
+
+  public :capture_pass_output, :update_target_file, :compute_aux_hash,
+         :detect_bib_tool, :discover_bib_files, :run_bib_pass,
+         :current_citation_keys, :needs_bib_pass?, :bib_files_newer_than_bbl?,
+         :bib_files_on_disk, :bib_globs, :bib_fatal?
 end

@@ -2227,17 +2227,29 @@ module LaTeXDiagnostics
     print_diagnostics_body(items_to_display, [], fallback_lines: fallback_lines, io: io)
   end
 
+  def print_compile_success_if_clean(errors, alerts, warnings)
+    return unless errors.zero? && !llm_mode? && !json_mode?
+    return if @options[:werror] && (alerts.positive? || warnings.positive?)
+
+    msg = (@options && @options[:color] == false) ? 'Compilation succeeded.' : Rainbow('Compilation succeeded.').green.bright
+    puts msg
+  end
+
   def summarize_and_check_werror(errors, alerts, warnings, whatevers)
     suppressed_alt = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_alerts] == true)
     suppressed_wrn = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_warnings] == true)
     suppressed_wht = (errors > 0 && !@options[:emacs] && !@options[:all]) || (@options[:suppress_whatevers] != false)
 
-    print_summary_line(
-      errors, alerts, warnings, whatevers,
-      suppressed_alerts: suppressed_alt && alerts > 0,
-      suppressed_warnings: suppressed_wrn && warnings > 0,
-      suppressed_whatevers: suppressed_wht && whatevers > 0
-    ) unless compile_mode?
+    if compile_mode?
+      print_compile_success_if_clean(errors, alerts, warnings)
+    else
+      print_summary_line(
+        errors, alerts, warnings, whatevers,
+        suppressed_alerts: suppressed_alt && alerts > 0,
+        suppressed_warnings: suppressed_wrn && warnings > 0,
+        suppressed_whatevers: suppressed_wht && whatevers > 0
+      )
+    end
 
     fail_on_diagnostics(errors, alerts, warnings)
   end

@@ -38,6 +38,7 @@ module LatexBundler
     compile_format.rb
     presenters.rb
     diagnostics.rb
+    bib_manager.rb
     builder.rb
     bib_extractor.rb
     packager.rb

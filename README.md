@@ -207,6 +207,7 @@ For technical details, configuration options, and advanced features, see:
 - **[docs/errors/README.md](docs/errors/README.md)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.
 - **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and environment variables.
 - **[docs/architecture.md](docs/architecture.md)**: Internal design, build lifecycle, and modular Ruby structure.
+- **[docs/decisions.md](docs/decisions.md)**: Architectural Decision Records (ADRs) and design rationale for accepted and rejected patterns.
 - **[docs/sandbox_testing.md](docs/sandbox_testing.md)**: Sandboxed testing (`bws_run`), portable paper bundles (`-z`), and REVTeX 4.0 support.
 
 ---

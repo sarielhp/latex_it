@@ -26,7 +26,7 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
 
       - name: Install test dependencies
-        run: gem install minitest rainbow --no-document
+        run: gem install 'minitest:< 6' rainbow --no-document
 
       - name: Verify bundle integrity & syntax
         run: ./tools/bundle --check

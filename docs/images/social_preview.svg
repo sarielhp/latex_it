@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+  <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#14151f" />
+    <stop offset="50%" stop-color="#1a1c2b" />
+    <stop offset="100%" stop-color="#0f1017" />
+  </linearGradient>
+
+  <linearGradient id="title-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#00f2fe" />
+    <stop offset="45%" stop-color="#4facfe" />
+    <stop offset="75%" stop-color="#f093fb" />
+    <stop offset="100%" stop-color="#f5576c" />
+  </linearGradient>
+
+  <linearGradient id="card-border-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#4facfe" stop-opacity="0.6" />
+    <stop offset="50%" stop-color="#3b4261" stop-opacity="0.4" />
+    <stop offset="100%" stop-color="#f5576c" stop-opacity="0.6" />
+  </linearGradient>
+
+  <filter id="card-shadow" x="-5%" y="-5%" width="110%" height="110%">
+    <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.6" />
+  </filter>
+
+  <style>
+    .font-ui { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .font-mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+  </style>
+</defs>
+
+  <!-- Canvas Background -->
+<rect width="1280" height="640" fill="url(#bg-grad)" />
+
+<!-- Subtle Ambient Glow -->
+<circle cx="150" cy="120" r="220" fill="#00f2fe" opacity="0.08" filter="blur(80px)" />
+<circle cx="1150" cy="500" r="260" fill="#f5576c" opacity="0.07" filter="blur(90px)" />
+
+<!-- Outer Framing Border -->
+<rect x="12" y="12" width="1256" height="616" rx="16" fill="none" stroke="#2a2d42" stroke-width="1.5" />
+
+  <!-- LEFT COLUMN: Brand, Value Proposition & Feature Badges -->
+<g transform="translate(56, 68)" class="font-ui">
+  <rect x="0" y="0" width="225" height="28" rx="14" fill="#1e2238" stroke="#3b4261" stroke-width="1" />
+  <text x="14" y="18" fill="#7dcfff" font-size="11.5" font-weight="700" letter-spacing="1.2">STANDALONE BUILD TOOL</text>
+
+  <text x="0" y="86" fill="url(#title-grad)" font-size="58" font-weight="900" letter-spacing="-1">latex_it</text>
+  <text x="212" y="86" fill="#7aa2f7" font-size="34" font-weight="700"> (l)</text>
+
+  <text x="0" y="126" fill="#ffffff" font-size="21" font-weight="700">Modern, Pinpointed LaTeX Diagnostics</text>
+  <text x="0" y="152" fill="#9aa5ce" font-size="15" font-weight="400">Rust-grade compiler errors &amp; clean isolated builds</text>
+
+  <line x1="0" y1="180" x2="430" y2="180" stroke="#2f354f" stroke-width="1" />
+
+  <g transform="translate(0, 204)">
+    <g transform="translate(0, 0)">
+      <circle cx="10" cy="10" r="5" fill="#f7768e" />
+      <text x="28" y="15" fill="#c0caf5" font-size="14.5" font-weight="600">Pinpointed Caret Diagnostics</text>
+      <text x="28" y="34" fill="#787c99" font-size="12.5">Exact opened line &amp; column for unclosed braces</text>
+    </g>
+    <g transform="translate(0, 56)">
+      <circle cx="10" cy="10" r="5" fill="#7dcfff" />
+      <text x="28" y="15" fill="#c0caf5" font-size="14.5" font-weight="600">Clean Directory Isolation</text>
+      <text x="28" y="34" fill="#787c99" font-size="12.5">Build noise strictly confined to junk/ directory</text>
+    </g>
+    <g transform="translate(0, 112)">
+      <circle cx="10" cy="10" r="5" fill="#9ece6a" />
+      <text x="28" y="15" fill="#c0caf5" font-size="14.5" font-weight="600">AI Coding Agent Profile (-llm)</text>
+      <text x="28" y="34" fill="#787c99" font-size="12.5">0 tokens on success; strict GNU error format</text>
+    </g>
+    <g transform="translate(0, 168)">
+      <circle cx="10" cy="10" r="5" fill="#bb9af7" />
+      <text x="28" y="15" fill="#c0caf5" font-size="14.5" font-weight="600">100% arXiv Compatible</text>
+      <text x="28" y="34" fill="#787c99" font-size="12.5">Automated comment stripping, flattening &amp; audit</text>
+    </g>
+  </g>
+
+  <g transform="translate(0, 442)">
+    <text x="0" y="0" fill="#565f89" font-size="13">GitHub Repository:</text>
+    <text x="126" y="0" fill="#7dcfff" font-size="13" font-weight="600">github.com/sarielhp/latex_it</text>
+  </g>
+</g>
+
+  <!-- RIGHT COLUMN: Floating Terminal Window Card -->
+<g transform="translate(530, 48)" filter="url(#card-shadow)">
+  <rect width="694" height="544" rx="14" fill="#16161e" stroke="url(#card-border-grad)" stroke-width="1.5" />
+
+  <path d="M 0,14 A 14,14 0 0,1 14,0 L 680,0 A 14,14 0 0,1 694,14 L 694,40 L 0,40 Z" fill="#13141a" />
+  <line x1="0" y1="40" x2="694" y2="40" stroke="#252838" stroke-width="1" />
+
+  <circle cx="22" cy="20" r="6" fill="#ff5f56" />
+  <circle cx="42" cy="20" r="6" fill="#ffbd2e" />
+  <circle cx="62" cy="20" r="6" fill="#27c93f" />
+
+  <text x="347" y="25" fill="#787c99" font-size="12.5" font-weight="600" text-anchor="middle" class="font-ui">terminal — latex_it</text>
+
+  <g transform="translate(24, 70)" class="font-mono" font-size="13.2" xml:space="preserve">
+    <text x="0" y="0"><tspan fill="#7dcfff" font-weight="bold">❯ </tspan><tspan fill="#c0caf5">l example.tex</tspan></text>
+    <text x="0" y="24"><tspan fill="#565f89">─── </tspan><tspan fill="#ff757f" font-weight="bold">example.tex (1 error) </tspan><tspan fill="#565f89">──────────────────────────────────────</tspan></text>
+    <text x="0" y="48"><tspan fill="#ff757f" font-weight="bold">example.tex:8:26: </tspan><tspan fill="#f7768e">Unclosed open brace &apos;{&apos; inside &apos;equation&apos;</tspan></text>
+
+    <text x="0" y="74"><tspan fill="#565f89">   8 | </tspan><tspan fill="#c0caf5">  \min_{x \ge 0} \frac{1}</tspan><tspan fill="#ff757f" font-weight="bold">{</tspan><tspan fill="#c0caf5">2 + \sqrt{x} = y</tspan></text>
+    <text x="0" y="96"><tspan fill="#565f89">     | </tspan><tspan fill="#fab387" font-weight="bold">                         ^</tspan></text>
+
+    <text x="0" y="122" fill="#ff9e64" font-weight="bold">example.tex: Runaway argument?</text>
+    <text x="0" y="146"><tspan fill="#9ece6a" font-weight="bold">  ▶ Hint: </tspan><tspan fill="#c0caf5">Unclosed brace across paragraph or blank line</tspan></text>
+
+    <text x="0" y="180" fill="#7aa2f7" font-weight="bold">Errors: 1, Alerts: 0, Warnings: 0, Whatevers: 0</text>
+    <line x1="0" y1="202" x2="646" y2="202" stroke="#252838" stroke-width="1" />
+
+    <text x="0" y="232"><tspan fill="#7dcfff" font-weight="bold">❯ </tspan><tspan fill="#c0caf5">vim +8 example.tex</tspan><tspan fill="#565f89">          # jumped straight to line 8</tspan></text>
+    <text x="0" y="262"><tspan fill="#7dcfff" font-weight="bold">❯ </tspan><tspan fill="#c0caf5">l -cc example.tex</tspan></text>
+
+    <text x="0" y="292" fill="#a6e3a1" font-weight="bold">Compilation succeeded.</text>
+
+    <text x="0" y="324" fill="#7dcfff" font-weight="bold">❯ </text>
+    <rect x="18" y="312" width="8" height="15" fill="#c0caf5" opacity="0.8" />
+
+    <g transform="translate(0, 360)" class="font-ui">
+      <rect x="0" y="0" width="646" height="42" rx="8" fill="#1a2b22" stroke="#9ece6a" stroke-width="1.2" />
+      <text x="323" y="26" fill="#a6e3a1" font-size="13" font-weight="bold" text-anchor="middle">✔  Pinpointed in 0.2s • Fixed in Vim • Clean 0-pass rebuild</text>
+    </g>
+  </g>
+</g>
+
+</svg>

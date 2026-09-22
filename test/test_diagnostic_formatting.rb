@@ -428,4 +428,15 @@ class TestDiagnosticFormatting < Minitest::Test
     assert_includes rendered_disabled, '13: Warning: Unused option'
     refute_includes rendered_disabled, '❕'
   end
+
+  def test_error_header_badge_formatting
+    builder = LatexBuilder.new('main.tex', color: false, link: false)
+    header = builder.send(:format_error_header, '! Undefined control sequence.', 'main.tex', 10, 10, 1, 0)
+    assert_includes header, 'main.tex:10:1: 🛑 Undefined control sequence.'
+
+    builder_nb = LatexBuilder.new('main.tex', color: false, link: false, badges: false)
+    header_nb = builder_nb.send(:format_error_header, '! Undefined control sequence.', 'main.tex', 10, 10, 1, 0)
+    assert_includes header_nb, 'main.tex:10:1: Undefined control sequence.'
+    refute_includes header_nb, '🛑'
+  end
 end

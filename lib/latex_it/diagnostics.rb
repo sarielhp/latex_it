@@ -324,13 +324,15 @@ module LaTeXDiagnostics
     reported_line = (root_line && root_line.positive? && root_line != line_no) ? line_no : nil
 
     disp_file = format_display_path(file_path)
+    badge = diagnostic_tier_badge('errors', :red)
+    clean_msg = badge ? clean_diagnostic_badge_message(msg) : msg
 
     header_text = if active_line && active_line.positive?
                     col_str = root_col ? ":#{root_col}" : ''
                     rep_str = reported_line ? " (reported on line #{reported_line})" : ''
-                    "#{disp_file}:#{active_line}#{col_str}: #{msg}#{rep_str}"
+                    "#{disp_file}:#{active_line}#{col_str}: #{badge}#{clean_msg}#{rep_str}"
                   else
-                    "#{disp_file}: #{msg}"
+                    "#{disp_file}: #{badge}#{clean_msg}"
                   end
 
     colored = highlight_line_numbers(header_text, :red, bright: true)

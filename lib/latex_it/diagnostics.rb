@@ -1972,10 +1972,15 @@ module LaTeXDiagnostics
   end
 
   def format_suppression_tag(alerts, warnings, whatevers, suppressed_alerts, suppressed_warnings, suppressed_whatevers)
+    use_badges = show_tier_badges?
+    alt_label = use_badges ? '🚨' : 'Alerts'
+    wrn_label = use_badges ? '⚠️' : 'Warnings'
+    wht_label = use_badges ? '☕' : 'Whatevers'
+
     suppressed = []
-    suppressed << 'Alerts' if suppressed_alerts && alerts > 0
-    suppressed << 'Warnings' if suppressed_warnings && warnings > 0
-    suppressed << 'Whatevers' if suppressed_whatevers && whatevers > 0
+    suppressed << alt_label if suppressed_alerts && alerts > 0
+    suppressed << wrn_label if suppressed_warnings && warnings > 0
+    suppressed << wht_label if suppressed_whatevers && whatevers > 0
 
     return '' if suppressed.empty?
 

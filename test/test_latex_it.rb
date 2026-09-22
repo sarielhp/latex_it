@@ -1916,11 +1916,18 @@ class TestLatexItCLI < Minitest::Test
     plain = strip_ansi(io.string)
     assert_includes plain, '🛑 Errors: 5, 🚨 Alerts: 10, ⚠️ Warnings: 15, ☕ Whatevers: 20  (non-errors suppressed)'
 
-    # Specific tiers suppressed
+    # Specific tiers suppressed (with badges)
     io = StringIO.new
     diag.send(:print_summary_line, 0, 0, 3, 4, suppressed_warnings: false, suppressed_whatevers: true, io: io)
     plain = strip_ansi(io.string)
-    assert_includes plain, '🛑 Errors: 0, 🚨 Alerts: 0, ⚠️ Warnings: 3, ☕ Whatevers: 4  (Whatevers suppressed)'
+    assert_includes plain, '🛑 Errors: 0, 🚨 Alerts: 0, ⚠️ Warnings: 3, ☕ Whatevers: 4  (☕ suppressed)'
+
+    # Specific tiers suppressed (without badges)
+    diag_no_badges = TestDiagnosticsHelper.new('main.tex', badges: false)
+    io_nb = StringIO.new
+    diag_no_badges.send(:print_summary_line, 0, 0, 3, 4, suppressed_warnings: false, suppressed_whatevers: true, io: io_nb)
+    plain_nb = strip_ansi(io_nb.string)
+    assert_includes plain_nb, 'Errors: 0, Alerts: 0, Warnings: 3, Whatevers: 4  (Whatevers suppressed)'
 
     # Nothing suppressed
     io = StringIO.new

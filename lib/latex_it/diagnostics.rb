@@ -217,10 +217,10 @@ module LaTeXDiagnostics
 
     case effective_tier
     when 'alerts'    then '🚨 '
-    when 'warnings'  then '⚠️ '
+    when 'warnings'  then '❕ '
     when 'whatevers' then '☕ '
     when 'errors'    then '🛑 '
-    else                  '⚠️ '
+    else                  '❕ '
     end
   end
 
@@ -1974,7 +1974,7 @@ module LaTeXDiagnostics
   def format_suppression_tag(alerts, warnings, whatevers, suppressed_alerts, suppressed_warnings, suppressed_whatevers)
     use_badges = show_tier_badges?
     alt_label = use_badges ? '🚨' : 'Alerts'
-    wrn_label = use_badges ? '⚠️' : 'Warnings'
+    wrn_label = use_badges ? '❕' : 'Warnings'
     wht_label = use_badges ? '☕' : 'Whatevers'
 
     suppressed = []
@@ -2034,7 +2034,7 @@ module LaTeXDiagnostics
   def print_nonzero_summary(target_io, errors, alerts, warnings, whatevers, supp_alt, supp_wrn, supp_wht)
     err_label = show_tier_badges? ? '🛑 Errors' : 'Errors'
     alt_label = show_tier_badges? ? '🚨 Alerts' : 'Alerts'
-    wrn_label = show_tier_badges? ? '⚠️ Warnings' : 'Warnings'
+    wrn_label = show_tier_badges? ? '❕ Warnings' : 'Warnings'
     wht_label = show_tier_badges? ? '☕ Whatevers' : 'Whatevers'
 
     err_str = format_tier_count(err_label, errors, :red)

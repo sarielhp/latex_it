@@ -348,15 +348,15 @@ class TestDiagnosticFormatting < Minitest::Test
 
     alert_item = { file: 'main.tex', line_str: '50', text: "Alert: label 'foo' duplicate", tier: 'alerts' }
     rendered_alert = builder.send(:render_diagnostic_item, alert_item, width: 4)
-    assert_includes rendered_alert, "50: 🚨Alert:    label 'foo' duplicate"
+    assert_includes rendered_alert, "50: 🚨 label 'foo' duplicate"
 
     warn_item = { file: 'main.tex', line_str: '13', text: 'Warning: Unused option', tier: 'warnings' }
     rendered_warn = builder.send(:render_diagnostic_item, warn_item, width: 4)
-    assert_includes rendered_warn, '13: ⚠️Warning:  Unused option'
+    assert_includes rendered_warn, '13: ⚠️ Unused option'
 
     what_item = { file: 'main.tex', line_str: '108', text: 'Note: underfull \hbox', tier: 'whatevers' }
     rendered_what = builder.send(:render_diagnostic_item, what_item, width: 4)
-    assert_includes rendered_what, '108: ☕Whatever: underfull \hbox'
+    assert_includes rendered_what, '108: ☕ underfull \hbox'
   end
 
   def test_category_normalization_strips_redundant_prefixes_with_badges
@@ -364,12 +364,12 @@ class TestDiagnosticFormatting < Minitest::Test
 
     what_font = { file: 'main.tex', line_str: '116', text: "Warning: [font] Font shape 'foo' not available", tier: 'whatevers' }
     rendered = builder.send(:render_diagnostic_item, what_font, width: 4)
-    assert_includes rendered, "116: ☕Whatever: [font] Font shape 'foo' not available"
+    assert_includes rendered, "116: ☕ [font] Font shape 'foo' not available"
     refute_includes rendered, 'Warning: [font]'
 
     bib_warn = { file: 'main.tex', line_str: 'bib', text: 'Warning--empty author in foo', tier: 'warnings' }
     rendered_bib = builder.send(:render_diagnostic_item, bib_warn, width: 4)
-    assert_includes rendered_bib, 'bib: ⚠️Warning:  empty author in foo'
+    assert_includes rendered_bib, 'bib: ⚠️ empty author in foo'
     refute_includes rendered_bib, 'Warning--'
   end
 
@@ -382,10 +382,10 @@ class TestDiagnosticFormatting < Minitest::Test
       rendered = builder.send(:render_diagnostic_item, item, width: 3)
       lines = rendered.lines.map(&:chomp)
       assert lines.size > 1
-      assert_match(/\A\s*13: ⚠️Warning:\s+/, lines[0])
+      assert_match(/\A\s*13: ⚠️\s+/, lines[0])
       prefix_str = lines[0][0...lines[0].index('You')]
       vis_prefix = LaTeXUtils.visible_width(prefix_str)
-      assert_equal 17, vis_prefix
+      assert_equal 8, vis_prefix
       lines[1..].each do |continuation|
         assert continuation.start_with?(' ' * vis_prefix)
         assert LaTeXUtils.visible_width(continuation) <= 70
@@ -393,5 +393,13 @@ class TestDiagnosticFormatting < Minitest::Test
     ensure
       ENV.delete('COLUMNS')
     end
+  end
+
+  def test_summary_line_emojis_under_badges_mode
+    builder = LatexBuilder.new('main.tex', color: false, link: false, all: true)
+    io = StringIO.new
+    builder.send(:print_nonzero_summary, io, 0, 7, 21, 14, false, false, false)
+    plain = io.string
+    assert_includes plain, '🛑 Errors: 0, 🚨 Alerts: 7, ⚠️ Warnings: 21, ☕ Whatevers: 14'
   end
 end

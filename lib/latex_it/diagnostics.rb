@@ -215,16 +215,11 @@ module LaTeXDiagnostics
                        end
 
     case effective_tier
-    when 'alerts'
-      color_enabled? ? "🚨#{Rainbow('Alert:').red.bright}    " : '🚨Alert:    '
-    when 'warnings'
-      color_enabled? ? "⚠️#{Rainbow('Warning:').yellow.bright}  " : '⚠️Warning:  '
-    when 'whatevers'
-      color_enabled? ? "☕#{Rainbow('Whatever:').cyan.bright} " : '☕Whatever: '
-    when 'errors'
-      color_enabled? ? "🛑#{Rainbow('Error:').red.bold}    " : '🛑Error:    '
-    else
-      color_enabled? ? "⚠️#{Rainbow('Warning:').yellow.bright}  " : '⚠️Warning:  '
+    when 'alerts'    then '🚨 '
+    when 'warnings'  then '⚠️ '
+    when 'whatevers' then '☕ '
+    when 'errors'    then '🛑 '
+    else                  '⚠️ '
     end
   end
 
@@ -656,7 +651,7 @@ module LaTeXDiagnostics
   def append_diagnostic_verbose_lines(item, width:, base_color:)
     return '' unless @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
 
-    badge_len = show_tier_badges? ? 12 : 0
+    badge_len = show_tier_badges? ? 3 : 0
     indent = ' ' * (width.positive? ? width + 2 + badge_len : 2 + badge_len)
     formatted = item[:extra_lines].map do |el|
       @options[:emacs] ? el : "#{indent}#{highlight_line_numbers(el, base_color)}"
@@ -2019,10 +2014,15 @@ module LaTeXDiagnostics
   end
 
   def print_nonzero_summary(target_io, errors, alerts, warnings, whatevers, supp_alt, supp_wrn, supp_wht)
-    err_str = format_tier_count('Errors', errors, :red)
-    alert_str = format_tier_count('Alerts', alerts, :red)
-    warn_str = format_tier_count('Warnings', warnings, :yellow)
-    what_str = format_tier_count('Whatevers', whatevers, :cyan)
+    err_label = show_tier_badges? ? '🛑 Errors' : 'Errors'
+    alt_label = show_tier_badges? ? '🚨 Alerts' : 'Alerts'
+    wrn_label = show_tier_badges? ? '⚠️ Warnings' : 'Warnings'
+    wht_label = show_tier_badges? ? '☕ Whatevers' : 'Whatevers'
+
+    err_str = format_tier_count(err_label, errors, :red)
+    alert_str = format_tier_count(alt_label, alerts, :red)
+    warn_str = format_tier_count(wrn_label, warnings, :yellow)
+    what_str = format_tier_count(wht_label, whatevers, :cyan)
     tag = format_suppression_tag(alerts, warnings, whatevers, supp_alt, supp_wrn, supp_wht)
 
     target_io.puts "#{err_str}, #{alert_str}, #{warn_str}, #{what_str}#{tag}"

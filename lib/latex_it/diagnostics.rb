@@ -216,15 +216,15 @@ module LaTeXDiagnostics
 
     case effective_tier
     when 'alerts'
-      color_enabled? ? "🚨 #{Rainbow('Alert:').red.bright}    " : '🚨 Alert:    '
+      color_enabled? ? "🚨#{Rainbow('Alert:').red.bright}    " : '🚨Alert:    '
     when 'warnings'
-      color_enabled? ? "⚠️  #{Rainbow('Warning:').yellow.bright}  " : '⚠️  Warning:  '
+      color_enabled? ? "⚠️#{Rainbow('Warning:').yellow.bright}  " : '⚠️Warning:  '
     when 'whatevers'
-      color_enabled? ? "☕ #{Rainbow('Whatever:').cyan.bright} " : '☕ Whatever: '
+      color_enabled? ? "☕#{Rainbow('Whatever:').cyan.bright} " : '☕Whatever: '
     when 'errors'
-      color_enabled? ? "🛑 #{Rainbow('Error:').red.bold}    " : '🛑 Error:    '
+      color_enabled? ? "🛑#{Rainbow('Error:').red.bold}    " : '🛑Error:    '
     else
-      color_enabled? ? "⚠️  #{Rainbow('Warning:').yellow.bright}  " : '⚠️  Warning:  '
+      color_enabled? ? "⚠️#{Rainbow('Warning:').yellow.bright}  " : '⚠️Warning:  '
     end
   end
 
@@ -656,7 +656,7 @@ module LaTeXDiagnostics
   def append_diagnostic_verbose_lines(item, width:, base_color:)
     return '' unless @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
 
-    badge_len = show_tier_badges? ? 13 : 0
+    badge_len = show_tier_badges? ? 12 : 0
     indent = ' ' * (width.positive? ? width + 2 + badge_len : 2 + badge_len)
     formatted = item[:extra_lines].map do |el|
       @options[:emacs] ? el : "#{indent}#{highlight_line_numbers(el, base_color)}"

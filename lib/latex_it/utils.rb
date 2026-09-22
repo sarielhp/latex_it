@@ -482,12 +482,14 @@ module LaTeXUtils
 
   def self.visible_width(str)
     plain = strip_ansi(str)
-    if defined?(Unicode::DisplayWidth)
-      Unicode::DisplayWidth.of(plain)
-    else
-      extra = plain.scan(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}]/).size
-      plain.length + extra
-    end
+    width = if defined?(Unicode::DisplayWidth)
+              Unicode::DisplayWidth.of(plain)
+            else
+              extra = plain.scan(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}]/).size
+              plain.length + extra
+            end
+    width += plain.scan(/\u{26A0}\u{FE0F}/).size if defined?(Unicode::DisplayWidth)
+    width
   end
 
   def self.terminal_width(default: 80, max: nil)

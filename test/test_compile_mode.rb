@@ -380,4 +380,92 @@ class TestCompileMode < Minitest::Test
       refute_includes out_all, 'were truncated'
     end
   end
+
+  def test_vscode_lw_success_with_warnings
+    Dir.mktmpdir('vscode_lw_warn') do |dir|
+      tex = File.join(dir, 'warn_doc.tex')
+      File.write(tex, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\hbox to 20pt{\\rule{100pt}{10pt}}
+        Missing ref: \\ref{bogi:shogi}.
+        \\end{document}
+      TEX
+
+      out, err, status = Open3.capture3(@bin_path, '--vscode-lw', '-u', 'warn_doc.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0 on warning build. stderr: #{err}, stdout: #{out}"
+      assert_empty err.strip, "Expected stderr to be empty in --vscode-lw mode, got: #{err}"
+      assert_includes out, 'Output written on '
+      assert_includes out, "LaTeX Warning: undefined reference 'bogi:shogi'"
+      assert_includes out, '❓ Why: A \\ref{...} or \\pageref{...} references a label that does not exist in any .aux.'
+      assert_includes out, '🔧 Fix: Check spelling of the key, ensure target chapter is included, and recompile.'
+      assert_includes out, 'LaTeX Warning: 80.00pt too wide on input line 3.'
+      assert_includes out, '❓ Why: Content spills significantly (≥24pt / ~8.4mm) into the page margin.'
+      assert_includes out, '🔧 Might fix: Reword text, insert discretionary hyphens \\-, break equations, or resize figures.'
+      refute_includes out, 'Compilation succeeded.'
+    end
+  end
+
+  def test_vscode_lw_error_output
+    Dir.mktmpdir('vscode_lw_err') do |dir|
+      tex = File.join(dir, 'err_doc.tex')
+      File.write(tex, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\unknownCommandHere
+        \\end{document}
+      TEX
+
+      out, err, status = Open3.capture3(@bin_path, '--vscode-lw', 'err_doc.tex', chdir: dir)
+      assert_equal 1, status.exitstatus, "Expected exit 1 on error build. stderr: #{err}, stdout: #{out}"
+      assert_empty err.strip, "Expected stderr to be empty in --vscode-lw mode, got: #{err}"
+      assert_includes out, 'Fatal error occurred, no output PDF file produced!'
+      assert_match(%r{\./err_doc\.tex:3: undefined control sequence}, out)
+      assert_includes out, '❓ Why: LaTeX does not recognize this macro or command name.'
+      assert_includes out, '🔧 Fix: Check for typos or include the package defining this macro in preamble.'
+    end
+  end
+
+  def test_vscode_lw_clean_build
+    Dir.mktmpdir('vscode_lw_clean') do |dir|
+      tex = File.join(dir, 'clean_doc.tex')
+      File.write(tex, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        Hello World.
+        \\end{document}
+      TEX
+
+      out, err, status = Open3.capture3(@bin_path, '--vscode-lw', 'clean_doc.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. stderr: #{err}, stdout: #{out}"
+      assert_empty err.strip
+      assert_includes out, 'Output written on '
+      refute_includes out, 'Compilation succeeded.'
+      refute_includes out, 'LaTeX Warning:'
+    end
+  end
+
+  def test_vscode_lw_subfile_warning
+    Dir.mktmpdir('vscode_lw_sub') do |dir|
+      sub = File.join(dir, 'sub.tex')
+      File.write(sub, <<~TEX)
+        Missing sub ref: \\ref{sub:ref}.
+      TEX
+
+      main = File.join(dir, 'main.tex')
+      File.write(main, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\input{sub}
+        \\end{document}
+      TEX
+
+      out, err, status = Open3.capture3(@bin_path, '--vscode-lw', '-u', 'main.tex', chdir: dir)
+      assert_equal 0, status.exitstatus, "Expected exit 0. stderr: #{err}, stdout: #{out}"
+      assert_empty err.strip
+      assert_includes out, 'Output written on '
+      assert_match(%r{\(\./sub\.tex\nLaTeX Warning: undefined reference 'sub:ref'}, out)
+      assert_includes out, '❓ Why: A \\ref{...} or \\pageref{...} references a label that does not exist in any .aux.'
+    end
+  end
 end

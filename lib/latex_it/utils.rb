@@ -10,6 +10,11 @@
 require 'fileutils'
 require 'io/console'
 require 'pathname'
+begin
+  require 'unicode/display_width'
+rescue LoadError
+  # Optional dependency; fallback used in visible_width
+end
 
 module LaTeXUtils
   class << self
@@ -476,14 +481,21 @@ module LaTeXUtils
   end
 
   def self.visible_width(str)
-    strip_ansi(str).length
+    plain = strip_ansi(str)
+    if defined?(Unicode::DisplayWidth)
+      Unicode::DisplayWidth.of(plain)
+    else
+      extra = plain.scan(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}]/).size
+      plain.length + extra
+    end
   end
 
   def self.terminal_width(default: 80, max: nil)
     w = if ENV['COLUMNS'] =~ /^\d+$/
           ENV['COLUMNS'].to_i
         else
-          IO.console&.winsize&.last rescue nil
+          (IO.console&.winsize&.last rescue nil) ||
+            ($stdout.tty? ? ($stdout.winsize[1] rescue nil) : nil)
         end
     return default unless w && w > 30
 
@@ -493,7 +505,7 @@ module LaTeXUtils
   def self.wrap_text(text, width: nil, prefix: nil, indent: nil)
     return '' if text.nil? || text.empty?
 
-    width ||= terminal_width(default: 80, max: 80)
+    width ||= terminal_width(default: 80)
     text.to_s.split("\n", -1).map do |line|
       wrap_single_line(line, width: width, prefix: prefix, indent: indent)
     end.join("\n")

@@ -1,0 +1,168 @@
+% ==============================================================================
+% examples/horror/horror.tex
+%
+% "The Diagnostic Bestiary" -- A torture-test document deliberately engineered
+% to trigger as many distinct LaTeX, font, box, float, hyperref, and cross-ref
+% warnings and alerts as possible in a single compilable document.
+% ==============================================================================
+
+% 1. Unused global document class option -> "LaTeX Warning: Unused global option(s)"
+\documentclass[11pt,unused_horror_option_flag]{article}
+
+\usepackage{etex}
+\usepackage{amsmath,amssymb}[2099/01/01]
+\usepackage[top=0.2in,bottom=0.2in,headheight=1.5in]{geometry}
+\usepackage{caption}
+\usepackage[colorlinks=true]{hyperref}
+
+\title{The Diagnostic Bestiary: A LaTeX Horror Show}
+\author{Dr. Victor von Frankenstein \and Igor}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+% ------------------------------------------------------------------------------
+% 2. Hyperref PDF Bookmark & Navigation Horrors
+% ------------------------------------------------------------------------------
+% Bookmark hierarchy gap: \part followed directly by \subsubsection
+\part{The Netherworld}
+\subsubsection{A Deeply Nested Chamber Without Intermediate Sections}
+
+% Math and formatting stripped from PDF outline strings
+\section{Math $\sum_{i=1}^\infty \frac{1}{n^2}$ and \textbf{bold} in Section Bookmark}
+\label{sec:bookmark_horror}
+
+% Duplicate hyperref target destination -> "Package hyperref Warning: Destination already exists"
+\hypertarget{horror_dest}{Target A}
+\hypertarget{horror_dest}{Target B (Duplicate)}
+
+% Suppressing empty link
+\href{}{}
+
+% ------------------------------------------------------------------------------
+% 3. Label & Cross-Reference Horrors
+% ------------------------------------------------------------------------------
+\subsection{Label \& Reference Aberrations}
+
+% Multiply defined label -> Alert: Multiply-Defined Label
+\label{horror:dup_label}
+Some text between duplicate label declarations.
+\label{horror:dup_label}
+
+% Undefined cross-references -> Warning: Undefined Reference
+Reference to a nonexistent label: \ref{horror:phantom_label_404}.
+Page reference to another missing anchor: \pageref{horror:phantom_page_999}.
+
+% Inverted \label before \caption -> Alert: Inverted \label Before \caption
+\begin{figure}[htbp]
+  \centering
+  \fbox{A Mock Float Object}
+  \label{fig:inverted_before_caption}
+  \caption{This figure has its label declared before caption, causing section-number reference hijacking.}
+\end{figure}
+
+% \label inside unnumbered math -> Alert: \label Inside Unnumbered Math
+\begin{equation*}
+  \label{eq:unnumbered_equation_label}
+  e^{i \pi} + 1 = 0
+\end{equation*}
+
+\begin{align*}
+  \label{eq:unnumbered_align_label}
+  \nabla \times \mathbf{E} &= -\frac{\partial \mathbf{B}}{\partial t}
+\end{align*}
+
+% Foreign command \over in amsmath -> Package amsmath Warning: Foreign command \over
+\begin{equation}
+  {numerator \over denominator}
+\end{equation}
+
+% Text commands invalid in math mode -> LaTeX Warning: Command \foo invalid in math mode
+$\textregistered$
+$\textdollar$
+$\textunderscore$
+
+% ------------------------------------------------------------------------------
+% 4. Float Placement Horrors
+% ------------------------------------------------------------------------------
+\subsection{Float Placement Perversities}
+
+% Strict '!h' float specifier -> Whatever: Float Specifier Auto-Adjusted
+\begin{figure}[!h]
+  \centering
+  \fbox{Float Demanding Strict Local Here-Placement}
+  \caption{Strict here float that triggers '!h changed to !ht'.}
+  \label{fig:strict_here}
+\end{figure}
+
+% Oversized float -> LaTeX Warning: Float too large for page
+\begin{figure}[p]
+  \vspace{1.2\textheight}
+  \caption{A monstrously tall float that exceeds the printable text height.}
+  \label{fig:oversized}
+\end{figure}
+
+% Marginpar collisions -> LaTeX Warning: Marginpar on page moved
+Text with colliding marginpars.\marginpar{First Margin Note}\marginpar{Second Colliding Margin Note}
+
+% ------------------------------------------------------------------------------
+% 5. Font Shape Substitution & Undefined Font Combinations
+% ------------------------------------------------------------------------------
+\subsection{Font Shape Anomalies}
+
+% Computer Modern lacks Sans-serif Small Caps -> Whatever: Font Shape Substitution
+{\textsf{\textsc{Sans-Serif Small Caps Does Not Exist In Standard Computer Modern}}}
+
+% Monospace Bold Italic Slanted -> Font Warning
+{\texttt{\textbf{\textsl{Typewriter Bold Slanted Undefined Font Combination}}}}
+
+% Font size substitution with differences -> LaTeX Font Warning: Size substitutions
+{\fontsize{99pt}{110pt}\fontencoding{OT1}\fontfamily{cmr}\selectfont Gigantic Nonexistent Size}
+
+% ------------------------------------------------------------------------------
+% 6. Box Sizing Horrors (Overfull & Underfull)
+% ------------------------------------------------------------------------------
+\subsection{Box Sizing Grotesqueries}
+
+% Severe Overfull \hbox (>= 24pt) -> Alert: Severe Overfull \hbox
+\noindent\mbox{EXTREMELY-LONG-UNHYPHENATABLE-OVERFULL-HBOX-THAT-RUNS-FAR-OFF-THE-EDGE-OF-THE-PAGE-MARGIN-INTO-NOWHERE-FOR-TESTING-PURPOSES}
+
+% Standard Overfull \hbox (2.5pt - 24pt) -> Warning: Overfull \hbox
+\noindent\hspace{0.90\textwidth}\mbox{A moderate margin protrusion of roughly twelve points.}
+
+% Micro Overfull \hbox (<= 2.5pt) -> Whatever: Micro Overfull \hbox
+\noindent\hspace{0.995\textwidth}\mbox{1.2pt}
+
+% Underfull \hbox (Loose line, badness 10000) -> Note: Underfull \hbox (Loose Line)
+Forced break on a short line with extreme loose spacing\linebreak
+
+% Underfull \vbox (Vertical stretch, badness 10000) -> Warning: Underfull \vbox
+\vbox to 4.5in{
+  Single solitary line sitting inside a massive rigid vertical box without any stretchable glue.
+}
+
+% Overfull \vbox -> Warning: Overfull \vbox
+\vbox to 12pt{
+  {\Huge Line One of Overfull Vbox}\\
+  {\Huge Line Two of Overfull Vbox}\\
+  {\Huge Line Three of Overfull Vbox}
+}
+
+% ------------------------------------------------------------------------------
+% 7. Citation & Bibliography Horrors
+% ------------------------------------------------------------------------------
+\subsection{Bibliographic Terrors}
+
+% Undefined citations -> Warning: Undefined Citation
+Citing phantom scholar Alpha: \cite{phantom_author_alpha_2026}.
+Citing phantom scholar Beta: \cite{phantom_author_beta_1999}.
+
+% Defective bib entries with missing required fields
+Citing entry missing author/title/year: \cite{bad_entry_1,bad_entry_2}.
+
+\bibliographystyle{plain}
+\bibliography{horror}
+
+\end{document}

@@ -22,6 +22,14 @@ class TestCompileFormat < Minitest::Test
     # Overfull hbox
     msg4 = 'Overfull \hbox (15.2pt too wide) in paragraph at lines 50--55'
     assert_equal 'overfull \hbox (15.2pt too wide) in paragraph', LaTeXCompileFormat.clean_message(msg4)
+
+    # Font warning with continuation line
+    msg5 = "LaTeX Font Warning: Font shape `TU/lmss/m/sc' in size <10.95> not available\n(Font)              Font shape `TU/lmr/m/sc' tried instead on input line 116."
+    assert_equal "[font] Font shape `TU/lmss/m/sc' in size <10.95> not available, Font shape `TU/lmr/m/sc' tried instead", LaTeXCompileFormat.clean_message(msg5)
+
+    # Inline location noise stripping
+    msg6 = "LaTeX Warning: You have requested, on input line 13, version `2099/01/01' of package amsmath, but only version `2026/05/19' is available."
+    assert_equal "you have requested version `2099/01/01' of package amsmath, but only version `2026/05/19' is available", LaTeXCompileFormat.clean_message(msg6)
   end
 
   def test_clean_message_trailing_period_and_ellipsis

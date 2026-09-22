@@ -77,6 +77,18 @@ class TestDiagnosticFormatting < Minitest::Test
     raw_math = 'LaTeX Warning: Command \L invalid in math mode on input line 133.'
     assert_equal 'Warning: command \L invalid in math mode', builder.send(:clean_diagnostic_warning, raw_math)
 
+    # Font warning cleaning
+    raw_font = "LaTeX Font Warning: Font shape `TU/lmss/m/sc' in size <10.95> not available\n(Font)              Font shape `TU/lmr/m/sc' tried instead on input line 116."
+    assert_equal "Warning: [font] Font shape `TU/lmss/m/sc' in size <10.95> not available, Font shape `TU/lmr/m/sc' tried instead", builder.send(:clean_diagnostic_warning, raw_font)
+
+    # Inline package request location cleaning
+    raw_pkg = "LaTeX Warning: You have requested, on input line 13, version `2099/01/01' of package amsmath, but only version `2026/05/19' is available."
+    assert_equal "Warning: You have requested version `2099/01/01' of package amsmath, but only version `2026/05/19' is available.", builder.send(:clean_diagnostic_warning, raw_pkg)
+
+    # Float too large float rounding
+    raw_float = "LaTeX Warning: Float too large for page by 176.81013pt on input line 105."
+    assert_equal "Warning: Float too large for page by 176.81pt", builder.send(:clean_diagnostic_warning, raw_float)
+
     # Deduplication of Hyper reference and Reference
     log = <<~LOG
       (./chapter.tex
@@ -219,6 +231,167 @@ class TestDiagnosticFormatting < Minitest::Test
       assert_includes box, 'See:'
     ensure
       Rainbow.enabled = orig_rainbow
+    end
+  end
+
+  def test_cli_numeric_flag_context_normalization
+    argv = ['-3', 'paper.tex']
+    LatexCLI.normalize_argv!(argv)
+    assert_equal ['--context=3', 'paper.tex'], argv
+
+    argv2 = ['-12', '-u', 'main.tex']
+    LatexCLI.normalize_argv!(argv2)
+    assert_equal ['--context=12', '-u', 'main.tex'], argv2
+  end
+
+  def test_render_context_snippet_basic
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      content = (1..20).map { |i| "Line #{i}: content of line #{i}\n" }.join
+      File.write(file, content)
+
+      builder = LatexBuilder.new(file, color: false, link: false, context_lines: 3)
+      lines = builder.send(:render_context_snippet, file, 10, 3)
+
+      assert_equal 7, lines.size
+      assert_match(/^\s+7 \| Line 7:/, lines[0])
+      assert_match(/^>\s+10 \| Line 10:/, lines[3])
+      assert_match(/^\s+13 \| Line 13:/, lines[6])
+    end
+  end
+
+  def test_render_context_snippet_with_range
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      content = (1..20).map { |i| "Line #{i}: content of line #{i}\n" }.join
+      File.write(file, content)
+
+      builder = LatexBuilder.new(file, color: false, link: false, context_lines: 2)
+      lines = builder.send(:render_context_snippet, file, 8, 2, target_line_end: 10)
+
+      assert_equal 7, lines.size
+      assert_match(/^\s+6 \| Line 6:/, lines[0])
+      assert_match(/^\s+7 \| Line 7:/, lines[1])
+      assert_match(/^>\s+8 \| Line 8:/, lines[2])
+      assert_match(/^>\s+9 \| Line 9:/, lines[3])
+      assert_match(/^>\s+10 \| Line 10:/, lines[4])
+      assert_match(/^\s+11 \| Line 11:/, lines[5])
+      assert_match(/^\s+12 \| Line 12:/, lines[6])
+    end
+  end
+
+  def test_render_context_snippet_with_hyperlinks_and_carets
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'test.tex')
+      content = (1..10).map { |i| "Line #{i}: \\foo command here\n" }.join
+      File.write(file, content)
+
+      builder = LatexBuilder.new(file, color: true, link: true, context_lines: 2)
+      lines = builder.send(:render_context_snippet, file, 5, 2, col_pos: 8, token_len: 4)
+
+      combined = lines.join("\n")
+      assert_includes combined, "\e]8;;file://"
+      assert_includes combined, "test.tex#5"
+      assert_includes combined, '^^^^'
+    end
+  end
+
+  def test_highlight_latex_in_process
+    orig = Rainbow.enabled
+    begin
+      Rainbow.enabled = true
+      line = "\\begin{align*} \\DotProd{ \\nu_h }{ q } = 0 % note"
+      colored = LatexColor.highlight_latex(line, color_enabled: true)
+      assert_match(/\e\[(?:35|\d+;2;\d+;\d+;\d+)m/, colored)
+      assert_includes colored, "align*"
+      assert_includes colored, "\\DotProd"
+      assert_includes colored, "\e[2m% note"
+    ensure
+      Rainbow.enabled = orig
+    end
+  end
+
+  def test_context_snippet_deduplication_on_repeated_lines
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'dup.tex')
+      content = (1..20).map { |i| "Line #{i}\n" }.join
+      File.write(file, content)
+
+      builder = LatexBuilder.new(file, color: false, link: false, context_lines: 2)
+      first = builder.send(:render_context_snippet, file, 10, 2)
+      refute_empty first
+      second = builder.send(:render_context_snippet, file, 10, 2)
+      assert_empty second
+      forced = builder.send(:render_context_snippet, file, 10, 2, force: true)
+      refute_empty forced
+    end
+  end
+
+  def test_context_snippet_deduplication_on_covered_ranges
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, 'range.tex')
+      content = (1..30).map { |i| "Line #{i}\n" }.join
+      File.write(file, content)
+
+      builder = LatexBuilder.new(file, color: false, link: false, context_lines: 2)
+      range_lines = builder.send(:render_context_snippet, file, 10, 2, target_line_end: 15)
+      refute_empty range_lines
+      subsumed = builder.send(:render_context_snippet, file, 12, 2)
+      assert_empty subsumed
+      outside = builder.send(:render_context_snippet, file, 20, 2)
+      refute_empty outside
+    end
+  end
+
+  def test_option_1_tier_badges_under_all_mode
+    builder = LatexBuilder.new('main.tex', color: false, link: false, all: true)
+
+    alert_item = { file: 'main.tex', line_str: '50', text: "Alert: label 'foo' duplicate", tier: 'alerts' }
+    rendered_alert = builder.send(:render_diagnostic_item, alert_item, width: 4)
+    assert_includes rendered_alert, "50: 🚨 Alert:    label 'foo' duplicate"
+
+    warn_item = { file: 'main.tex', line_str: '13', text: 'Warning: Unused option', tier: 'warnings' }
+    rendered_warn = builder.send(:render_diagnostic_item, warn_item, width: 4)
+    assert_includes rendered_warn, '13: ⚠️  Warning:  Unused option'
+
+    what_item = { file: 'main.tex', line_str: '108', text: 'Note: underfull \hbox', tier: 'whatevers' }
+    rendered_what = builder.send(:render_diagnostic_item, what_item, width: 4)
+    assert_includes rendered_what, '108: ☕ Whatever: underfull \hbox'
+  end
+
+  def test_category_normalization_strips_redundant_prefixes_with_badges
+    builder = LatexBuilder.new('main.tex', color: false, link: false, all: true)
+
+    what_font = { file: 'main.tex', line_str: '116', text: "Warning: [font] Font shape 'foo' not available", tier: 'whatevers' }
+    rendered = builder.send(:render_diagnostic_item, what_font, width: 4)
+    assert_includes rendered, "116: ☕ Whatever: [font] Font shape 'foo' not available"
+    refute_includes rendered, 'Warning: [font]'
+
+    bib_warn = { file: 'main.tex', line_str: 'bib', text: 'Warning--empty author in foo', tier: 'warnings' }
+    rendered_bib = builder.send(:render_diagnostic_item, bib_warn, width: 4)
+    assert_includes rendered_bib, 'bib: ⚠️  Warning:  empty author in foo'
+    refute_includes rendered_bib, 'Warning--'
+  end
+
+  def test_diagnostic_message_terminal_wrapping_hanging_indent
+    builder = LatexBuilder.new('main.tex', color: false, link: false, all: true)
+    ENV['COLUMNS'] = '70'
+    begin
+      long_msg = 'You have requested version `2099/01/01` of package amsmath, but only version `2026/05/19 v2.18d AMS math features` is available.'
+      item = { file: 'main.tex', line_str: '13', text: long_msg, tier: 'warnings' }
+      rendered = builder.send(:render_diagnostic_item, item, width: 3)
+      lines = rendered.lines.map(&:chomp)
+      assert lines.size > 1
+      assert_match(/\A\s*13: ⚠️  Warning:\s+/, lines[0])
+      prefix_str = lines[0][0...lines[0].index('You')]
+      vis_prefix = LaTeXUtils.visible_width(prefix_str)
+      assert_equal 18, vis_prefix
+      lines[1..].each do |continuation|
+        assert continuation.start_with?(' ' * vis_prefix)
+        assert LaTeXUtils.visible_width(continuation) <= 70
+      end
+    ensure
+      ENV.delete('COLUMNS')
     end
   end
 end

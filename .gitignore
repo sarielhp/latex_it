@@ -64,7 +64,9 @@ reviews/logs/
 tools/rtk
 /examples/*
 !/examples/gallery/
+!/examples/horror/
 !/examples/gallaery
+examples/**/*.pdf
 /AGENTS.md
 arxiv_*.zip
 arxiv_*_meta.txt

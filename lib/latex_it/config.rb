@@ -200,7 +200,8 @@ module LaTeXConfig
       },
       'presentation' => {
         'reveal' => 'silent',
-        'panel' => 'shared'
+        'panel' => 'shared',
+        'revealProblems' => 'onProblem'
       },
       'problemMatcher' => {
         'owner' => 'latex',
@@ -232,7 +233,7 @@ module LaTeXConfig
 
   def self.merge_vscode_tool(tools)
     filtered = tools.reject { |t| t.is_a?(Hash) && t['name'] == VSCODE_TOOL_NAME }
-    filtered << { 'name' => VSCODE_TOOL_NAME, 'command' => 'l', 'args' => ['%DOC%'], 'env' => {} }
+    filtered << { 'name' => VSCODE_TOOL_NAME, 'command' => 'l', 'args' => ['--vscode-lw', '%DOC%'], 'env' => {} }
   end
 
   def self.merge_vscode_recipe(recipes)
@@ -253,6 +254,9 @@ module LaTeXConfig
 
     data['latex-workshop.latex.recipe.default'] = VSCODE_TOOL_NAME
     data['latex-workshop.latex.outDir'] = '%DIR%/junk'
+    data['latex-workshop.latex.autoClean.run'] = 'never'
+    data['latex-workshop.latex.autoBuild.cleanAndRetry.enabled'] = false
+    data['latex-workshop.view.pdf.viewer'] ||= 'tab'
 
     File.write(settings_file, "#{JSON.pretty_generate(data)}\n")
     settings_file

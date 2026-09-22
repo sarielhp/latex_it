@@ -78,7 +78,7 @@ If you use the popular [LaTeX Workshop](https://marketplace.visualstudio.com/ite
     {
       "name": "latex_it",
       "command": "l",
-      "args": ["%DOC%"],
+      "args": ["--vscode-lw", "%DOC%"],
       "env": {}
     }
   ],
@@ -89,7 +89,8 @@ If you use the popular [LaTeX Workshop](https://marketplace.visualstudio.com/ite
     }
   ],
   "latex-workshop.latex.recipe.default": "latex_it",
-  "latex-workshop.latex.outDir": "%DIR%/junk"
+  "latex-workshop.latex.outDir": "%DIR%/junk",
+  "latex-workshop.latex.autoClean.run": "never"
 }
 ```
 

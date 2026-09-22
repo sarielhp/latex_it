@@ -17,7 +17,7 @@ module LaTeXDiagnostics
     tex sty cls aux bbl bib dtx def ldf cfg clo toc lof lot png pdf jpg eps fd fontspec out idx code\.tex
   ].join('|').freeze
 
-  LOG_FILE_PATTERN = %r{\A\((?:"([^"]+)"?|((?:\.{1,2}[\\/][^\s()]+|[a-zA-Z0-9_\-./]+?\.(?:#{LOG_FILE_EXTENSIONS}))\b))}.freeze
+  LOG_FILE_PATTERN = %r{\A\((?:"([^"]+)"|((?:\.{1,2}[\\/][^\s()]+|[a-zA-Z0-9_\-./]+?\.(?:#{LOG_FILE_EXTENSIONS}))\b))}.freeze
 
   # One canonical recogniser for a LaTeX/package/class warning header. Five
   # near-but-not-equal variants of this used to be spelled out inline, and the
@@ -76,6 +76,17 @@ module LaTeXDiagnostics
 
   def link_enabled?
     @options && @options[:link] == true && !@options[:emacs]
+  end
+
+  def color_enabled?
+    @options.nil? || @options[:color] != false
+  end
+
+  def show_tier_badges?
+    return false if @options.nil?
+    return false if @options[:emacs] || compile_mode? || @options[:vscode_lw] || @options[:json]
+
+    @options[:all] == true || @options[:suppress_whatevers] == false || @options[:badges] == true
   end
 
   def format_terminal_link(file, line_str, display_str, underline: false, color: nil)
@@ -193,18 +204,68 @@ module LaTeXDiagnostics
     end
   end
 
-  def format_diagnostic_line(line_str, message, base_color, width: 0, bright_sep: true, file: nil)
-    return format_emacs_diagnostic_line(line_str, message) if @options[:emacs]
+  def diagnostic_tier_badge(tier, base_color = nil)
+    return nil unless show_tier_badges?
+
+    effective_tier = tier&.to_s
+    effective_tier ||= case base_color
+                       when :red then 'alerts'
+                       when :cyan then 'whatevers'
+                       else 'warnings'
+                       end
+
+    case effective_tier
+    when 'alerts'
+      color_enabled? ? "🚨 #{Rainbow('Alert:').red.bright}    " : '🚨 Alert:    '
+    when 'warnings'
+      color_enabled? ? "⚠️  #{Rainbow('Warning:').yellow.bright}  " : '⚠️  Warning:  '
+    when 'whatevers'
+      color_enabled? ? "☕ #{Rainbow('Whatever:').cyan.bright} " : '☕ Whatever: '
+    when 'errors'
+      color_enabled? ? "🛑 #{Rainbow('Error:').red.bold}    " : '🛑 Error:    '
+    else
+      color_enabled? ? "⚠️  #{Rainbow('Warning:').yellow.bright}  " : '⚠️  Warning:  '
+    end
+  end
+
+  def clean_diagnostic_badge_message(message)
+    str = message.to_s
+    cleaned = str.sub(/\A(?:Alert|Warning|Note|Whatever|Info)(?::|--)\s*/i, '').strip
+    cleaned.empty? ? str : cleaned
+  end
+
+  def wrap_diagnostic_message(full_prefix, sub_indent, formatted_msg, term_width)
+    return "#{full_prefix}#{formatted_msg}" if @options && @options[:no_wrap]
+
+    lines = formatted_msg.to_s.split("\n", -1)
+    return full_prefix if lines.empty?
+
+    lines.each_with_index.map do |line, idx|
+      pfx = idx.zero? ? full_prefix : sub_indent
+      if line.strip.empty?
+        pfx.rstrip
+      else
+        LaTeXUtils.wrap_single_line("#{pfx}#{line.strip}", width: term_width, prefix: pfx, indent: sub_indent)
+      end
+    end.join("\n")
+  end
+
+  def format_diagnostic_line(line_str, message, base_color, width: 0, bright_sep: true, file: nil, tier: nil)
+    return format_emacs_diagnostic_line(line_str, message) if @options && @options[:emacs]
 
     left_side = format_diagnostic_left_side(line_str, base_color, width, bright_sep, file)
-    formatted = highlight_line_numbers(message, base_color)
-    return left_side + highlight_latex_it_tag(formatted, base_color) unless formatted.include?("\n")
+    badge = diagnostic_tier_badge(tier, base_color)
+    clean_msg = badge ? clean_diagnostic_badge_message(message) : message
 
-    sub_indent = ' ' * (width + 2)
-    lines = formatted.split("\n")
-    first = left_side + highlight_latex_it_tag(lines[0], base_color)
-    rest = lines[1..].map { |l| "#{sub_indent}#{highlight_latex_it_tag(l, base_color)}" }
-    ([first] + rest).join("\n")
+    full_prefix = badge ? "#{left_side}#{badge}" : left_side
+    prefix_width = LaTeXUtils.visible_width(full_prefix)
+    sub_indent = ' ' * prefix_width
+
+    term_width = terminal_columns
+    formatted_msg = highlight_line_numbers(clean_msg, base_color)
+    formatted_msg = highlight_latex_it_tag(formatted_msg, base_color)
+
+    wrap_diagnostic_message(full_prefix, sub_indent, formatted_msg, term_width)
   end
 
   def highlight_latex_it_tag(str, base_color = :red)
@@ -228,18 +289,18 @@ module LaTeXDiagnostics
 
     indent = ' ' * (width.positive? ? width + 2 : 2)
     file_path = item&.[](:file) || @filename
-    root_line = item&.[](:root_line) || catalog&.[](:root_line)
-    root_col = item&.[](:col) || item&.[](:root_col) || catalog&.[](:root_col)
+    root_line = item&.[](:root_line) || cat&.[](:root_line)
+    root_col = item&.[](:col) || item&.[](:root_col) || cat&.[](:root_col)
 
     header = format_error_header(err_block.first, file_path, line_no, root_line, root_col, width)
     lines = [header]
 
     active_line = (root_line && root_line.positive?) ? root_line : line_no
-    source_frame = format_source_frame(file_path, active_line, root_col, item, catalog)
+    source_frame = format_source_frame(file_path, active_line, root_col, item, cat)
     if source_frame
       lines.concat(source_frame)
     else
-      append_error_hint(lines, catalog, indent)
+      append_error_hint(lines, cat, indent)
     end
 
     append_repeat_note(lines, repeat_count, line_no, indent) if repeat_count > 1
@@ -306,14 +367,17 @@ module LaTeXDiagnostics
     clean_token = (token && !token.to_s.match?(/\s/)) ? token.to_s : nil
 
     if col_no && col_no.positive?
+      col_idx = col_no - 1
       len = if %i[missing_dollar misplaced_alignment_tab extra_closing_brace].include?(cat_id)
               1
+            elsif source_line[col_idx..] =~ /\A(\\[a-zA-Z@]+|\\[^\s])/
+              Regexp.last_match(1).length
             elsif clean_token
               clean_token.length
             else
               1
             end
-      [col_no - 1, len]
+      [col_idx, len]
     elsif clean_token && (idx = source_line.index(clean_token))
       [idx, clean_token.length]
     elsif cat_id == :misplaced_alignment_tab && (idx = source_line.index(/(?<!\\)&/))
@@ -368,8 +432,109 @@ module LaTeXDiagnostics
     "  #{' ' * (gutter_num_len + 2)}#{arrow} #{label}#{hint_colored}"
   end
 
+  def render_context_snippet(file_path, target_line, context_lines, col_pos: nil, token_len: nil, catalog: nil, root_col: nil, target_line_end: nil, force: false)
+    return [] unless file_path && target_line && target_line.positive? && context_lines && context_lines.positive?
+
+    real_file = LaTeXErrorCatalog.find_source_file(file_path) || file_path
+    return [] unless real_file && File.file?(real_file)
+
+    all_raw_lines = File.readlines(real_file) rescue nil
+    return [] unless all_raw_lines && !all_raw_lines.empty?
+
+    target_end = (target_line_end && target_line_end.to_i >= target_line) ? target_line_end.to_i : target_line
+    return [] if context_range_covered?(real_file, target_line, target_end, force)
+
+    start_line = [target_line - context_lines, 1].max
+    end_line = [target_end + context_lines, all_raw_lines.size].min
+    return [] if start_line > end_line
+
+    color_enabled = (@options && @options[:color] != false) && !@options[:emacs]
+    code_lines = fetch_snippet_code_lines(real_file, start_line, end_line, all_raw_lines, color_enabled)
+    build_snippet_lines(code_lines, start_line, target_line, target_end, end_line, real_file, color_enabled, col_pos, token_len, catalog, root_col)
+  end
+
+  def context_range_covered?(real_file, target_line, target_end, force)
+    return false if force
+
+    @last_context_file == real_file && @last_context_range &&
+      @last_context_range.cover?(target_line) && @last_context_range.cover?(target_end)
+  end
+
+  def fetch_snippet_code_lines(real_file, start_line, end_line, all_raw_lines, color_enabled)
+    bat_lines = fetch_bat_snippet_lines(real_file, start_line, end_line) if color_enabled && @options && @options[:bat]
+    return bat_lines if bat_lines
+
+    raw_slice = all_raw_lines[(start_line - 1)..(end_line - 1)] || []
+    raw_slice.map { |ln| LatexColor.highlight_latex(ln, color_enabled: color_enabled) }
+  end
+
+  def fetch_bat_snippet_lines(real_file, start_line, end_line)
+    bat_cmd = resolve_bat_command
+    return nil unless bat_cmd
+
+    cmd = [bat_cmd, '--color=always', '--paging=never', '--style=plain', '-l', 'tex', "-r=#{start_line}:#{end_line}", real_file]
+    out, _, st = Open3.capture3(*cmd) rescue nil
+    (st&.success? && out && !out.empty?) ? out.lines : nil
+  end
+
+  def resolve_bat_command
+    return 'batcat' if LaTeXUtils.command_available?('batcat')
+    return 'bat' if LaTeXUtils.command_available?('bat')
+
+    nil
+  end
+
+  def format_snippet_line_gutter(cur_line, g_len, is_target, color_enabled, links_active, abs_path)
+    marker = is_target ? (color_enabled ? Rainbow('>').red.bright.to_s : '>') : ' '
+    num_str = cur_line.to_s.rjust(g_len)
+    link_num = if color_enabled
+                 styled = is_target ? Rainbow(num_str).red.bright.to_s : Rainbow(num_str).cyan.to_s
+                 links_active ? "\e]8;;file://#{abs_path}##{cur_line}\e\\#{styled}\e]8;;\e\\" : styled
+               else
+                 num_str
+               end
+    bar = color_enabled ? (is_target ? Rainbow('│').red.bright.to_s : Rainbow('│').cyan.to_s) : '|'
+    "#{marker} #{link_num} #{bar}"
+  end
+
+  def append_snippet_pointer_or_hint(lines, g_len, col_pos, token_len, catalog, root_col)
+    if col_pos
+      pointer_line = render_pointer_line(g_len, col_pos, token_len, catalog, root_col: root_col)
+      lines << pointer_line if pointer_line
+    elsif (hint_line = render_gutter_hint(g_len, catalog))
+      lines << hint_line
+    end
+  end
+
+  def build_snippet_lines(code_lines, start_line, target_line, target_end, end_line, real_file, color_enabled, col_pos, token_len, catalog, root_col)
+    abs_path = ::URI::DEFAULT_PARSER.escape(File.expand_path(real_file.to_s))
+    g_len = [end_line.to_s.length, 3].max
+    links_active = color_enabled && (@options.nil? || @options[:link] != false)
+    lines = []
+
+    code_lines.each_with_index do |cline, idx|
+      cur_line = start_line + idx
+      is_target = (cur_line >= target_line && cur_line <= target_end)
+      gutter = format_snippet_line_gutter(cur_line, g_len, is_target, color_enabled, links_active, abs_path)
+      lines << "#{gutter} #{cline.chomp}"
+      append_snippet_pointer_or_hint(lines, g_len, col_pos, token_len, catalog, root_col) if cur_line == target_line
+    end
+
+    @last_context_file = real_file
+    @last_context_range = (target_line..target_end)
+    lines
+  end
+
   def format_source_frame(file_path, line_no, col_no, item, catalog)
     return nil unless line_no && line_no.positive?
+
+    if @options && @options[:context_lines] && @options[:context_lines].to_i > 0
+      token = item&.[](:token) || catalog&.[](:token)
+      source_line = read_source_line(file_path, line_no)
+      col_pos, token_len = source_line ? locate_token_column(source_line, col_no, token, catalog) : [nil, 1]
+      return render_context_snippet(file_path, line_no, @options[:context_lines].to_i,
+                                    col_pos: col_pos, token_len: token_len, catalog: catalog, root_col: col_no)
+    end
 
     source_line = read_source_line(file_path, line_no)
     return nil unless source_line && !source_line.strip.empty?
@@ -400,7 +565,7 @@ module LaTeXDiagnostics
 
     indent = ' ' * 2
     gutter_pad = ' ' * gutter_num_len
-    gutter_bar = (@options && @options[:color] == false) ? '|' : Rainbow('|').cyan
+    gutter_bar = (@options && @options[:color] == false) ? '|' : Rainbow('│').cyan
     col_pad = ' ' * [col_pos, 0].max
 
     "#{indent}#{gutter_pad} #{gutter_bar} #{col_pad}#{caret_colored}#{hint_colored}"
@@ -480,20 +645,40 @@ module LaTeXDiagnostics
     return format_error_block(item[:err_block], item[:line] || 0, width: width, catalog: item[:catalog], repeat_count: item[:repeat_count] || 1, item: item) if item[:err_block]
 
     base_color = item[:base_color] || :yellow
+    tier = tier_label_for(item)
     display_text = format_diagnostic_item_text(item)
-    out = format_diagnostic_line(item[:line_str], display_text, base_color, width: width, file: item[:file])
-    if @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
-      indent = ' ' * (width.positive? ? width + 2 : 2)
-      out += "\n" + item[:extra_lines].map do |el|
-        @options[:emacs] ? el : "#{indent}#{highlight_line_numbers(el, base_color)}"
-      end.join("\n")
-    end
+    out = format_diagnostic_line(item[:line_str], display_text, base_color, width: width, file: item[:file], tier: tier)
+    out += append_diagnostic_verbose_lines(item, width: width, base_color: base_color)
+    out += append_diagnostic_item_context(item)
     out
+  end
+
+  def append_diagnostic_verbose_lines(item, width:, base_color:)
+    return '' unless @options[:verbose] && item[:extra_lines] && !item[:extra_lines].empty?
+
+    badge_len = show_tier_badges? ? 13 : 0
+    indent = ' ' * (width.positive? ? width + 2 + badge_len : 2 + badge_len)
+    formatted = item[:extra_lines].map do |el|
+      @options[:emacs] ? el : "#{indent}#{highlight_line_numbers(el, base_color)}"
+    end
+    "\n#{formatted.join("\n")}"
+  end
+
+  def append_diagnostic_item_context(item)
+    return '' unless @options && @options[:context_lines].to_i.positive?
+    line = item[:line].to_i
+    return '' unless line.positive?
+
+    file_path = item[:file] || @filename
+    target_end = item[:line_str].to_s =~ /\A(\d+)--(\d+)\z/ ? Regexp.last_match(2).to_i : nil
+    snippet_lines = render_context_snippet(file_path, line, @options[:context_lines].to_i, target_line_end: target_end)
+    snippet_lines.empty? ? '' : "\n#{snippet_lines.join("\n")}"
   end
 
   def track_log_file(line, file_stack)
     return if line =~ WARNING_LINE_PATTERN ||
-              line =~ /^(?:Overfull|Underfull)/ || line =~ /^!\s+/
+              line =~ /^(?:Overfull|Underfull)/ || line =~ /^!\s+/ ||
+              line =~ /^Missing character:/
 
     pos = 0
     len = line.length
@@ -579,19 +764,35 @@ module LaTeXDiagnostics
     if str =~ /^Missing database entries/i
       return "Warning: #{str}"
     end
-    if str =~ /^(?:Package|Class)\s+([-\w.@*]+)\s+[Ww]arning:\s*(.+)$/m
+    if str =~ /^(?:\*?\s*(?:Package|Class))\s+([-\w.@*]+)\s+[Ww]arning:\s*(.+)$/m
       pkg = Regexp.last_match(1)
       body = Regexp.last_match(2).gsub(/\(#{Regexp.escape(pkg)}\)/, ' ').gsub(/\s+/, ' ').strip
-      body = body.sub(/\s+on input line \d+\.?$/i, '')
+      body = strip_input_line_noise(body)
       return "Warning: [#{pkg}] #{body}"
+    end
+    if str =~ /^LaTeX Font Warning:\s*(.+)$/im
+      body = Regexp.last_match(1)
+      body = body.gsub(/not available\s*\(Font\)\s*/i, 'not available, ')
+      body = body.gsub(/\(Font\)/i, ' ')
+      body = strip_input_line_noise(body)
+      return "Warning: [font] #{body}"
     end
     if str =~ /^LaTeX Warning:\s*(.+)$/i
       body = Regexp.last_match(1).gsub(/\s+/, ' ').strip
-      body = body.sub(/\s+on input line \d+\.?$/i, '')
+      if body =~ /Float too large for page by ([\d\.]+)pt/i
+        body = body.sub(/Float too large for page by ([\d\.]+)pt/i) { "Float too large for page by #{format('%.2f', Regexp.last_match(1).to_f)}pt" }
+      end
+      body = strip_input_line_noise(body)
       return "Warning: #{body}"
     end
 
     str
+  end
+
+  def strip_input_line_noise(body)
+    body = body.sub(/(?:,\s*)?on input line \d+(?:,\s*|\s+(?=[a-zA-Z]))/i, ' ')
+    body = body.sub(/(?:,\s*)?on input line \d+\.?$/i, '')
+    body.gsub(/\s+/, ' ').strip
   end
 
   def clean_ref_warning(str)
@@ -849,7 +1050,7 @@ module LaTeXDiagnostics
     file_name = err_file || current_log_file(file_stack)
     classification = LaTeXErrorCatalog.classify(err_text, err_block, file: file_name, line: line_no)
     cat_id = classification ? classification[:id] : :generic
-    token = extract_argument_token(err_block) || classification&.[](:token)
+    token = (cat_id == :undefined_control_sequence && classification&.[](:token)) ? classification[:token] : (extract_argument_token(err_block) || classification&.[](:token))
     token = nil if token.to_s.match?(/\s/)
     root_l = classification ? classification[:root_line] : nil
     root_c = classification ? classification[:root_col] : nil
@@ -1024,6 +1225,8 @@ module LaTeXDiagnostics
   end
 
   def print_diagnostics_body(warnings, errors = [], fallback_lines: [], tier_label: nil, io: $stdout)
+    @last_context_file = nil
+    @last_context_range = nil
     all_sorted, num_warnings, num_errors = sort_diagnostic_items(warnings, errors)
     max_width = all_sorted.map { |item| item[:line_str].to_s.length }.max || 0
 
@@ -1052,6 +1255,8 @@ module LaTeXDiagnostics
     header_key = item_file
 
     if header_key != current_header
+      @last_context_file = nil
+      @last_context_range = nil
       if @options[:emacs]
         io.puts ')' if current_header
         io.puts "(#{item_file}"
@@ -1154,9 +1359,89 @@ module LaTeXDiagnostics
   def emit_compile_diagnostics(errors: [], alerts: [], warnings: [], whatevers: [], io: $stderr)
     records = collect_compile_records(errors: errors, alerts: alerts,
                                       warnings: warnings, whatevers: whatevers)
+    if @options[:vscode_lw]
+      emit_vscode_lw_diagnostics(records, errors: errors)
+      return records.size
+    end
+    @last_context_file = nil
+    @last_context_range = nil
     records.sort_by { |r| [r[:index] || 0, r[:file] || '', r[:line] || 0, r[:col] || 0] }
-           .each { |r| io.puts LaTeXCompileFormat.render(r, color: @options[:color] != false, link: @options[:link] == true) }
+           .each do |r|
+             io.puts LaTeXCompileFormat.render(r, color: @options[:color] != false, link: @options[:link] == true)
+             emit_compile_record_context(r, io)
+           end
     records.size
+  end
+
+  def emit_compile_record_context(record, io)
+    return unless @options && @options[:context_lines].to_i.positive?
+    line = record[:line].to_i
+    return unless line.positive?
+
+    col_pos = (record[:col] && record[:col].to_i.positive?) ? record[:col].to_i - 1 : nil
+    token_len = (record[:token] && !record[:token].to_s.empty?) ? record[:token].to_s.length : 1
+    snippet = render_context_snippet(record[:file], line, @options[:context_lines].to_i,
+                                     col_pos: col_pos, token_len: token_len, root_col: record[:col])
+    io.puts snippet.join("\n") unless snippet.empty?
+  end
+
+  def emit_vscode_lw_diagnostics(records, errors:)
+    $stdout.puts "Fatal error occurred, no output PDF file produced!\n\n" if errors.any?
+    root_base = File.basename(@filename.to_s, '.tex')
+    records.sort_by { |r| [r[:index] || 0, r[:file] || '', r[:line] || 0, r[:col] || 0] }
+           .each { |r| emit_single_vscode_record(r, root_base: root_base) }
+  end
+
+  def emit_single_vscode_record(record, root_base:)
+    file = format_vscode_record_file(record[:file])
+    line = (record[:line] && record[:line].to_i.positive?) ? record[:line].to_i : 1
+    msg = LaTeXCompileFormat.format_message(record, color: false)
+    cat = record[:category] || (respond_to?(:diagnostic_category, true) ? diagnostic_category(record) : nil)
+    expl = (cat && cat != :generic) ? (DIAGNOSTIC_EXPLANATIONS[cat] || LaTeXErrorCatalog.find_by_id(cat)) : nil
+    is_root = (File.basename(file, '.tex') == root_base)
+
+    case record[:tier]
+    when 'errors'
+      emit_vscode_error(file, line, msg, expl)
+    when 'whatevers'
+      emit_vscode_info(file, line, msg, expl, is_root: is_root)
+    else
+      emit_vscode_warning(file, line, msg, expl, is_root: is_root)
+    end
+  end
+
+  def format_vscode_record_file(file)
+    f = file || @filename
+    f.start_with?('/', './') ? f : "./#{f}"
+  end
+
+  def build_vscode_explanation_lines(expl)
+    return [] unless expl
+
+    lines = []
+    lines << "❓ Why: #{expl[:why]}" if expl[:why]
+    fix_label = expl[:fix_label] || 'Fix:'
+    fix_label = "#{fix_label}:" unless fix_label.end_with?(':')
+    lines << "🔧 #{fix_label} #{expl[:fix]}" if expl[:fix]
+    lines << "👀 See: #{expl[:doc_url]}" if expl[:doc_url]
+    lines
+  end
+
+  def emit_vscode_error(file, line, msg, expl)
+    lines = ["#{file}:#{line}: #{msg}"] + build_vscode_explanation_lines(expl)
+    $stdout.puts "#{lines.join("\n")}\n\n"
+  end
+
+  def emit_vscode_info(file, line, msg, expl, is_root:)
+    lines = ["LaTeX Info: #{msg} on input line #{line}."] + build_vscode_explanation_lines(expl)
+    block = lines.join("\n")
+    $stdout.puts is_root ? "#{block}\n\n" : "(#{file}\n#{block}\n\n)\n\n"
+  end
+
+  def emit_vscode_warning(file, line, msg, expl, is_root:)
+    lines = ["LaTeX Warning: #{msg} on input line #{line}."] + build_vscode_explanation_lines(expl)
+    block = lines.join("\n")
+    $stdout.puts is_root ? "#{block}\n\n" : "(#{file}\n#{block}\n\n)\n\n"
   end
 
   def collect_compile_records(errors:, alerts:, warnings:, whatevers:)
@@ -1263,6 +1548,8 @@ module LaTeXDiagnostics
     if compile_mode?
       if all_sorted.empty? && !fallback_lines.empty?
         disp = format_display_path(@filename)
+        disp = "./#{disp}" if @options[:vscode_lw] && !disp.start_with?('/', './')
+        io.puts 'Fatal error occurred, no output PDF file produced!' if @options[:vscode_lw]
         io.puts "#{disp}:1: error: compilation failed; see log for details"
       end
       return
@@ -1302,7 +1589,7 @@ module LaTeXDiagnostics
   end
 
   def terminal_columns
-    LaTeXUtils.terminal_width(default: 80, max: 80)
+    LaTeXUtils.terminal_width(default: 80)
   end
 
   def wrap_box_field(prefix, text, inner_width)
@@ -1324,14 +1611,15 @@ module LaTeXDiagnostics
     top_title = "─ Diagnostic Explanation: #{expl[:title]} "
     dash_count = [cols - 2 - top_title.length, 1].max
     fix_label = expl[:fix_label] || (category.to_s.start_with?('underfull') ? 'Might fix:' : 'Fix:')
+    fix_label = "#{fix_label}:" unless fix_label.end_with?(':')
     box_lines = [
       "┌#{top_title}#{'─' * dash_count}┐",
-      *wrap_box_field('Why:', expl[:why], inner_width),
-      *wrap_box_field(fix_label, expl[:fix], inner_width)
+      *wrap_box_field('❓ Why:', expl[:why], inner_width),
+      *wrap_box_field("🔧 #{fix_label}", expl[:fix], inner_width)
     ]
     if expl[:doc_url]
       doc_link = format_terminal_url(expl[:doc_url], expl[:doc_url], color: :blue)
-      box_lines.concat(wrap_box_field('See:', doc_link, inner_width))
+      box_lines.concat(wrap_box_field('👀 See:', doc_link, inner_width))
     end
     box_lines << "└#{'─' * (cols - 2)}┘"
 
@@ -1365,9 +1653,9 @@ module LaTeXDiagnostics
   end
 
   def reference_or_cite_category(txt)
-    if (txt.include?('Reference `') || txt.include?('reference `')) && txt.include?('undefined')
+    if txt =~ /(?:reference|Reference)\s+[`'"]/i && txt.include?('undefined')
       :undefined_reference
-    elsif (txt.include?('Citation `') || txt.include?('citation `')) && txt.include?('undefined')
+    elsif txt =~ /(?:citation|Citation)\s+[`'"]/i && txt.include?('undefined')
       :undefined_citation
     end
   end
@@ -1386,8 +1674,11 @@ module LaTeXDiagnostics
 
     return :hyperref_token if txt.include?('Token not allowed in a PDF string')
     return :float_specifier if txt =~ /float specifier changed to/i
-    return :font_shape if txt.include?('Some font shapes were not available') || txt =~ /Font shape .* undefined/i
-    return :summary_warning if txt.include?('There were multiply-defined labels') || txt.include?('There were undefined references')
+    return :font_shape if txt.include?('Some font shapes were not available') ||
+                          txt =~ /Font shape .* (?:undefined|not available)/i
+    return :summary_warning if txt.include?('There were multiply-defined labels') ||
+                               txt.include?('There were undefined references') ||
+                               txt.include?('Size substitutions with differences')
     return :etex_allocation if txt.include?('Extended allocation already in use')
 
     :generic
@@ -1634,7 +1925,8 @@ module LaTeXDiagnostics
                    txt.include?('There were multiply-defined labels') ||
                    txt.include?('There were undefined references') ||
                    txt.include?('Some font shapes were not available') ||
-                   txt =~ /Font shape .* undefined using .* instead/i ||
+                   txt.include?('Size substitutions with differences') ||
+                   txt =~ /Font shape .* (?:undefined using|tried instead|defaults substituted)/i ||
                    txt.include?('Extended allocation already in use')
 
     false
@@ -1839,11 +2131,23 @@ module LaTeXDiagnostics
       exit 1
     end
 
+    io = $stdout if @options[:vscode_lw]
     displayed_errors, cascade_info = throttle_errors(errors)
+    if displayed_errors.empty?
+      disp = format_display_path(@filename)
+      disp = "./#{disp}" if @options[:vscode_lw] && !disp.start_with?('/', './')
+      displayed_errors = [{
+        file: disp,
+        line: 1,
+        text: 'compilation failed; see log for details',
+        tier: 'errors'
+      }]
+    end
+
     alerts = []
     warns = []
     whats = []
-    if @options[:all]
+    if @options[:all] || @options[:vscode_lw]
       raw_warns = extract_warnings(content, false)
       alerts, warns, whats = partition_diagnostics(content, raw_warns)
     end
@@ -1855,7 +2159,7 @@ module LaTeXDiagnostics
       whatevers: whats,
       io: io
     )
-    emit_compile_cascade_notice(cascade_info, io: io)
+    emit_compile_cascade_notice(cascade_info, io: io) unless @options[:vscode_lw]
     exit 1
   end
 
@@ -2114,16 +2418,17 @@ module LaTeXDiagnostics
     prepared_errors = prepare_error_items(err_items)
     displayed_errors, cascade_info = throttle_errors(prepared_errors)
     has_errors = errors > 0 || !prepared_errors.empty?
-    show_non_errors = @options[:all] || !has_errors
+    show_non_errors = @options[:all] || !has_errors || @options[:vscode_lw]
 
+    out_io = @options[:vscode_lw] ? $stdout : $stderr
     emit_compile_diagnostics(
       errors: displayed_errors,
       alerts: show_non_errors ? alert_items : [],
       warnings: show_non_errors ? reg_warns : [],
       whatevers: show_non_errors ? what_items : [],
-      io: $stderr
+      io: out_io
     )
-    emit_compile_cascade_notice(cascade_info, io: $stderr)
+    emit_compile_cascade_notice(cascade_info, io: out_io) unless @options[:vscode_lw]
     [prepared_errors.size, errors].max
   end
 
@@ -2228,6 +2533,7 @@ module LaTeXDiagnostics
   end
 
   def print_compile_success_if_clean(errors, alerts, warnings)
+    return if @options && @options[:vscode_lw]
     return unless errors.zero? && !llm_mode? && !json_mode?
     return if @options[:werror] && (alerts.positive? || warnings.positive?)
 

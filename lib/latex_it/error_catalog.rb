@@ -72,22 +72,24 @@ module LaTeXErrorCatalog
     frac sqrt left right over atop lim min max sup inf det exp log ln sin cos tan
   ].freeze
 
-  def self.suggest_command(raw_tok, file: nil)
+  def self.suggest_command(raw_tok, file: nil, macro: nil)
     return 'Undefined command; check spelling or \\usepackage' if raw_tok.nil? || raw_tok.empty?
 
     cmd = raw_tok.to_s.strip.sub(/\A\\/, '')
     return "Undefined command '\\#{cmd}'; check spelling or \\usepackage" if cmd.empty?
 
+    macro_ctx = macro ? " (in expansion of '#{macro}')" : ''
+
     pkg = PACKAGE_COMMANDS[cmd]
-    return "Command '\\#{cmd}' requires \\usepackage{#{pkg}}" if pkg
+    return "Command '\\#{cmd}'#{macro_ctx} requires \\usepackage{#{pkg}}" if pkg
 
     project_macros = LaTeXMacroHarvester.harvest(file)
     suggestion = find_closest_command(cmd, project_macros)
     if suggestion
       sug_pkg = project_macros.include?(suggestion) ? nil : PACKAGE_COMMANDS[suggestion]
-      sug_pkg ? "Did you mean '\\#{suggestion}'? (requires \\usepackage{#{sug_pkg}})" : "Did you mean '\\#{suggestion}'?"
+      sug_pkg ? "Did you mean '\\#{suggestion}'?#{macro_ctx} (requires \\usepackage{#{sug_pkg}})" : "Did you mean '\\#{suggestion}'?#{macro_ctx}"
     else
-      "Undefined command '\\#{cmd}'; check spelling or \\usepackage"
+      "Undefined command '\\#{cmd}'#{macro_ctx}; check spelling or \\usepackage"
     end
   end
 
@@ -116,6 +118,8 @@ module LaTeXErrorCatalog
   def self.score_command_candidates(cmd, candidates, project_macros, max_dist)
     scored = []
     candidates.each do |c|
+      next if c == cmd
+
       dist = LaTeXUtils.edit_distance(cmd, c)
       next if dist > max_dist
 
@@ -138,17 +142,87 @@ module LaTeXErrorCatalog
     false
   end
 
-  # TeX breaks the l.N context line immediately after the offending token, so
-  # the culprit is the LAST control sequence on it, not the first. The old
-  # pattern was non-greedy and captured the first, which for any context line
-  # with more than one macro named the wrong command and produced a nonsensical
-  # "Did you mean ...?" hint -- on the single most common LaTeX error there is.
-  UNDEFINED_CS_EXTRACTOR = lambda do |_match, err_block|
+  def self.extract_undefined_cs_info(err_block)
     block_text = err_block.join("\n")
-    return Regexp.last_match(1) if block_text =~ /<recently read>\s*(\\\S+)/
+    if block_text =~ /<recently read>\s*(\\[a-zA-Z@]+|\\[^\s])/
+      return [Regexp.last_match(1), nil]
+    end
+    if block_text =~ /<to be read again>\s*(\\[a-zA-Z@]+|\\[^\s])/
+      return [Regexp.last_match(1), nil]
+    end
 
-    context = err_block.find { |line| line =~ /\Al\.\d+/ }
-    context&.scan(/\\[a-zA-Z@]+/)&.last
+    # Check macro expansion lines: \macro ...->... \badcs
+    # TeX breaks the line immediately after the offending token, so the culprit
+    # is the last control sequence on the line after '->'.
+    macro_line = err_block.find { |l| l =~ /->/ }
+    if macro_line
+      before_arrow, after_arrow = macro_line.split('->', 2)
+      enclosing = before_arrow&.scan(/\\[a-zA-Z@]+|\\[^\s]/)&.first
+      cs = after_arrow&.scan(/\\[a-zA-Z@]+|\\[^\s]/)&.last
+      return [cs, enclosing] if cs
+    end
+
+    # Check <argument> lines: <argument> ... \badcs
+    arg_line = err_block.find { |l| l =~ /<argument>/ }
+    if arg_line
+      after_arg = arg_line.sub(/\A.*<argument>\s*/, '')
+      cs = after_arg.scan(/\\[a-zA-Z@]+|\\[^\s]/).last
+      return [cs, nil] if cs
+    end
+
+    # Fallback to l.N line
+    context = err_block.find { |l| l =~ /\Al\.\d+/ }
+    if context
+      tokens = context.scan(/\\[a-zA-Z@]+|\\[^\s]/)
+      tokens.reject! { |t| t == '\end' } if tokens.size > 1
+      return [tokens.last, nil] if tokens.last
+    end
+
+    [nil, nil]
+  end
+
+  def self.find_undefined_cs_source_location(file, line, token, err_block)
+    source_file = find_source_file(file)
+    return [nil, nil] unless source_file && line && line.to_i > 0
+
+    lines = File.readlines(source_file) rescue nil
+    return [nil, nil] unless lines
+
+    err_idx = line.to_i - 1
+    return [nil, nil] if err_idx < 0 || err_idx >= lines.size
+
+    _cs, macro = extract_undefined_cs_info(err_block)
+
+    start_search = [err_idx - 1, 0].max
+    min_search = [err_idx - 50, 0].max
+
+    # Pass 1: Look for the undefined token itself on preceding lines
+    if token && !token.empty?
+      start_search.downto(min_search) do |i|
+        pos = lines[i].index(token)
+        return [i + 1, pos + 1] if pos
+      end
+    end
+
+    # Pass 2: If inside a macro expansion, look for the enclosing macro on preceding lines
+    if macro && !macro.empty?
+      start_search.downto(min_search) do |i|
+        pos = lines[i].index(macro)
+        return [i + 1, pos + 1] if pos
+      end
+    end
+
+    [nil, nil]
+  rescue StandardError
+    [nil, nil]
+  end
+
+  # TeX breaks the error context line immediately after the offending token.
+  # If inside a macro definition/expansion (e.g. \DotProd #1#2->\permut),
+  # or argument (<argument> ...), the culprit is on that line, NOT on the outer l.N context.
+  UNDEFINED_CS_EXTRACTOR = lambda do |_match, err_block|
+    token, _macro = extract_undefined_cs_info(err_block)
+    token
   end
 
   MATH_NON_ALIGN_ENVS = (
@@ -406,7 +480,7 @@ module LaTeXErrorCatalog
       pattern: /Undefined control sequence/i,
       title: 'Undefined Control Sequence',
       token_extractor: UNDEFINED_CS_EXTRACTOR,
-      hint: ->(tok, file = nil) { suggest_command(tok, file: file) },
+      hint: ->(tok, file = nil, macro = nil) { suggest_command(tok, file: file, macro: macro) },
       why: 'LaTeX does not recognize this macro or command name.',
       fix: 'Check for typos or include the package defining this macro in preamble.',
       doc_slug: '02_undefined_control_sequence'
@@ -901,8 +975,21 @@ module LaTeXErrorCatalog
       next unless match
 
       token = extract_token(entry, match, err_block, file: file, line: line)
-      hint = resolve_hint(entry[:hint], token, file: file)
-      root_line, root_col = extract_root_location(entry, token, hint, file, line)
+      _cs, macro = (entry[:id] == :undefined_control_sequence) ? extract_undefined_cs_info(err_block) : [token, nil]
+      hint = resolve_hint(entry[:hint], token, file: file, macro: macro)
+      root_line, root_col = extract_root_location(entry, token, hint, file, line, err_block: err_block)
+
+      why = if entry[:id] == :undefined_control_sequence && macro
+              "LaTeX does not recognize '#{token}' (encountered while expanding '#{macro}')."
+            else
+              entry[:why]
+            end
+      fix = if entry[:id] == :undefined_control_sequence && macro
+              "Check definition of '#{macro}' or define '#{token}' in preamble."
+            else
+              entry[:fix]
+            end
+
       return {
         id: entry[:id],
         title: entry[:title],
@@ -910,15 +997,15 @@ module LaTeXErrorCatalog
         hint: hint,
         root_line: root_line,
         root_col: root_col,
-        why: entry[:why],
-        fix: entry[:fix],
+        why: why,
+        fix: fix,
         doc_slug: entry[:doc_slug]
       }
     end
     nil
   end
 
-  def self.extract_root_location(entry, token, hint, file, line)
+  def self.extract_root_location(entry, token, hint, file, line, err_block: [])
     if hint =~ /opened on line (\d+)(?:\s*\(col\s*(\d+)\))?/i
       return [Regexp.last_match(1).to_i, Regexp.last_match(2) ? Regexp.last_match(2).to_i : nil]
     end
@@ -931,6 +1018,9 @@ module LaTeXErrorCatalog
     if entry[:id] == :undefined_control_sequence && token
       col = extract_token_col(file, line, token)
       return [line, col] if col
+
+      root_l, root_c = find_undefined_cs_source_location(file, line, token, err_block)
+      return [root_l, root_c] if root_l
     end
 
     [line, nil]
@@ -977,10 +1067,14 @@ module LaTeXErrorCatalog
     end
   end
 
-  def self.resolve_hint(hint, token, file: nil)
+  def self.resolve_hint(hint, token, file: nil, macro: nil)
     return hint.to_s unless hint.respond_to?(:call)
 
-    hint.parameters.size > 1 ? hint.call(token, file) : hint.call(token)
+    case hint.parameters.size
+    when 1 then hint.call(token)
+    when 2 then hint.call(token, file)
+    else hint.call(token, file, macro)
+    end
   end
 
   WARNING_EXPLANATIONS = {

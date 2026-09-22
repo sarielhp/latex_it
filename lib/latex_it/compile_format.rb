@@ -92,9 +92,13 @@ module LaTeXCompileFormat
 
   def clean_message(raw_text)
     str = raw_text.to_s.gsub(/\s+/, ' ').strip
+    str = str.gsub(/not available\s*\(Font\)\s*/i, 'not available, ')
+    str = str.gsub(/\(Font\)\s*/i, ' ')
     str = strip_warning_header(str)
+    str = str.sub(/(?:,\s*)?on input line \d+(?:,\s*|\s+(?=[a-zA-Z]))/i, ' ')
     str = strip_trailing_location(str)
     str = strip_trailing_period(str)
+    str = str.gsub(/\s+/, ' ').strip
     downcase_first_word(str)
   end
 
@@ -103,6 +107,10 @@ module LaTeXCompileFormat
       pkg = Regexp.last_match(1)
       rest = Regexp.last_match(2)
       "[#{pkg}] #{rest}"
+    elsif text =~ /\ALaTeX\s+([-\w.@*]+)\s+[Ww]arning:\s*(.*)\z/i
+      subsystem = Regexp.last_match(1).downcase
+      rest = Regexp.last_match(2)
+      "[#{subsystem}] #{rest}"
     elsif text =~ WARNING_HEADER_PATTERN
       text.sub(WARNING_HEADER_PATTERN, '')
     elsif text =~ /\A(?:Alert|Warning|Note|Error):\s*(.*)\z/i
@@ -113,7 +121,7 @@ module LaTeXCompileFormat
   end
 
   def strip_trailing_location(text)
-    text.sub(/\s*\b(?:on input line \d+(?:--\d+)?|at lines? \d+(?:--\d+)?)\.?\s*\z/i, '')
+    text.sub(/(?:,\s*)?\b(?:on input line \d+(?:--\d+)?|at lines? \d+(?:--\d+)?)\.?\s*\z/i, '')
   end
 
   def strip_trailing_period(text)

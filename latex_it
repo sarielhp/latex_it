@@ -231,6 +231,7 @@ module LatexCLI
       suppress_warnings: cfg['suppress_warnings'] == true,
       suppress_alerts: cfg['suppress_alerts'] == true,
       all: false, explain: false, deps: false,
+      context_lines: cfg['context_lines'] || 0,
       exclude_main_tex: cfg['exclude_main_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_MAIN_PATTERNS,
       exclude_source_tex: cfg['exclude_source_tex'] || LaTeXUtils::DEFAULT_EXCLUDE_SOURCE_PATTERNS,
       bib_dirs: cfg['bib_dirs'] || LaTeXUtils::DEFAULT_BIB_DIRS,
@@ -241,6 +242,7 @@ module LatexCLI
       explicit_junk_dir: false,
       bib_extract: false, bib_extract_name: nil,
       compile: cfg['compile'] == true, llm: cfg['llm'] == true, json: cfg['json'] == true,
+      vscode_lw: false,
       raw: cfg['raw'] == true, link: cfg['links'],
       index: cfg['index'] == true, explicit_index: false, config_save: false, config_scope: nil,
       explicit_passes: false, explicit_update_on_diff: false, explicit_time: false,
@@ -277,6 +279,7 @@ module LatexCLI
       case arg
       when '-cc' then '--compile'
       when '-llm' then '--llm'
+      when /\A-([2-9]|\d{2,})\z/ then "--context=#{$1}"
       else arg
       end
     end
@@ -380,6 +383,9 @@ module LatexCLI
       options[:suppress_warnings] = false
       options[:suppress_alerts] = false
     end
+    opts.on('--badges', 'Display visual severity badges/emojis for all diagnostics') do
+      options[:badges] = true
+    end
     opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero status') do
       options[:werror] = true
       options[:explicit_werror] = true
@@ -392,6 +398,10 @@ module LatexCLI
     end
     opts.on('--alert-hbox PT', Float, 'Overfull hbox threshold in points to classify as Alert (default: 24.0)') { |v| options[:alert_overfull_pt] = v.to_f }
     opts.on('--whatever-pt PT', Float, 'Overfull hbox threshold in points to classify as Whatever (default: 2.5)') { |v| options[:whatever_overfull_pt] = v.to_f }
+    opts.on('--context NUM', Integer, 'Show NUM lines of surrounding source context for diagnostics') do |v|
+      options[:context_lines] = v.to_i
+      options[:explicit_context_lines] = true
+    end
   end
 
   def self.add_compilation_options_bundle(opts, options)
@@ -469,6 +479,11 @@ module LatexCLI
     opts.on('--vscode-init', 'Create VS Code tasks.json and settings.json in .vscode/ and exit') do
       LaTeXConfig.create_vscode_template!('.')
       exit 0
+    end
+    opts.on('--vscode-lw', 'Format diagnostics for VS Code LaTeX Workshop extension') do
+      options[:compile] = true
+      options[:vscode_lw] = true
+      options[:color] = false
     end
     opts.on('--gitignore-init', 'Create or add standard LaTeX and junk/ ignore rules to .gitignore and exit') do
       LaTeXConfig.init_gitignore!('.')

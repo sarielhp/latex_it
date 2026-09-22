@@ -68,6 +68,7 @@ class LatexArxivPackager
 
   def ensure_compiled!
     puts Rainbow("==> Pre-flight compilation of #{@filename} for arXiv submission...").cyan.bright
+    @builder.options[:no_env] = true
     return false unless @builder.run_in_current_directory!
 
     fls_path = "junk/#{@bfilename}.fls"

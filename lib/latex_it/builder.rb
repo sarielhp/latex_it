@@ -145,7 +145,11 @@ class LatexBuilder
   end
 
   def handle_cached_up_to_date_build
-    if json_mode?
+    if @options[:vscode_lw]
+      junk_pdf = File.join(@junk_dir, "#{@bfilename}.pdf")
+      puts "Output written on #{junk_pdf} (1 page)."
+      analyze_output
+    elsif json_mode?
       analyze_output
     elsif llm_mode?
       analyze_output if @options[:all] || @options[:werror]
@@ -174,6 +178,8 @@ class LatexBuilder
       total_t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       printf("Total Build Time: %s seconds\n", Rainbow(format('%.2f', total_t1 - total_t0)).green.bright)
     end
+
+    puts "Output written on #{junk_pdf} (1 page)." if @options[:vscode_lw]
 
     analyze_output
     save_build_state!

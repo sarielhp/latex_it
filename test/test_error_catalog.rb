@@ -100,6 +100,73 @@ class TestErrorCatalog < Minitest::Test
     assert_includes item[:hint], "Did you mean '\\includegraphics'? (requires \\usepackage{graphicx})"
   end
 
+  def test_classify_undefined_control_sequence_in_macro_expansion
+    err_lines = [
+      "./t_cover.tex:208: Undefined control sequence.",
+      "\\DotProd #1#2->\\permut ",
+      "                       {{#1},{#2}}",
+      "l.208 \\end{align*}"
+    ]
+    item = LaTeXErrorCatalog.classify(err_lines.join("\n"), err_lines)
+    assert item
+    assert_equal :undefined_control_sequence, item[:id]
+    assert_equal '\\permut', item[:token]
+    assert_includes item[:hint], "Undefined command '\\permut' (in expansion of '\\DotProd')"
+    assert_includes item[:why], "encountered while expanding '\\DotProd'"
+    assert_includes item[:fix], "Check definition of '\\DotProd'"
+    refute_includes item[:hint], 'Did you mean'
+  end
+
+  def test_classify_undefined_control_sequence_root_location_in_align_environment
+    Dir.mktmpdir('test_align_macro') do |dir|
+      file = File.join(dir, 'doc.tex')
+      File.write(file, <<~TEX)
+        \\documentclass{article}
+        \\begin{document}
+        \\begin{align*}
+          x &= 1 \\\\
+          \\DotProd{a}{b} \\\\
+          y &= 2
+        \\end{align*}
+        \\end{document}
+      TEX
+
+      err_lines = [
+        "#{file}:8: Undefined control sequence.",
+        "\\DotProd #1#2->\\permut ",
+        "                       {{#1},{#2}}",
+        "l.8 \\end{align*}"
+      ]
+      item = LaTeXErrorCatalog.classify(err_lines.join("\n"), err_lines, file: file, line: 8)
+      assert item
+      assert_equal :undefined_control_sequence, item[:id]
+      assert_equal '\\permut', item[:token]
+      assert_equal 5, item[:root_line], "Expected root_line to point to line 5 containing \\DotProd"
+      assert_equal 3, item[:root_col], "Expected root_col to point to \\DotProd"
+    end
+  end
+
+  def test_classify_undefined_control_sequence_in_argument
+    err_lines = [
+      "! Undefined control sequence.",
+      "<argument>  x &= 1 \\\\ y &= \\unknownMacro ",
+      "                                         \\\\ z &= 2 ",
+      "l.8 \\end{align*}"
+    ]
+    item = LaTeXErrorCatalog.classify(err_lines.join("\n"), err_lines)
+    assert item
+    assert_equal :undefined_control_sequence, item[:id]
+    assert_equal '\\unknownMacro', item[:token]
+    assert_includes item[:hint], "Undefined command '\\unknownMacro'"
+  end
+
+  def test_score_command_candidates_does_not_suggest_identical_command
+    assert_nil LaTeXErrorCatalog.find_closest_command('end', [])
+    assert_nil LaTeXErrorCatalog.find_closest_command('begin', [])
+    hint = LaTeXErrorCatalog.suggest_command('end')
+    refute_includes hint, "Did you mean '\\end'?"
+  end
+
   def test_classify_missing_item
     text = "./main.tex:4: LaTeX Error: Something's wrong--perhaps a missing \\item."
     item = LaTeXErrorCatalog.classify(text, text.lines)

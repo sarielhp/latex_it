@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'strscan'
+
 # ==============================================================================
 # lib/latex_it/color.rb
 #
@@ -122,6 +124,32 @@ module LatexColor
 
     def default_theme(env = ENV)
       true_color_supported?(env) ? 'blush' : 'ansi'
+    end
+
+    def highlight_latex(line, color_enabled: true)
+      return line.to_s unless color_enabled
+
+      s = StringScanner.new(line.to_s)
+      out = String.new(capacity: line.bytesize * 2)
+
+      until s.eos?
+        if s.scan(/(?<!\\)%.*$/)
+          out << Rainbow(s.matched).faint.to_s
+        elsif s.scan(/\\(?:begin|end)\b/)
+          out << Rainbow(s.matched).magenta.bright.to_s
+        elsif s.scan(/\\[a-zA-Z@]+/)
+          out << Rainbow(s.matched).cyan.to_s
+        elsif s.scan(/\\[^a-zA-Z@\s]/)
+          out << Rainbow(s.matched).cyan.to_s
+        elsif s.scan(/\$\$|\$|\\\(|\\\)|\\[\[\]]/)
+          out << Rainbow(s.matched).yellow.to_s
+        elsif s.scan(/[^\\%$]+/)
+          out << s.matched
+        else
+          out << s.getch
+        end
+      end
+      out
     end
 
     def rgb_to_ansi16(r, g, b, ground = :foreground)

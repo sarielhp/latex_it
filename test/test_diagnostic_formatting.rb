@@ -42,7 +42,21 @@ class TestDiagnosticFormatting < Minitest::Test
     item, = builder.send(:parse_box_warning, lines, 0, ['main.tex'], false)
     assert_equal '108', item[:line_str]
     assert_equal 108, item[:line]
+    assert_nil item[:line_end]
     assert_equal 'Warning: 50.97pt too wide', item[:text]
+  end
+
+  def test_multiline_ranges_use_ellipsis
+    builder = LatexBuilder.new('main.tex', {})
+    lines = [
+      'Overfull \hbox (22.19pt too wide) in paragraph at lines 136--137',
+      'l.137 \somecode'
+    ]
+    item, = builder.send(:parse_box_warning, lines, 0, ['main.tex'], false)
+    assert_equal "136\u{2026}", item[:line_str]
+    assert_equal 136, item[:line]
+    assert_equal 137, item[:line_end]
+    assert_equal 'Warning: 22.19pt too wide', item[:text]
   end
 
   def test_monotonic_line_number_sorting

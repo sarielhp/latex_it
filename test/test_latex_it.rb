@@ -492,11 +492,11 @@ class TestLatexItCLI < Minitest::Test
     assert_includes formatted, Rainbow('42').cyan.bright.to_s
     assert_includes formatted, Rainbow(': ').yellow.bright.to_s
 
-    # In plain/monochrome mode, verify plain 42: prefix
+    # In plain/monochrome mode, verify plain 42: prefix with badge
     Rainbow.enabled = false
     mono_formatted = builder.send(:format_diagnostic_line, '42', 'Package hyperref Warning: Token not allowed on input line 42.', :yellow)
     refute_includes mono_formatted, 'W:'
-    assert_equal '42: Package hyperref Warning: Token not allowed on input line 42.', mono_formatted
+    assert_equal '42: ⚠️ Package hyperref Warning: Token not allowed on input line 42.', mono_formatted
 
     # In emacs mode, verify line prefixes are completely suppressed
     emacs_builder = LatexBuilder.new('sample.tex', emacs: true)
@@ -512,7 +512,7 @@ class TestLatexItCLI < Minitest::Test
 
     Rainbow.enabled = false
     mono_formatted = builder.send(:format_diagnostic_line, '', 'LaTeX Warning: Label(s) may have changed.', :yellow)
-    assert_equal ': LaTeX Warning: Label(s) may have changed.', mono_formatted
+    assert_equal ': ⚠️ LaTeX Warning: Label(s) may have changed.', mono_formatted
 
     emacs_builder = LatexBuilder.new('sample.tex', emacs: true)
     emacs_formatted = emacs_builder.send(:format_diagnostic_line, '', 'LaTeX Warning: Label(s) may have changed.', :yellow)
@@ -564,9 +564,9 @@ class TestLatexItCLI < Minitest::Test
     f_short = builder.send(:format_diagnostic_line, '448', 'Overfull \\hbox ...', :magenta, width: 10)
     f_empty = builder.send(:format_diagnostic_line, '', 'Warning without line', :yellow, width: 10)
 
-    assert_match(/^1071--1075: Overfull/, f_range)
-    assert_match(/^       448: Overfull/, f_short)
-    assert_match(/^          : Warning/, f_empty)
+    assert_match(/^1071--1075: ⚠️ Overfull/, f_range)
+    assert_match(/^       448: ⚠️ Overfull/, f_short)
+    assert_match(/^          : ⚠️ Warning/, f_empty)
 
     # Check colon positions: all must align at index 10 (11th character)
     assert_equal 10, f_range.index(':')
@@ -772,7 +772,9 @@ class TestLatexItCLI < Minitest::Test
     warnings = builder.send(:extract_warnings, log_content)
     assert_equal 2, warnings.size
     assert_equal './main.tex', warnings[0][:file]
-    assert_equal '140--143', warnings[0][:line_str]
+    assert_equal "140\u{2026}", warnings[0][:line_str]
+    assert_equal 140, warnings[0][:line]
+    assert_equal 143, warnings[0][:line_end]
     assert_equal './main.tex', warnings[1][:file]
     assert_equal '249', warnings[1][:line_str]
   end
@@ -1306,7 +1308,7 @@ class TestLatexItCLI < Minitest::Test
       end
 
       plain = strip_ansi(out)
-      assert_includes plain, '256: Note: underfull \hbox (badness 10000)'
+      assert_includes plain, '256: ⚠️ underfull \hbox (badness 10000)'
       assert_includes plain, 'Diagnostic Explanation: Note: Underfull \hbox (Loose Line)'
       assert_includes plain, 'TeX stretched inter-word spacing excessively'
       assert_includes plain, 'Might fix: Remove trailing \\\\ before blank lines'
@@ -1912,19 +1914,19 @@ class TestLatexItCLI < Minitest::Test
     io = StringIO.new
     diag.send(:print_summary_line, 5, 10, 15, 20, suppressed_alerts: true, suppressed_warnings: true, suppressed_whatevers: true, io: io)
     plain = strip_ansi(io.string)
-    assert_includes plain, 'Errors: 5, Alerts: 10, Warnings: 15, Whatevers: 20  (non-errors suppressed)'
+    assert_includes plain, '🛑 Errors: 5, 🚨 Alerts: 10, ⚠️ Warnings: 15, ☕ Whatevers: 20  (non-errors suppressed)'
 
     # Specific tiers suppressed
     io = StringIO.new
     diag.send(:print_summary_line, 0, 0, 3, 4, suppressed_warnings: false, suppressed_whatevers: true, io: io)
     plain = strip_ansi(io.string)
-    assert_includes plain, 'Errors: 0, Alerts: 0, Warnings: 3, Whatevers: 4  (Whatevers suppressed)'
+    assert_includes plain, '🛑 Errors: 0, 🚨 Alerts: 0, ⚠️ Warnings: 3, ☕ Whatevers: 4  (Whatevers suppressed)'
 
     # Nothing suppressed
     io = StringIO.new
     diag.send(:print_summary_line, 0, 1, 2, 3, io: io)
     plain = strip_ansi(io.string)
-    assert_includes plain, 'Errors: 0, Alerts: 1, Warnings: 2, Whatevers: 3'
+    assert_includes plain, '🛑 Errors: 0, 🚨 Alerts: 1, ⚠️ Warnings: 2, ☕ Whatevers: 3'
     refute_includes plain, 'suppressed'
   end
 

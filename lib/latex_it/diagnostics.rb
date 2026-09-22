@@ -666,7 +666,7 @@ module LaTeXDiagnostics
     return '' unless line.positive?
 
     file_path = item[:file] || @filename
-    target_end = item[:line_str].to_s =~ /\A(\d+)--(\d+)\z/ ? Regexp.last_match(2).to_i : nil
+    target_end = item[:line_end] || (item[:line_str].to_s =~ /\A(\d+)--(\d+)\z/ ? Regexp.last_match(2).to_i : nil)
     snippet_lines = render_context_snippet(file_path, line, @options[:context_lines].to_i, target_line_end: target_end)
     snippet_lines.empty? ? '' : "\n#{snippet_lines.join("\n")}"
   end
@@ -870,6 +870,20 @@ module LaTeXDiagnostics
     [file_name, line_no, line_str]
   end
 
+  def parse_box_line_span(box_line)
+    match = (box_line =~ /lines?\s+(\d+(?:--\d+)?)/i) ? Regexp.last_match(1) : ''
+    if match =~ /\A(\d+)--(\d+)\z/
+      start_l = Regexp.last_match(1).to_i
+      end_l = Regexp.last_match(2).to_i
+      line_end = end_l > start_l ? end_l : nil
+      line_str = line_end ? "#{start_l}\u{2026}" : start_l.to_s
+      [start_l, line_str, line_end]
+    else
+      start_l = match[/^\d+/].to_i
+      [start_l, start_l.positive? ? start_l.to_s : '', nil]
+    end
+  end
+
   def parse_box_warning(lines, i, file_stack, verbose)
     l = lines[i]
     start_idx = i
@@ -883,9 +897,7 @@ module LaTeXDiagnostics
       i += 1
     end
 
-    line_no, line_str = (box_line =~ /lines?\s+(\d+(?:--\d+)?)/i) ? [Regexp.last_match(1).split('--').first.to_i, Regexp.last_match(1)] : [0, '']
-    line_str = line_str.sub(/^(\d+)--\1$/, '\1')
-    line_no = line_str[/^\d+/].to_i if line_str && !line_str.empty?
+    line_no, line_str, line_end = parse_box_line_span(box_line)
     file_name = current_log_file(file_stack)
     severity = extract_box_severity(box_line)
 
@@ -897,7 +909,7 @@ module LaTeXDiagnostics
     end
 
     item = {
-      type: box_type, file: file_name, line: line_no, line_str: line_str,
+      type: box_type, file: file_name, line: line_no, line_str: line_str, line_end: line_end,
       text: clean_text, raw_text: box_line, base_color: base_color, extra_lines: extra_lines,
       severity: severity, formatted: formatted, index: start_idx
     }

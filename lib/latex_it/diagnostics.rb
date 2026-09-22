@@ -85,8 +85,9 @@ module LaTeXDiagnostics
   def show_tier_badges?
     return false if @options.nil?
     return false if @options[:emacs] || compile_mode? || @options[:vscode_lw] || @options[:json]
+    return false if @options[:badges] == false
 
-    @options[:all] == true || @options[:suppress_whatevers] == false || @options[:badges] == true
+    true
   end
 
   def format_terminal_link(file, line_str, display_str, underline: false, color: nil)

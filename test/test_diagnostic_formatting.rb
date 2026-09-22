@@ -402,4 +402,16 @@ class TestDiagnosticFormatting < Minitest::Test
     plain = io.string
     assert_includes plain, '🛑 Errors: 0, 🚨 Alerts: 7, ⚠️ Warnings: 21, ☕ Whatevers: 14'
   end
+
+  def test_tier_badges_active_in_default_mode_and_disableable
+    builder = LatexBuilder.new('main.tex', color: false, link: false)
+    warn_item = { file: 'main.tex', line_str: '13', text: 'Warning: Unused option', tier: 'warnings' }
+    rendered_default = builder.send(:render_diagnostic_item, warn_item, width: 4)
+    assert_includes rendered_default, '13: ⚠️ Unused option'
+
+    builder_no_badges = LatexBuilder.new('main.tex', color: false, link: false, badges: false)
+    rendered_disabled = builder_no_badges.send(:render_diagnostic_item, warn_item, width: 4)
+    assert_includes rendered_disabled, '13: Warning: Unused option'
+    refute_includes rendered_disabled, '⚠️'
+  end
 end

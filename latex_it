@@ -383,8 +383,8 @@ module LatexCLI
       options[:suppress_warnings] = false
       options[:suppress_alerts] = false
     end
-    opts.on('--badges', 'Display visual severity badges/emojis for all diagnostics') do
-      options[:badges] = true
+    opts.on('--[no-]badges', 'Display visual severity badges/emojis for all diagnostics (default: on)') do |v|
+      options[:badges] = v
     end
     opts.on('-W', '--werror', 'Treat compilation warnings as fatal errors and exit with non-zero status') do
       options[:werror] = true

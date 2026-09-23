@@ -250,7 +250,7 @@ module ArxivSampler
     def random_month
       first = Date.new(2007, 4, 1)
       last = Date.new(@clock.today.year, @clock.today.month, 1) << 1
-      first >> @random.rand((last.year * 12 + last.month) - (first.year * 12 + first.month) + 1)
+      first >> @random.rand(((last.year * 12) + last.month) - ((first.year * 12) + first.month) + 1)
     end
 
     def query(month, offset)
@@ -298,7 +298,7 @@ module ArxivSampler
           File.rename(stage, destination)
         end
       ensure
-        FileUtils.rm_rf(stage) if File.exist?(stage)
+        FileUtils.rm_rf(stage)
       end
       puts "Downloaded #{entry[:id]} to #{destination}"
       destination

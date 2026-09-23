@@ -323,7 +323,7 @@ module ArxivTestWorker
                           out: log, err: %i[child out], pgroup: true)
       status = wait_bounded(pid, timeout, log)
       after = File.file?(@counter) ? File.foreach(@counter).count : 0
-      @last_command.merge!(exit_status: status.exitstatus || 128 + status.termsig,
+      @last_command.merge!(exit_status: status.exitstatus || (128 + status.termsig),
                            elapsed: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(3),
                            passes: after - before)
       @last_command.dup

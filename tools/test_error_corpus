@@ -31,7 +31,7 @@ class ErrorCorpusRunner
   private
 
   def discover_examples
-    Dir.glob(File.join(CORPUS_DIR, '*/example.tex')).sort
+    Dir.glob(File.join(CORPUS_DIR, '*/example.tex'))
   end
 
   def execute_suite(examples)
@@ -92,14 +92,14 @@ class ErrorCorpusRunner
 
   def cleanup_junk(dir)
     junk = File.join(dir, 'junk')
-    FileUtils.rm_rf(junk) if File.exist?(junk)
+    FileUtils.rm_rf(junk)
     %w[pdf aux log synctex.gz fls out].each do |ext|
       f = File.join(dir, "example.#{ext}")
-      FileUtils.rm_f(f) if File.exist?(f)
+      FileUtils.rm_f(f)
     end
   end
 
-  def report_summary(passed, failed, total)
+  def report_summary(_passed, failed, total)
     puts ''
     if failed.empty?
       puts Rainbow("✔ All #{total} error corpus tests passed successfully!").green.bright

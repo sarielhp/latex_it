@@ -1,0 +1,516 @@
+# ==============================================================================
+# Top 500 LaTeX Commands by Empirical Corpus Frequency
+#
+# Source Corpus:
+# Scanned across 29368 LaTeX source (.tex) files from an active academic
+# research corpus in theoretical computer science, algorithms, and mathematics.
+#
+# Methodology:
+# 1. Comments (% ...) stripped prior to tokenization.
+# 2. LaTeX command tokens extracted via regex pattern \([a-zA-Z]+).
+# 3. Filtered: Personal identifier filter applied (excluded any command containing
+#    "sariel" or "har-peled", case-insensitive).
+# 4. Ranked in descending order of empirical occurrence count.
+#
+# Format: <rank>. \<command> <count>
+# ==============================================================================
+  1. \item                            1602464
+  2. \end                              870684
+  3. \begin                            870336
+  4. \vspace                           516110
+  5. \noindent                         423937
+  6. \log                              330504
+  7. \newcommand                       291873
+  8. \hrule                            282130
+  9. \in                               255427
+ 10. \bf                               210684
+ 11. \Graph                            205455
+ 12. \T                                199931
+ 13. \ldots                            175931
+ 14. \eps                              169720
+ 15. \leq                              166646
+ 16. \newpage                          160067
+ 17. \textwidth                        159639
+ 18. \G                                113885
+ 19. \bigstar                          113320
+ 20. \geq                              110352
+ 21. \pth                              109950
+ 22. \alpha                            107757
+ 23. \frac                             107028
+ 24. \vfil                              88195
+ 25. \penalty                           87568
+ 26. \vfilneg                           87560
+ 27. \filbreak                          87560
+ 28. \text                              83480
+ 29. \emph                              77017
+ 30. \NPHard                            73938
+ 31. \ell                               72209
+ 32. \AfterQuestion                     68906
+ 33. \NPComplete                        66954
+ 34. \sum                               66948
+ 35. \delta                             65297
+ 36. \Sigma                             65249
+ 37. \brc                               61917
+ 38. \emphi                             61196
+ 39. \subseteq                          60604
+ 40. \usepackage                        57817
+ 41. \beta                              57672
+ 42. \Delta                             57372
+ 43. \Set                               56906
+ 44. \textbf                            56812
+ 45. \floor                             55256
+ 46. \cite                              52383
+ 47. \cardin                            52051
+ 48. \hline                             51356
+ 49. \QuestionNumber                    46679
+ 50. \sqrt                              46391
+ 51. \pi                                45663
+ 52. \mathcal                           44406
+ 53. \cap                               40878
+ 54. \PS                                40321
+ 55. \color                             39040
+ 56. \cdot                              36249
+ 57. \Re                                35633
+ 58. \fi                                34818
+ 59. \linewidth                         32312
+ 60. \Mh                                31548
+ 61. \rightarrow                        30985
+ 62. \Sym                               29871
+ 63. \Prob                              29784
+ 64. \Tb                                29561
+ 65. \cup                               28666
+ 66. \def                               28534
+ 67. \Ta                                27742
+ 68. \texttt                            27067
+ 69. \gamma                             26951
+ 70. \includegraphics                   26880
+ 71. \left                              26551
+ 72. \right                             26545
+ 73. \input                             26300
+ 74. \pnt                               26254
+ 75. \NP                                26252
+ 76. \points                            26106
+ 77. \lemref                            26000
+ 78. \pause                             25263
+ 79. \ADX                               24958
+ 80. \neq                               24869
+ 81. \mid                               24702
+ 82. \providecommand                    24436
+ 83. \PntSet                            24398
+ 84. \textsc                            24136
+ 85. \Pi                                24010
+ 86. \le                                23569
+ 87. \thepage                           23350
+ 88. \label                             23193
+ 89. \newtheorem                        23086
+ 90. \em                                23075
+ 91. \tau                               22883
+ 92. \Ex                                22832
+ 93. \range                             22263
+ 94. \section                           22144
+ 95. \subsection                        22113
+ 96. \th                                21892
+ 97. \DAG                               21807
+ 98. \Bigl                              21721
+ 99. \mu                                21706
+100. \setminus                          21685
+101. \node                              21249
+102. \medskip                           21227
+103. \mathrm                            21087
+104. \smallskip                         20673
+105. \FrameTtl                          20616
+106. \VX                                20366
+107. \pa                                20236
+108. \bigl                              20223
+109. \renewcommand                      19916
+110. \overline                          19504
+111. \VV                                19367
+112. \Theta                             18794
+113. \Bigr                              18715
+114. \max                               18564
+115. \ifx                               18253
+116. \undefined                         18127
+117. \P                                 18111
+118. \ref                               18098
+119. \qquad                             17724
+120. \xspace                            17527
+121. \ifnum                             17272
+122. \fbox                              17155
+123. \else                              16991
+124. \lg                                16580
+125. \rho                               16263
+126. \MST                               16144
+127. \NPC                               15871
+128. \lemlab                            15749
+129. \vee                               15699
+130. \InExam                            15650
+131. \hspace                            15649
+132. \centerline                        15549
+133. \drawedge                          15491
+134. \bigskip                           15424
+135. \bigr                              15281
+136. \ceil                              15233
+137. \DFA                               15136
+138. \times                             14676
+139. \hfill                             14469
+140. \min                               14436
+141. \epsilon                           14209
+142. \ProblemC                          14170
+143. \mathsf                            14094
+144. \message                           13936
+145. \CNF                               13892
+146. \MakeBig                           13620
+147. \Omega                             13614
+148. \leftarrow                         13553
+149. \setcounter                        13247
+150. \sigma                             13235
+151. \p                                 13219
+152. \infty                             13153
+153. \paragraph                         12985
+154. \permut                            12936
+155. \Family                            12723
+156. \answer                            12686
+157. \pb                                12667
+158. \cdots                             12607
+159. \ge                                12274
+160. \Algorithm                         12210
+161. \lambda                            12033
+162. \documentclass                     11999
+163. \minpadpages                       11892
+164. \maxpadpages                       11892
+165. \pntA                              11854
+166. \alert                             11764
+167. \query                             11638
+168. \rule                              11452
+169. \wedge                             11450
+170. \GenExamMode                       11396
+171. \exp                               11344
+172. \sep                               10705
+173. \maxrawpages                       10369
+174. \binom                             10166
+175. \caption                           10109
+176. \rm                                10008
+177. \OnSlide                           10008
+178. \oplus                              9976
+179. \emptyset                           9964
+180. \ln                                 9821
+181. \frametitle                         9788
+182. \NFA                                9728
+183. \secref                             9572
+184. \R                                  9352
+185. \gets                               9129
+186. \II                                 9080
+187. \underline                          9070
+188. \figref                             9031
+189. \Large                              8751
+190. \seclab                             8740
+191. \tt                                 8719
+192. \Gamma                              8665
+193. \HLink                              8637
+194. \textrm                             8534
+195. \cellcolor                          8484
+196. \textcolor                          8270
+197. \Opt                                8264
+198. \Do                                 8207
+199. \UsePackage                         8180
+200. \POLYT                              8167
+201. \q                                  8114
+202. \dist                               8007
+203. \cal                                8002
+204. \si                                 7920
+205. \cleardoublepage                    7824
+206. \large                              7690
+207. \For                                7678
+208. \newcount                           7614
+209. \Tc                                 7541
+210. \figlab                             7525
+211. \thmref                             7493
+212. \quad                               7483
+213. \dots                               7404
+214. \File                               7390
+215. \Edges                              7345
+216. \TM                                 7314
+217. \SolutionMP                         7238
+218. \LP                                 7224
+219. \mbox                               7131
+220. \EdgesX                             7067
+221. \subsubsection                      7017
+222. \CFG                                6956
+223. \dirEdge                            6874
+224. \curveA                             6836
+225. \BSet                               6815
+226. \IncludeGraphics                    6784
+227. \dY                                 6620
+228. \Line                               6590
+229. \psi                                6579
+230. \pitem                              6526
+231. \mathbb                             6409
+232. \CHX                                6409
+233. \pp                                 6353
+234. \mathop                             6316
+235. \textsf                             6295
+236. \IfFileExists                       6282
+237. \A                                  6266
+238. \Event                              6217
+239. \forall                             6208
+240. \nu                                 6202
+241. \etal                               6133
+242. \epsA                               6101
+243. \padcount                           6053
+244. \fill                               6052
+245. \cell                               6050
+246. \F                                  5976
+247. \Tree                               5911
+248. \SpotFill                           5874
+249. \epsR                               5867
+250. \draw                               5865
+251. \Frechet                            5854
+252. \newcounter                         5852
+253. \reals                              5798
+254. \small                              5775
+255. \newblock                           5694
+256. \PatternOnScantron                  5680
+257. \bigcup                             5643
+258. \path                               5598
+259. \Return                             5586
+260. \widehat                            5586
+261. \neg                                5487
+262. \varepsilon                         5463
+263. \varphi                             5430
+264. \displaystyle                       5376
+265. \phi                                5354
+266. \opt                                5334
+267. \setlength                          5331
+268. \If                                 5310
+269. \the                                5284
+270. \Arr                                5265
+271. \VS                                 5261
+272. \LineSkip                           5257
+273. \pq                                 5224
+274. \Vertices                           5124
+275. \ensuremath                         5117
+276. \SCC                                5074
+277. \index                              5070
+278. \Vname                              5048
+279. \drawloop                           5026
+280. \equiv                              4986
+281. \VCourseGrade                       4948
+282. \Vemail                             4935
+283. \VhwAvg                             4910
+284. \Vnetid                             4908
+285. \Dist                               4904
+286. \Vcombined                          4902
+287. \setlist                            4897
+288. \EMPH                               4884
+289. \Vmta                               4865
+290. \thmlab                             4851
+291. \subset                             4822
+292. \curveB                             4821
+293. \body                               4794
+294. \B                                  4781
+295. \D                                  4707
+296. \Term                               4705
+297. \footnote                           4692
+298. \xi                                 4678
+299. \C                                  4670
+300. \newlist                            4667
+301. \Cell                               4655
+302. \InSol                              4654
+303. \implies                            4645
+304. \emphic                             4631
+305. \mathbf                             4625
+306. \FamilyA                            4624
+307. \EuScript                           4539
+308. \ne                                 4535
+309. \scalebox                           4519
+310. \bibitem                            4515
+311. \HWProblem                          4486
+312. \pc                                 4473
+313. \LARGE                              4444
+314. \Of                                 4414
+315. \IS                                 4393
+316. \AlgorithmI                         4376
+317. \Sample                             4351
+318. \eqlab                              4343
+319. \rect                               4320
+320. \verb                               4318
+321. \Vmtb                               4316
+322. \DetailedSolution                   4291
+323. \variant                            4227
+324. \correctanswer                      4224
+325. \ball                               4222
+326. \IRX                                4215
+327. \hat                                4197
+328. \centering                          4191
+329. \tfrac                              4164
+330. \pntB                               4123
+331. \remove                             4101
+332. \par                                4098
+333. \notin                              4092
+334. \ra                                 4073
+335. \L                                  4042
+336. \Ball                               3994
+337. \Then                               3960
+338. \to                                 3958
+339. \seg                                3907
+340. \Eqref                              3894
+341. \Vfeg                               3879
+342. \eta                                3865
+343. \edge                               3850
+344. \GraphA                             3739
+345. \author                             3732
+346. \multicolumn                        3727
+347. \GraphB                             3719
+348. \BellmanFordCode                    3712
+349. \norm                               3703
+350. \mcm                                3685
+351. \DotProd                            3657
+352. \chi                                3650
+353. \arabic                             3636
+354. \smash                              3612
+355. \EE                                 3598
+356. \rangle                             3581
+357. \SA                                 3575
+358. \HrX                                3574
+359. \ts                                 3566
+360. \langle                             3545
+361. \triangle                           3521
+362. \omega                              3519
+363. \FrameTtlTtl                        3480
+364. \hdim                               3445
+365. \InDSol                             3438
+366. \definecolor                        3398
+367. \BadProb                            3376
+368. \url                                3368
+369. \footnotesize                       3365
+370. \Cdot                               3344
+371. \ANN                                3342
+372. \protect                            3336
+373. \big                                3331
+374. \Var                                3305
+375. \ds                                 3302
+376. \Vuin                               3280
+377. \thanks                             3256
+378. \LS                                 3253
+379. \title                              3250
+380. \ObjSet                             3213
+381. \bd                                 3209
+382. \theexamnumber                      3207
+383. \DS                                 3193
+384. \textit                             3169
+385. \X                                  3142
+386. \BibLatexMode                       3136
+387. \Rightarrow                         3109
+388. \raisebox                           3097
+389. \newenvironment                     3094
+390. \S                                  3090
+391. \hyperref                           3082
+392. \prod                               3070
+393. \noLTR                              3054
+394. \PSet                               3048
+395. \refstepcounter                     3033
+396. \mathcalb                           3030
+397. \CC                                 3012
+398. \PP                                 3009
+399. \maketitle                          3009
+400. \tabularnewline                     2989
+401. \SolutionSmall                      2986
+402. \emphw                              2982
+403. \arc                                2958
+404. \myl                                2937
+405. \theoremstyle                       2936
+406. \diam                               2934
+407. \Body                               2914
+408. \NPProblem                          2905
+409. \not                                2904
+410. \loop                               2902
+411. \repeat                             2902
+412. \ll                                 2898
+413. \CS                                 2885
+414. \I                                  2875
+415. \mc                                 2860
+416. \bibliography                       2854
+417. \PSX                                2841
+418. \rceil                              2831
+419. \lceil                              2829
+420. \Dim                                2823
+421. \obj                                2803
+422. \deflab                             2780
+423. \mathit                             2772
+424. \Pr                                 2767
+425. \bar                                2756
+426. \kappa                              2748
+427. \partial                            2724
+428. \pbrc                               2723
+429. \Solution                           2710
+430. \approx                             2709
+431. \VA                                 2698
+432. \tiny                               2696
+433. \question                           2685
+434. \chx                                2684
+435. \IntRange                           2683
+436. \distFr                             2674
+437. \num                                2660
+438. \parpic                             2655
+439. \aleph                              2649
+440. \pbrcx                              2649
+441. \PSY                                2649
+442. \DFS                                2628
+443. \rfloor                             2598
+444. \lfloor                             2598
+445. \VC                                 2595
+446. \Boxes                              2590
+447. \iff                                2582
+448. \error                              2566
+449. \sc                                 2539
+450. \MakeSBig                           2539
+451. \atgen                              2530
+452. \abs                                2528
+453. \bookMode                           2518
+454. \set                                2506
+455. \pm                                 2462
+456. \PntSetA                            2462
+457. \itemref                            2461
+458. \circled                            2452
+459. \bibliographystyle                  2452
+460. \vdots                              2443
+461. \Course                             2423
+462. \Hr                                 2407
+463. \href                               2386
+464. \cZ                                 2382
+465. \defref                             2380
+466. \FalseTrueBox                       2372
+467. \HLinkPage                          2359
+468. \WeightX                            2358
+469. \bmod                               2341
+470. \ballA                              2339
+471. \Semester                           2339
+472. \FMS                                2336
+473. \ArrX                               2336
+474. \Q                                  2332
+475. \Spacer                             2331
+476. \ZZ                                 2328
+477. \origin                             2325
+478. \tilde                              2315
+479. \and                                2312
+480. \phantom                            2303
+481. \pd                                 2302
+482. \FalseTrueBoxExt                    2301
+483. \volX                               2293
+484. \solutionMode                       2285
+485. \tm                                 2283
+486. \ExCond                             2274
+487. \corref                             2265
+488. \solMode                            2254
+489. \x                                  2242
+490. \fcode                              2236
+491. \distX                              2229
+492. \lenX                               2227
+493. \Coreset                            2223
+494. \theta                              2212
+495. \e                                  2210
+496. \mleft                              2190
+497. \mright                             2190
+498. \SB                                 2173
+499. \HLinkSuffix                        2171
+500. \SL                                 2165

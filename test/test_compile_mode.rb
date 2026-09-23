@@ -282,6 +282,7 @@ class TestCompileMode < Minitest::Test
         begin
           r.each_line { |line| output << line }
         rescue Errno::EIO
+          # Linux PTY raises Errno::EIO on EOF
         end
       end
       assert_includes output, "\e]8;;file://"

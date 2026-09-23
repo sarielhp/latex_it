@@ -197,7 +197,7 @@ end
 def wait_for_child(child, seconds, log)
   if child.join(seconds)
     status = child.value
-    return status.exitstatus || 128 + status.termsig
+    return status.exitstatus || (128 + status.termsig)
   end
 
   signal_group('TERM', child.pid)

@@ -255,7 +255,7 @@ module ArxivPaperTest
               '--bws', @options[:bws], '--latex-it', @options[:latex_it], '--timeout', @options[:timeout].to_s,
               '--', 'ruby', 'tools/arxiv_test_worker.rb']
       output, status = Open3.capture2e(*argv)
-      @report['runner'] = { 'exit_status' => status.exitstatus || 128 + status.termsig, 'output' => output }
+      @report['runner'] = { 'exit_status' => status.exitstatus || (128 + status.termsig), 'output' => output }
       worker_path = File.join(workspace, 'test-worker-report.json')
       worker = File.file?(worker_path) ? JSON.parse(File.read(worker_path)) : {}
       @report['worker'] = worker

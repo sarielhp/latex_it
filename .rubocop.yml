@@ -1,0 +1,21 @@
+AllCops:
+  TargetRubyVersion: 3.3
+  NewCops: enable
+  DisabledByDefault: true
+  SuggestExtensions: false
+
+Lint:
+  Enabled: true
+
+Lint/ScriptPermission:
+  Enabled: false
+
+Lint/EmptyBlock:
+  Enabled: false
+
+Lint/AmbiguousBlockAssociation:
+  Enabled: false
+
+Lint/RescueException:
+  Exclude:
+    - 'tools/arxiv_test_worker.rb'

@@ -88,7 +88,7 @@ class TestArxivWorker < Minitest::Test
   def test_command_uses_null_stdin_and_pgroup
     worker do |runner, _root|
       spawn_args = nil
-      mock_spawn = lambda do |*args, **kwargs|
+      mock_spawn = lambda do |*_args, **kwargs|
         spawn_args = kwargs
         12_345
       end

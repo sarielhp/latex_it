@@ -248,7 +248,7 @@ module VersionBumper
       _out, status = Open3.capture2e(bundle_script, '-o', bundle_path)
       unless status.success? && File.file?(bundle_path)
         puts "#{YELLOW}⚠️ Warning: Failed to bundle standalone binary for release.#{RESET}"
-        return
+        next
       end
 
       cmd = ['gh', 'release', 'create', tag_name, bundle_path, '--title', "Release #{tag_name}", '--generate-notes']

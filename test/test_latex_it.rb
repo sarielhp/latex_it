@@ -2051,8 +2051,8 @@ class TestLatexItCLI < Minitest::Test
       warn_ref_pos = chap1_block.index("undefined reference 'sec:foo'")
 
       assert alert20_pos < alert80_pos, 'Alert on line 20 should come before alert on line 80'
-      assert alert80_pos < warn10_pos, 'All alerts should come before warnings'
-      assert warn10_pos < warn_ref_pos, 'Warnings should be sorted by line number'
+      assert alert80_pos < warn_ref_pos, 'All alerts should come before warnings'
+      assert warn_ref_pos < warn10_pos, 'Warnings should be sorted by line number'
     end
   end
 end

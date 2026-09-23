@@ -137,9 +137,7 @@ module LatexColor
           out << Rainbow(s.matched).faint.to_s
         elsif s.scan(/\\(?:begin|end)\b/)
           out << Rainbow(s.matched).magenta.bright.to_s
-        elsif s.scan(/\\[a-zA-Z@]+/)
-          out << Rainbow(s.matched).cyan.to_s
-        elsif s.scan(/\\[^a-zA-Z@\s]/)
+        elsif s.scan(/\\[a-zA-Z@]+|\\[^a-zA-Z@\s]/)
           out << Rainbow(s.matched).cyan.to_s
         elsif s.scan(/\$\$|\$|\\\(|\\\)|\\[\[\]]/)
           out << Rainbow(s.matched).yellow.to_s
@@ -218,8 +216,7 @@ end
 begin
   require 'rainbow'
 
-  # Enable TrueColor 24-bit output when supported, fallback to 256 or ANSI 16
-  class Rainbow::Color::RGB < Rainbow::Color::Indexed
+  module RainbowRGBOverride
     def codes
       if LatexColor.true_color_supported?
         [ground == :foreground ? 38 : 48, 2, r, g, b]
@@ -230,6 +227,7 @@ begin
       end
     end
   end
+  Rainbow::Color::RGB.prepend(RainbowRGBOverride)
 
   module RainbowThemeOverride
     def build(ground, values)

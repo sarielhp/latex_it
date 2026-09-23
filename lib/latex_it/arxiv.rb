@@ -91,9 +91,9 @@ class LatexArxivPackager
   end
 
   def stage_arxiv_files(stage_dir)
-    flattened_tex = begin
-      LaTeXFlattener.flatten(@filename, '.', @options[:strip_host_patterns],
-                             strip_comments: @options[:strip_comments] != false)
+    begin
+      flattened_tex = LaTeXFlattener.flatten(@filename, '.', @options[:strip_host_patterns],
+                                             strip_comments: @options[:strip_comments] != false)
     rescue StandardError => e
       warn Rainbow("[FAIL] Could not flatten LaTeX source: #{e.message}").red.bright
       return false

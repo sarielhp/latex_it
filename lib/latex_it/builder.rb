@@ -24,7 +24,7 @@ require_relative 'bib_manager'
 class LatexBuilder
   include LaTeXDiagnostics
 
-  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :junk_dir, :biberr, :input_snapshots, :bib_manager
+  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :biberr, :input_snapshots
 
   CACHE_ENV_KEYS = %w[
     LATEXOPTS LATEXOPTIONS TEXINPUTS PDFTEXINPUTS XETEXINPUTS LUATEXINPUTS
@@ -41,6 +41,14 @@ class LatexBuilder
   ].freeze
 
   ProcessResultStatus = LaTeXUtils::ProcessResultStatus
+  NOFOLLOW = defined?(File::NOFOLLOW) ? File::NOFOLLOW : 0
+
+  LABEL_HOOK = '\let\lit@orig@pw\protected@write' \
+               '\long\def\protected@write#1#2#3{\ifx#1\@auxout\typeout{LIT_LBL:\the\inputlineno:\detokenize{#3}}\fi\lit@orig@pw{#1}{#2}{#3}}'
+
+  BIBLATEX_HOOK = '\AtBeginDocument{\@ifpackageloaded{biblatex}{\AtEveryBibitem{\typeout{BIB_ENTRY: \thefield{entrykey}}}}{}}'
+
+  RUNTIME_HOOK = "\\makeatletter#{LABEL_HOOK}#{BIBLATEX_HOOK}\\makeatother"
 
   def initialize(target, options)
     @options = options
@@ -488,8 +496,6 @@ class LatexBuilder
     @path_hash ||= Digest::SHA256.hexdigest(canonical_build_dir)[0..15]
   end
 
-  NOFOLLOW = defined?(File::NOFOLLOW) ? File::NOFOLLOW : 0
-
   def project_tmp_dir
     @project_tmp_dir ||= begin
       dir = File.join(Dir.tmpdir, "latex_it_#{Process.uid}")
@@ -724,13 +730,6 @@ class LatexBuilder
     end
     status.success?
   end
-
-  LABEL_HOOK = '\let\lit@orig@pw\protected@write' \
-               '\long\def\protected@write#1#2#3{\ifx#1\@auxout\typeout{LIT_LBL:\the\inputlineno:\detokenize{#3}}\fi\lit@orig@pw{#1}{#2}{#3}}'
-
-  BIBLATEX_HOOK = '\AtBeginDocument{\@ifpackageloaded{biblatex}{\AtEveryBibitem{\typeout{BIB_ENTRY: \thefield{entrykey}}}}{}}'
-
-  RUNTIME_HOOK = "\\makeatletter#{LABEL_HOOK}#{BIBLATEX_HOOK}\\makeatother"
 
   def build_latex_pass_cmd
     latexopts = ENV['LATEXOPTS'] || ''

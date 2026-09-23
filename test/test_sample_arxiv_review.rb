@@ -168,11 +168,7 @@ class TestSampleArxivReview < Minitest::Test
 
     retries = Array.new(4) { Net::HTTPTooManyRequests.new('1.1', '429', 'Too Many Requests') }
     retries.each { |response| response.define_singleton_method(:read_body) {} }
-    connection.define_singleton_method(:request) do |_request, &block|
-      response = retries.shift
-      block.call(response)
-      response
-    end
+    responses.replace(retries)
     assert_raises(ArxivSampler::HttpError) { client.get('https://export.arxiv.org/api/query') }
     assert_equal [7.0, 3, 6, 12], sleeps
   end

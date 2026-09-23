@@ -206,8 +206,8 @@ class LatexPackager
     FileUtils.mkdir_p(File.dirname(dest_path))
 
     strip_comments = @options[:strip_comments] == true
-    content = begin
-      LaTeXFlattener.flatten(
+    begin
+      content = LaTeXFlattener.flatten(
         @filename,
         '.',
         @options[:strip_host_patterns],

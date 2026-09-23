@@ -92,6 +92,15 @@ class TestErrorCatalog < Minitest::Test
     assert_includes item[:hint], "Did you mean '\\alpha'?"
   end
 
+  def test_classify_undefined_control_sequence_fuzzy_matches_lodts_to_ldots
+    text = "./main.tex:5: Undefined control sequence.\nl.5 \\lodts"
+    item = LaTeXErrorCatalog.classify(text, text.lines)
+    assert item
+    assert_equal :undefined_control_sequence, item[:id]
+    assert_equal '\\lodts', item[:token]
+    assert_includes item[:hint], "Did you mean '\\ldots'?"
+  end
+
   def test_classify_undefined_control_sequence_fuzzy_matches_package_macro
     text = "./main.tex:5: Undefined control sequence.\nl.5 \\includegrahics{fig.pdf}"
     item = LaTeXErrorCatalog.classify(text, text.lines)

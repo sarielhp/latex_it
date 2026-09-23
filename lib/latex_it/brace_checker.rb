@@ -223,9 +223,7 @@ class LaTeXBraceChecker
     elsif rest =~ /\A\\\]/
       process_env_end('\\[', line_no)
       bs_start + 2
-    elsif (m = rest.match(INLINE_VERBATIM_PATTERN))
-      bs_start + m[0].length
-    elsif (m = rest.match(URL_ARGUMENT_PATTERN))
+    elsif (m = rest.match(INLINE_VERBATIM_PATTERN) || rest.match(URL_ARGUMENT_PATTERN))
       bs_start + m[0].length
     end
   end

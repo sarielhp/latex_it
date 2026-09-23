@@ -211,6 +211,44 @@ module LaTeXUtils
     i > 1 && j > 1 && left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1]
   end
 
+  QWERTY_COORDS = {
+    'q' => [0.0, 1.0], 'w' => [1.0, 1.0], 'e' => [2.0, 1.0], 'r' => [3.0, 1.0], 't' => [4.0, 1.0],
+    'y' => [5.0, 1.0], 'u' => [6.0, 1.0], 'i' => [7.0, 1.0], 'o' => [8.0, 1.0], 'p' => [9.0, 1.0],
+    'a' => [0.25, 2.0], 's' => [1.25, 2.0], 'd' => [2.25, 2.0], 'f' => [3.25, 2.0], 'g' => [4.25, 2.0],
+    'h' => [5.25, 2.0], 'j' => [6.25, 2.0], 'k' => [7.25, 2.0], 'l' => [8.25, 2.0],
+    'z' => [0.75, 3.0], 'x' => [1.75, 3.0], 'c' => [2.75, 3.0], 'v' => [3.75, 3.0], 'b' => [4.75, 3.0],
+    'n' => [5.75, 3.0], 'm' => [6.75, 3.0]
+  }.freeze
+
+  def self.key_distance(c1, c2)
+    p1 = QWERTY_COORDS[c1.downcase]
+    p2 = QWERTY_COORDS[c2.downcase]
+    return 1.0 unless p1 && p2
+
+    dist = Math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+    [0.35 + (dist * 0.15), 1.0].min
+  end
+
+  def self.keyboard_edit_distance(left, right)
+    return 0.0 if left == right
+    return right.length.to_f if left.empty?
+    return left.length.to_f if right.empty?
+
+    d = Array.new(left.length + 1) { Array.new(right.length + 1, 0.0) }
+    (0..left.length).each { |i| d[i][0] = i * 0.8 }
+    (0..right.length).each { |j| d[0][j] = j * 0.8 }
+
+    (1..left.length).each do |i|
+      (1..right.length).each do |j|
+        cost = left[i - 1] == right[j - 1] ? 0.0 : key_distance(left[i - 1], right[j - 1])
+        d[i][j] = [d[i - 1][j] + 0.8, d[i][j - 1] + 0.8, d[i - 1][j - 1] + cost].min
+        d[i][j] = [d[i][j], d[i - 2][j - 2] + 0.5].min if transposition?(left, right, i, j)
+      end
+    end
+
+    d[left.length][right.length]
+  end
+
   def self.safe_read(path)
     return '' unless path && File.file?(path)
 
@@ -364,9 +402,9 @@ module LaTeXUtils
     puts "Cleaning LaTeX auxiliary files in #{rel_path}..." if verbose
 
     Dir.chdir(target_dir) do
-      JUNK_BUILD_DIRS.each { |d| FileUtils.rm_rf(d) if File.exist?(d) }
+      JUNK_BUILD_DIRS.each { |d| FileUtils.rm_rf(d) }
       JUNK_PATTERNS.each do |pat|
-        Dir.glob(pat).each { |f| FileUtils.rm_f(f) if File.file?(f) }
+        Dir.glob(pat).each { |f| FileUtils.rm_f(f) }
       end
     end
   end
@@ -615,7 +653,11 @@ module LaTeXUtils
   end
 
   def self.trace_status(status)
-    code = status&.exitstatus || (status&.respond_to?(:termsig) && status&.termsig ? 128 + status.termsig : 1)
+    code = if status.nil?
+             1
+           else
+             status.exitstatus || (status.respond_to?(:termsig) && status.termsig ? 128 + status.termsig : 1)
+           end
     status_str = "[trace] => exit status #{code}"
     puts(code.zero? ? Rainbow(status_str).green : Rainbow(status_str).yellow)
   end

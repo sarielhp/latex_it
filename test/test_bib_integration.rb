@@ -342,7 +342,7 @@ class TestBibIntegration < Minitest::Test
       File.write(File.join(dir, 'refs.bib'), bib1)
 
       bin_path = File.expand_path('../latex_it', __dir__)
-      out1, status1 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      _out1, status1 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
       assert_equal 0, status1.exitstatus
       pdf_path = File.join(dir, 'main.pdf')
       txt1, _ = Open3.capture2('pdftotext', pdf_path, '-')
@@ -355,7 +355,7 @@ class TestBibIntegration < Minitest::Test
       past_time = File.mtime(bbl_path) - 100
       File.utime(past_time, past_time, File.join(dir, 'refs.bib'))
 
-      out2, status2 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      _out2, status2 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
       assert_equal 0, status2.exitstatus
       txt2, _ = Open3.capture2('pdftotext', pdf_path, '-')
       assert_includes txt2, 'Updated Title', 'Biber should rerun because .bib content hash changed'

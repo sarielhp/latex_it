@@ -7,9 +7,9 @@
 # dependency discovery, execution lifecycle, and staleness detection.
 # ==============================================================================
 
-require 'digest'
 require 'fileutils'
-require 'set'
+require 'open3'
+require 'digest'
 
 require_relative 'color'
 require_relative 'utils'
@@ -242,7 +242,7 @@ class LaTeXBibManager
   end
 
   def compute_aux_hash
-    aux_files = Dir.glob(File.join(junk_dir, '**/*.aux')).sort
+    aux_files = Dir.glob(File.join(junk_dir, '**/*.aux'))
     aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
   end
 

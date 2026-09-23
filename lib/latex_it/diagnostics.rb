@@ -217,7 +217,6 @@ module LaTeXDiagnostics
 
     case effective_tier
     when 'alerts'    then '🚨 '
-    when 'warnings'  then '❕ '
     when 'whatevers' then '☕ '
     when 'errors'    then '🛑 '
     else                  '❕ '
@@ -317,7 +316,7 @@ module LaTeXDiagnostics
     lines.join("\n")
   end
 
-  def format_error_header(first_raw_line, file_path, line_no, root_line, root_col, width)
+  def format_error_header(first_raw_line, file_path, line_no, root_line, root_col, _width = nil)
     first_clean = first_raw_line.to_s.strip
     msg = extract_clean_error_message(first_clean)
     active_line = (root_line && root_line.positive?) ? root_line : line_no
@@ -366,11 +365,10 @@ module LaTeXDiagnostics
 
     if col_no && col_no.positive?
       col_idx = col_no - 1
-      len = if %i[missing_dollar misplaced_alignment_tab extra_closing_brace].include?(cat_id)
-              1
-            elsif source_line[col_idx..] =~ /\A(\\[a-zA-Z@]+|\\[^\s])/
+      is_single_char_cat = %i[missing_dollar misplaced_alignment_tab extra_closing_brace].include?(cat_id)
+      len = if !is_single_char_cat && (source_line[col_idx..] =~ /\A(\\[a-zA-Z@]+|\\[^\s])/)
               Regexp.last_match(1).length
-            elsif clean_token
+            elsif !is_single_char_cat && clean_token
               clean_token.length
             else
               1
@@ -378,9 +376,8 @@ module LaTeXDiagnostics
       [col_idx, len]
     elsif clean_token && (idx = source_line.index(clean_token))
       [idx, clean_token.length]
-    elsif cat_id == :misplaced_alignment_tab && (idx = source_line.index(/(?<!\\)&/))
-      [idx, 1]
-    elsif cat_id == :missing_dollar && (idx = source_line.index(/(?<!\\)\$/))
+    elsif (cat_id == :misplaced_alignment_tab && (idx = source_line.index(/(?<!\\)&/))) ||
+          (cat_id == :missing_dollar && (idx = source_line.index(/(?<!\\)\$/)))
       [idx, 1]
     else
       [nil, 1]
@@ -1539,7 +1536,6 @@ module LaTeXDiagnostics
   def tier_color(tier_label)
     case tier_label.to_s
     when 'alerts', 'errors' then :red
-    when 'warnings' then :yellow
     when 'whatevers' then :cyan
     else :yellow
     end

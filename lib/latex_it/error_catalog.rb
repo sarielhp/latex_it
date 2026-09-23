@@ -55,21 +55,56 @@ module LaTeXErrorCatalog
   }.freeze
 
   COMMON_COMMANDS = %w[
-    documentclass usepackage begin end
-    section subsection subsubsection paragraph subparagraph
-    maketitle tableofcontents appendix bibliography bibliographystyle
-    label ref pageref cite citep citet footnote item caption centering
-    textbf textit texttt textsc textsf textsl underline emph
-    normalsize large Large LARGE small footnotesize huge Huge
-    newline newpage clearpage noindent bigskip medskip smallskip
-    alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta
-    iota kappa lambda mu nu xi pi rho sigma tau upsilon phi varphi chi psi omega
-    Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega
-    infty partial nabla times cdot sum prod int iint oint forall exists
-    in notin subset subseteq supset supseteq cup cap setminus
-    leq geq neq approx equiv sim simeq le ge ne
-    to leftarrow rightarrow Leftarrow Rightarrow mapsto iff implies
-    frac sqrt left right over atop lim min max sup inf det exp log ln sin cos tan
+    acute addcontentsline alpha appendix appendixname approx arabic atop
+    author bar begin beginend beta bfseries bibitem bibliography
+    bibliographystyle bigcap bigcup Bigg bigg Biggl biggl Bigl
+    bigl bigskip boldmath breve cap caption cdot cdots
+    centering chapter chaptermark chaptername check chi circ cite
+    citep citet citeyear cleardoublepage clearpage cline columnwidth contentsline
+    contentsname cos cup date ddot ddots Delta delta
+    det displaystyle div documentclass dot dots emph end
+    enlargethispage ensuremath epsilon equiv eta exists exp fbox
+    figurename flushbottom fontencoding fontfamily fontseries fontshape fontsize footnote
+    footnotemark footnotesize footnotetext footref forall fpeval frac frame
+    framebox Gamma gamma ge geq glossary glossaryentry grave
+    hat hline hlinefill hrule hspace Huge huge i
+    iff iint IJ ij implies in include includegraphics
+    includeonly index indexname indexspace inf infty input inputlineno
+    int inteval iota item itshape kappa kill label
+    Lambda lambda LARGE Large large LaTeX LaTeXe ldots
+    le left Leftarrow leftarrow lefteqn Leftrightarrow leq lim
+    linebreak linespread linethickness linewidth listfigurename listfiles listoffigures listoftables
+    listtablename ln log makeatletter makeatother makeglossary makeindex maketitle
+    mapsto marginpar markboth markright mathbb mathbf mathcal mathdollar
+    mathds mathellipsis mathgroup mathit mathnormal mathparagraph mathring mathrm
+    mathscr mathsection mathsf mathsterling mathtt mathunderscore max mbox
+    medskip medspace mid min mu multicolumn nabla ne
+    neg negmedspace negthickspace neq newcommand newenvironment newlength newline
+    newpage newtheorem nocite nofiles noindent nolinebreak nonumber nopagebreak
+    normalcolor normalfont normalsize notin nu OE oe oint
+    oldstylenums Omega omega onecolumn over overbrace overline pagebreak
+    pagename pagenumbering pageref pagestyle paragraph parbox parencite part
+    partial partname Phi phi Pi pi pm poptabs
+    pounds prime prod protect providecommand Psi psi pushtabs
+    r raggedleft raggedright Ref ref refname renewcommand renewenvironment
+    rho right Rightarrow rightarrow rightmargin rightmark rmfamily Roman
+    roman rule sbox scriptsize scshape section selectfont setlength
+    setminus sffamily shortcite shortstack Sigma sigma sim simeq
+    sin slshape small smallskip sqrt SS stackrel stepcounter
+    stop subitem subparagraph subsection subset subseteq subsubitem subsubsection
+    sum sup suppressfloats supset supseteq symbol tablename tableofcontents
+    tabularnewline tan tau text textasciicircum textasciitilde textasteriskcentered textbackslash
+    textbar textbf textbraceleft textbraceright textbullet textcircled textcite textcommaabove
+    textcommabelow textcompwordmark textcopyright textdagger textdaggerdbl textdollar textellipsis textemdash
+    textendash textexclamdown textgreater textheight textit textless textmd textnormal
+    textparagraph textperiodcentered textquestiondown textquotedblleft textquotedblright textquoteleft textquoteright textregistered
+    textrm textsc textsection textsf textsl textsterling textsubscript textsuperscript
+    texttrademark texttt textunderscore textup textvisiblespace textwidth thanks Theta
+    theta thickspace thispagestyle tilde time times tiny title
+    to today ttfamily twocolumn unboldmath underbrace underline upshape
+    Upsilon upsilon usepackage varbigtriangledown varbigtriangleup varepsilon varphi varpi
+    varrho varsigma vartheta vdots vec vee verb vline
+    vspace wedge widehat widetilde width Xi xi zeta
   ].freeze
 
   def self.suggest_command(raw_tok, file: nil, macro: nil)
@@ -105,7 +140,7 @@ module LaTeXErrorCatalog
     candidates = (COMMON_COMMANDS + PACKAGE_COMMANDS.keys + project_macros).uniq
     candidates.select! { |c| (c.length - cmd.length).abs <= max_dist }
 
-    scored = score_command_candidates(cmd, candidates, project_macros, max_dist)
+    scored = score_command_candidates(cmd, candidates, project_macros)
     return nil if scored.empty?
 
     scored.sort_by! { |s| [s[:dist], s[:is_proj], s[:same_first]] }
@@ -115,27 +150,40 @@ module LaTeXErrorCatalog
     best[:cand]
   end
 
-  def self.score_command_candidates(cmd, candidates, project_macros, max_dist)
+  def self.score_command_candidates(cmd, candidates, project_macros)
     scored = []
+    threshold = candidate_threshold(cmd.length)
+
     candidates.each do |c|
       next if c == cmd
 
-      dist = LaTeXUtils.edit_distance(cmd, c)
-      next if dist > max_dist
+      same_first = c[0] == cmd[0] ? 0 : 1
+      dist = LaTeXUtils.keyboard_edit_distance(cmd, c)
+      next if same_first == 1 && dist > 0.85
+      next if dist > threshold
 
       is_proj = project_macros.include?(c) ? 0 : 1
-      same_first = c[0] == cmd[0] ? 0 : 1
       scored << { cand: c, dist: dist, is_proj: is_proj, same_first: same_first }
     end
     scored
   end
 
+  def self.candidate_threshold(len)
+    if len <= 4
+      0.85
+    elsif len <= 7
+      1.25
+    else
+      [len * 0.18, 1.8].max
+    end
+  end
+
   def self.ambiguous_match?(best, runner_up)
     return false unless runner_up
-    return false if best[:is_proj].zero? && runner_up[:is_proj] == 1 && best[:dist] == runner_up[:dist]
-    return true if best[:dist] == runner_up[:dist]
+    return false if best[:is_proj].zero? && runner_up[:is_proj] == 1 && best[:dist] <= runner_up[:dist]
+    return true if (best[:dist] - runner_up[:dist]).abs < 0.05
 
-    if best[:dist] >= 2 && runner_up[:dist] < best[:dist] + 2
+    if best[:dist] >= 1.5 && runner_up[:dist] < best[:dist] + 0.5
       return true unless best[:is_proj].zero? && runner_up[:is_proj] == 1
     end
 

@@ -23,7 +23,7 @@ class TestArxivWorker < Minitest::Test
   ensure
     ENV['LANG'] = old_lang
     ENV['LC_ALL'] = old_locale
-    Encoding.default_external = old_encoding
+    Encoding.default_external = old_encoding unless Encoding.default_external == old_encoding
   end
 
   def test_successful_exit_is_insufficient_for_noop_build

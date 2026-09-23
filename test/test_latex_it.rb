@@ -547,7 +547,6 @@ class TestLatexItCLI < Minitest::Test
     builder = LatexBuilder.new('sample.tex', emacs: false, color: true)
 
     catalog = { id: :undefined_control_sequence, hint: "Did you mean '\\alpha'?" }
-    item = { file: 'sample.tex', token: '\\alpa' }
     pointer = builder.send(:render_pointer_line, 3, 5, 5, catalog)
 
     assert_includes pointer, Rainbow("Did you mean ").cyan.to_s
@@ -2053,6 +2052,7 @@ class TestLatexItCLI < Minitest::Test
 
       assert alert20_pos < alert80_pos, 'Alert on line 20 should come before alert on line 80'
       assert alert80_pos < warn10_pos, 'All alerts should come before warnings'
+      assert warn10_pos < warn_ref_pos, 'Warnings should be sorted by line number'
     end
   end
 end

@@ -21,7 +21,7 @@ module ArxivTestWorker
   class Runner
     def initialize(root)
       ENV['LANG'] = ENV['LC_ALL'] = 'C.UTF-8'
-      Encoding.default_external = Encoding::UTF_8
+      Encoding.default_external = Encoding::UTF_8 unless Encoding.default_external == Encoding::UTF_8
       @root = root
       cfg_path = File.join(root, 'test-config.json')
       raise CheckError, "#{cfg_path}: config file not found" unless File.file?(cfg_path)

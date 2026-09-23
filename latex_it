@@ -75,7 +75,7 @@ module LatexCLI
 
       configure_environment(options)
       execute_targets(argv, options)
-    rescue Interrupt, SignalException => e
+    rescue SignalException => e
       handle_interrupt(options, e)
     end
   end
@@ -84,7 +84,7 @@ module LatexCLI
     @interrupted = true
     LaTeXIndicator.stop(clear: true)
     $stderr.print "\e[0m"
-    signo = exception&.respond_to?(:signo) ? exception.signo : 2
+    signo = exception.respond_to?(:signo) ? exception.signo : 2
     exit_code = 128 + (signo || 2)
 
     if options && options[:compile]

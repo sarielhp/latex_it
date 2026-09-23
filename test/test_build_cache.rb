@@ -355,7 +355,7 @@ class TestBuildCache < Minitest::Test
       assert_includes out2, 'up-to-date'
 
       # Clean with -C removes .junk
-      out3, status3 = Open3.capture2e(bin, '-C', chdir: dir)
+      _out3, status3 = Open3.capture2e(bin, '-C', chdir: dir)
       assert_equal 0, status3.exitstatus
       refute File.directory?(File.join(dir, '.junk')), 'clean-only must wipe .junk/'
     end

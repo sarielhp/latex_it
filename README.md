@@ -196,9 +196,7 @@ The installer creates several convenient shortcuts based on the executable name:
 For technical details, configuration options, and advanced features, see:
 
 - **[docs/llm_reference.md](docs/llm_reference.md)**: Token-optimized complete technical reference for AI agents and LLMs (flags, exit codes, config schema, error remedies).
-- **[docs/vim.md](docs/vim.md)**: Vi, Vim, and Neovim Quickfix integration (`:make`), errorformat, and compiler plugin.
-- **[docs/emacs.md](docs/emacs.md)**: GNU Emacs and AUCTeX error jumping, compilation buffer, and elisp configuration.
-- **[docs/vscode.md](docs/vscode.md)**: Visual Studio Code native tasks (`Ctrl+Shift+B`), problem matcher, and LaTeX Workshop setup.
+- **Editor Integrations**: [Vi / Vim / Neovim](docs/vim.md) • [GNU Emacs](docs/emacs.md) • [Visual Studio Code](docs/vscode.md).
 - **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
 - **[docs/troubleshooting_bibliography_errors.md](docs/troubleshooting_bibliography_errors.md)**: Diagnosing and solving cryptic `\printbibliography` crashes and pinpointing errors in `.bib` databases.
 - **[docs/guides/underfull_boxes/README.md](docs/guides/underfull_boxes/README.md)**: Deep dive into diagnosing and fixing `Underfull \hbox (badness 10000)` and `Underfull \vbox` warnings with verified reproducers.

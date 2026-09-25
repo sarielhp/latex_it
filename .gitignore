@@ -58,8 +58,8 @@ flycheck_*.tex
 vendor/bundle/
 
 # Local reviews & audit scratch
-reviews/archive/
-reviews/logs/
+reviews/
+.reviews/
 .review_state.json
 
 # Local tooling shim and example corpus

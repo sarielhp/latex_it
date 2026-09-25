@@ -49,3 +49,27 @@ We evaluated implementing a Model Context Protocol (MCP) server daemon to interf
    Autonomous coding agents already possess terminal execution tools. `l -llm` works immediately with zero configuration files, daemon setup, port management, or background process supervisors.
 3. **Sandbox & Isolation Compatibility**:
    Coding agents frequently operate inside isolated sandboxes (Bubblewrap `bws`, Docker containers, temporary git worktrees). A CLI command runs natively inside the sandbox where files and compiler environments reside, whereas daemon-based MCP servers run outside and struggle with path translation and filesystem boundaries.
+
+---
+
+## ADR-0003: External Orchestration via Task Runners (`just` / `make`) over Compiler Pre-Build Hooks
+
+* **Status**: **Accepted**
+* **Date**: September 2026
+* **Deciders**: Maintainers
+
+### Context
+We evaluated adding automatic pre-build triggers to `latex_it` that would traverse parent directories, collect pre-build scripts, and execute them prior to LaTeX compilation (e.g., to generate plots or shared assets for per-chapter compilation in book setups).
+
+### Decision
+**Reject internal compiler pre-build script hooks.** Upstream asset and data generation must be orchestrated by dedicated task runners (such as [`just`](https://github.com/casey/just) or `make`), while `latex_it` remains strictly focused on LaTeX compilation, pass convergence, and diagnostic reporting.
+
+### Rationale
+1. **Security & Untrusted Code Execution (CWE-426)**:
+   LaTeX document repositories are frequently shared across collaborators, students, and arXiv submissions. Automatically executing arbitrary shell scripts declared in tracked configuration files (`.l.jsonc`) creates an unauthenticated remote code execution (RCE) vulnerability.
+2. **Preservation of Sub-Second 0-Pass Incremental Builds**:
+   `latex_it`'s core value proposition is sub-second turnaround and zero-pass caching (`junk/.build_state.json`). Running external Python/shell pipelines before every compile—including editor auto-saves and watch mode (`lw`)—permanently degrades the interactive authoring feedback loop.
+3. **Deadlock, Fork-Bomb & CWD Ambiguities**:
+   If an ancestor script invokes `l` to build sub-assets, recursive hook execution causes fork-bombs or deadlocks on concurrency locks. Furthermore, ancestor scripts break relative paths unless executed within explicit, dedicated task runner boundaries.
+4. **Clean Separation of Concerns**:
+   Upstream asset generation operates on general computation graphs (Python, R, Gnuplot), whereas `latex_it` operates on LaTeX convergence. A two-tier architecture (`just` for upstream updates, `l` for fast prose authoring) provides a robust, zero-friction workflow. Detailed implementation guide: [docs/orchestration.md](orchestration.md).

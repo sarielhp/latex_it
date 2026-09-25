@@ -171,3 +171,13 @@ When compiling large documents in editor setups that trigger builds on save, mul
   ```bash
   l --theme="#ff8888"
   ```
+
+---
+
+## 7. Complex Workflows & Multi-Chapter Orchestration
+
+For large projects (such as books, dissertations, or multi-chapter volumes) that require upstream data generation, plot rendering, or pre-processing scripts before compiling:
+
+Do not attempt to embed shell execution scripts directly into LaTeX configuration files. Use a dedicated orchestrator such as **[`just`](https://github.com/casey/just)** with a single root `.justfile`.
+
+See **[docs/orchestration.md](orchestration.md)** for a complete walkthrough of single-command book workflows using `invocation_directory()`.

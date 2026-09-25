@@ -64,7 +64,7 @@ cd latex_it
 - **Operating System**: **Linux** (primary target; macOS is supported/functional via Homebrew/MacTeX; Windows requires WSL).
 - **Ruby**: 3.0 or newer.
 - **TeX Distribution**: TeX Live, MacTeX, or compatible (`xelatex`, `lualatex`, or `pdflatex`).
-- **Optional**: `poppler-utils` (provides `pdftotext` for `-d` / `--diff` text diffing; `brew install poppler` on macOS).
+- **Optional**: `poppler-utils` (provides `pdftotext` for `-d` / `--update-if-changed` text diffing; `brew install poppler` on macOS).
 
 ---
 
@@ -80,56 +80,23 @@ l
 l paper.tex
 ```
 
-Common everyday commands:
+Everyday commands:
 
 ```bash
 lw          # Fast incremental rebuild (reuses cached state)
 l -f        # Force a rebuild even if files haven't changed
 l -llm      # Token-optimized plaintext build for AI coding agents
-l -r        # Print raw compiler output (debug mode)
+l -x        # Show plain-English explanations and fixes for errors
 l -C        # Clean auxiliary and temporary files
-l -x        # Show plain-English explanations for errors and warnings
 l -B        # Extract cited references into local .bib file
+l -r        # Print raw compiler output (debug mode)
 ```
 
-### Using with AI Coding Agents (Claude Code, Cursor, Aider, OpenCode)
-
-`latex_it` provides first-class support for autonomous coding agents. While standard TeX compilers output hundreds of lines of confusing terminal tracebacks that consume context tokens and mislead LLMs, `l -llm` provides token-optimized, strict GNU compiler output:
-
-- **0 tokens on success**: Exits `0` silently with zero stdout/stderr on clean builds or up-to-date targets.
-- **Precise line & column diagnostics**: Emits exact `file:line:col: error: message` headers so agents jump straight to the fix.
-- **Warning folding**: Automatically collapses 50+ repeated citation or layout warnings into the first 2 instances plus count.
-
-**Drop-in configuration for your project's `CLAUDE.md`, `.cursorrules`, or system prompt:**
-
-```markdown
-### LaTeX Compilation Rule
-When compiling or checking LaTeX documents, always use `l -llm <file>.tex` instead of `pdflatex` or `latexmk`:
-- Runs in token-optimized mode (silent on clean build; exact file:line:col diagnostics on failure).
-- Confines auxiliary build artifacts to `junk/` automatically.
-```
+> **Tip**: For the full catalog of command-line flags, defaults, and symlink shortcuts (`ll`, `lp`, `clean_latex`), see **[docs/cli_options.md](docs/cli_options.md)** or run `l -h`.
 
 ---
 
-## Key Features
-
-- **Standalone executable**: Pure Ruby using standard libraries. Distributed as a single file with no gem installation, bundle management, or virtual environment required.
-- **Directory isolation**: All intermediate files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, etc.) remain in `junk/`. Subdirectories are mirrored automatically.
-- **Automatic detection**:
-  - Resolves root `.tex` file if omitted (checks `.mainfile`, directory name, and `\begin{document}`).
-  - Selects compiler (`xelatex`, `lualatex`, or `pdflatex`) via magic comments, loaded packages, or CLI flags.
-  - Detects and runs Biber or BibTeX when citations or `.bib` sources change.
-- **Deterministic incremental builds**: Tracks dependency checksums in `junk/.build_state.json` and exits in 0 passes when outputs are current.
-- **4-tier diagnostic filtering**:
-  - **Alerts**: Highlights structural bugs that exit 0 but corrupt document output (such as an inverted `\label` before `\caption` binding cross-references to the wrong section, duplicate labels, or large $\ge 24\text{pt}$ overflows). Treated as fatal when `-W` is supplied.
-  - **Whatevers**: Suppresses sub-millimeter layout overflow notices ($\le 2.5\text{pt}$) and Unicode bookmark removals from terminal output, reporting totals in the summary line (`l -a` to inspect).
-  See [docs/diagnostics.md](docs/diagnostics.md) for details.
-- **AI agent & LLM profile (`-llm`)**: Plaintext GNU compiler diagnostics (`file:line:col: severity: msg`) with zero ANSI or hyperlink escapes, silent clean builds (0 bytes on exit 0), warning category folding (collapsing 50 citation warnings to 2 + count), and structured `--json` output.
-- **arXiv packaging (`--arxiv`)**: Produces flattened, comment-stripped zip archives verified against an isolated sandbox compiler (see [docs/arxiv.md](docs/arxiv.md)).
-
----
-
-## Feature Comparison
+## Why `latex_it`?
 
 | Capability | `latex_it` | `latexmk` | `rubber` | Standard IDEs (VS Code / Overleaf) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -145,26 +112,39 @@ When compiling or checking LaTeX documents, always use `l -llm <file>.tex` inste
 
 ---
 
-## Command-Line Options
+## Built for Humans & Autonomous AI Agents
 
-For the full catalog of flags, defaults, symlink shortcuts (`ll`, `lp`, `clean_latex`), and usage examples, see **[docs/cli_options.md](docs/cli_options.md)**. Options can also be inspected directly in your terminal via `l -h` (condensed summary) or `l -H` (complete man-page manual).
+While humans enjoy rich TrueColor terminal diagnostics and plain-English error explanation boxes (`-x`), `latex_it` also provides first-class support for autonomous AI coding agents (Claude Code, Cursor, Aider, OpenCode):
+
+- **0 tokens on success**: Exits `0` silently with zero stdout/stderr on clean builds or up-to-date targets.
+- **Precise line & column diagnostics**: Emits exact `file:line:col: error: message` headers so agents jump straight to the fix.
+- **Warning folding**: Automatically collapses 50+ repeated citation or layout warnings into the first 2 instances plus count, preventing context window blowout.
+- **Automatic junk isolation**: Prevents AI agents from hallucinating or editing generated `.aux`, `.log`, or `.fls` files.
+
+### Drop-in Configuration for AI Agents (`CLAUDE.md`, `.cursorrules`)
+
+```markdown
+### LaTeX Compilation Rule
+When compiling or checking LaTeX documents, always use `l -llm <file>.tex` instead of `pdflatex` or `latexmk`:
+- Runs in token-optimized mode (silent on clean build; exact file:line:col diagnostics on failure).
+- Confines auxiliary build artifacts to `junk/` automatically.
+```
+
+*(See [docs/llm_reference.md](docs/llm_reference.md) for the complete token-optimized technical reference.)*
 
 ---
 
 ## Documentation
 
-For technical details, configuration options, and advanced features, see:
+For technical guides, configuration options, and advanced features, see:
 
 - **[docs/cli_options.md](docs/cli_options.md)**: Complete command-line options catalog, usage examples, and flag reference.
-- **[docs/llm_reference.md](docs/llm_reference.md)**: Token-optimized complete technical reference for AI agents and LLMs (flags, exit codes, config schema, error remedies).
-- **Editor Integrations**: [Vi / Vim / Neovim](docs/vim.md) • [GNU Emacs](docs/emacs.md) • [Visual Studio Code](docs/vscode.md).
-- **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
-- **[docs/troubleshooting_bibliography_errors.md](docs/troubleshooting_bibliography_errors.md)**: Diagnosing and solving cryptic `\printbibliography` crashes and pinpointing errors in `.bib` databases.
-- **[docs/guides/underfull_boxes/README.md](docs/guides/underfull_boxes/README.md)**: Deep dive into diagnosing and fixing `Underfull \hbox (badness 10000)` and `Underfull \vbox` warnings with verified reproducers.
-- **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.
-- **[docs/diagnostics.md](docs/diagnostics.html)**: The 4-tier diagnostic hierarchy (**Alerts** & **Whatevers** explained), error explanations (`-e`), and threshold tuning.
+- **[docs/diagnostics.md](docs/diagnostics.html)**: The 4-tier diagnostic hierarchy (**Alerts** & **Whatevers** explained), error explanations (`-x`), and threshold tuning.
 - **[docs/errors/README.md](docs/errors/README.md)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.
-- **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and environment variables.
+- **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
+- **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and theme customization.
+- **Editor Integrations**: [Visual Studio Code](docs/vscode.md) • [GNU Emacs / AUCTeX](docs/emacs.md) • [Vi / Vim / Neovim](docs/vim.md).
+- **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.
 - **[docs/orchestration.md](docs/orchestration.md)**: Orchestrating complex multi-chapter and book setups using `just` and `latex_it`.
 - **[docs/advanced_topics.md](docs/advanced_topics.md)**: Advanced paper packaging (`-z`, `-Z`), cited bibliography extraction (`-B`), text-diff guards, sandboxing, and environment isolation.
 - **[docs/architecture.md](docs/architecture.md)**: Internal design, build lifecycle, modular Ruby structure, and Architectural Decision Records (ADRs).
@@ -173,23 +153,14 @@ For technical details, configuration options, and advanced features, see:
 
 ## Frequently Asked Questions (FAQ)
 
-### Why a CLI flag (`l -llm`) instead of an MCP (Model Context Protocol) server?
+### Does `latex_it` modify my `.tex` source files?
+**No.** Standard compilation (`l`, `l paper.tex`) never touches or modifies your source documents. When generating publication packages (`-Z` or `--arxiv`), source flattening and comment stripping operate exclusively inside isolated temporary staging directories.
 
-1. **Token Economy**: Standard GNU compiler plaintext (`file:line: error: message`) takes ~75% fewer tokens than JSON-RPC envelopes or deeply nested structured JSON. LLMs are natively trained on trillions of tokens of compiler outputs and parse them effortlessly.
-2. **Zero Configuration**: Autonomous coding agents (Claude Code, Cursor, Antigravity, OpenCode, Aider) already have terminal / shell tools. `l -llm` works immediately with zero configuration files, daemon setup, or background process management.
-3. **Sandbox & Git Compatibility**: Agents frequently run inside isolated sandboxes (Bubblewrap `bws`, Docker containers, temporary worktrees). A CLI command runs directly inside the sandbox where files and compiler environments reside, whereas daemon-based MCP servers run outside and struggle with path mapping and permissions.
-4. **Programmatic Support via `--json`**: For workflows that strictly require structured payloads, `latex_it --json` emits clean JSON on stdout, making it trivial to build a 20-line standalone MCP bridge without adding daemon bloat to `latex_it`.
+### Where do intermediate build files go?
+All intermediate build files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, `.bcf`, etc.) are placed in the `junk/` directory. Only your final outputs (`<doc>.pdf`, `<doc>.bbl`, and `<doc>.synctex.gz`) reside in your working directory.
 
-### How should AI coding agents invoke `latex_it`?
-
-AI agents should invoke:
-```bash
-l -llm paper.tex
-```
-- On clean builds or up-to-date targets, it exits `0` with **zero output**, consuming zero context window tokens.
-- Output is pure plaintext: **zero ANSI color escape codes** and **zero OSC 8 terminal hyperlinks**.
-- High-repetition warnings (e.g. 50 missing citations) are automatically folded into the first 2 instances plus a summary note, preventing context blowout.
-- If unclassified compilation failures occur, the compiler log-tail is extracted automatically.
+### Why use `l -llm` instead of an MCP server for AI coding agents?
+Standard GNU compiler plaintext (`file:line: error: message`) takes ~75% fewer context tokens than JSON-RPC payloads, and coding agents already possess native terminal execution tools. For details, see [docs/decisions.md (ADR-0002)](docs/decisions.md).
 
 ---
 

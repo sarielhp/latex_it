@@ -262,4 +262,6 @@ Example JSON response:
 For an in-depth catalog of 55 common LaTeX compilation errors, their root causes, and minimal reproducer examples:
 
 - **[Master Error Index](errors/README.md)**: Catalog of 55 errors categorized by layer (TeX Primitive, LaTeX Kernel, Package).
+- **[Troubleshooting Bibliography Errors](troubleshooting_bibliography_errors.md)**: Resolving cryptic `\printbibliography` crashes and pinpointing `.bib` database syntax errors.
+- **[Deep Dive: Underfull Boxes (`badness 10000`)](guides/underfull_boxes/README.md)**: Diagnosing and solving `Underfull \hbox` and `Underfull \vbox` warnings.
 - **Corpus Test Suite**: Run `tools/test_error_corpus` to verify all 55 reproducers against real LaTeX engines.

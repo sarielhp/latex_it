@@ -147,22 +147,7 @@ When compiling or checking LaTeX documents, always use `l -llm <file>.tex` inste
 
 ## Command-Line Options
 
-For the full catalog of flags, defaults, and usage examples, see **[docs/cli_options.md](docs/cli_options.md)**. Options can also be inspected directly in your terminal via `l -h` (condensed summary) or `l -H` (complete man-page manual).
-
----
-
-## Symlink Shortcuts
-
-The installer creates several convenient shortcuts based on the executable name:
-
-| Command | Behavior |
-| :--- | :--- |
-| `l`, `latex_it` | Default build (`xelatex`, up to 3 passes, auto-bib). |
-| `lw` | Same as `l`; kept for compatibility with existing symlinks. |
-| `ll`, `llua` | Build using LuaLaTeX (`--engine=lualatex`). |
-| `lp`, `pdflatex` | Build using pdfLaTeX (`--engine=pdflatex`). |
-| `clean_latex`, `latex_clean` | Clean temporary files in current directory. |
-| `latex_file_in_dir` | Print the detected main file in current directory. |
+For the full catalog of flags, defaults, symlink shortcuts (`ll`, `lp`, `clean_latex`), and usage examples, see **[docs/cli_options.md](docs/cli_options.md)**. Options can also be inspected directly in your terminal via `l -h` (condensed summary) or `l -H` (complete man-page manual).
 
 ---
 

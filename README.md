@@ -145,34 +145,9 @@ When compiling or checking LaTeX documents, always use `l -llm <file>.tex` inste
 
 ---
 
-## Common CLI Options
+## Command-Line Options
 
-| Flag | Description |
-| :--- | :--- |
-| *(none)* | Build the document (auto-detects main file if omitted). |
-| `-f`, `--force` | Force initial LaTeX run, continuing only if needed for convergence. |
-| `-u`, `--single-pass` | Run exactly one LaTeX pass without BibTeX or extra passes. |
-| `-c`, `--clean` | Remove temporary build files before compiling. |
-| `-C`, `--clean-only` | Remove temporary build files and exit without compiling. |
-| `--junk-dir DIR` | Directory for temporary build artifacts (default: `junk`, or auto-detect `.junk`). |
-| `-x`, `--explain` | Show plain-English explanation boxes for errors and warnings. |
-| `-a`, `--all` | Display all diagnostics, including suppressed minor warnings. |
-| `--update-if-changed` | Only update the target PDF if the text content actually changed. |
-| `-m`, `--main` | Print the detected main LaTeX file and exit. |
-| `-e`, `--engine ENGINE` | Choose compiler: `x` (`xelatex`, default), `l` (`lualatex`), or `p` (`pdflatex`). |
-| `-z`, `--zip` | Create a self-contained portable zip archive of the paper. |
-| `-Z`, `--zip-flat` | Create a self-contained portable zip archive with inlined/flattened `.tex`. |
-| `-B`, `--bib-extract` | Extract cited bibliography entries into local `.bib` file (default: `<doc>.bib`). |
-| `--config-init` | Generate a local `.l.jsonc` configuration template. |
-| `--config-show` | Show active configuration sources and resolved settings. |
-| `--vscode-init` | Generate `.vscode/tasks.json` and `settings.json` for VS Code integration. |
-| `--gitignore-init` | Generate or add standard LaTeX & `junk/` rules to `.gitignore`. |
-| `--theme-list` | List available diagnostic color themes with terminal previews. |
-| `-cc`, `--compile` | Format diagnostics in strict GNU standard (`file:line:col: severity: message`). |
-| `-llm`, `--agent` | Token-optimized mode for AI agents (zero ANSI, folded warnings, silent on success). |
-| `--json` | Output structured compilation and diagnostic results as JSON. |
-| `-h`, `--help` | Show condensed help summary of everyday options. |
-| `-H`, `--help-all` | Show complete list of command-line options with detailed explanations. |
+For the full catalog of flags, defaults, and usage examples, see **[docs/cli_options.md](docs/cli_options.md)**. Options can also be inspected directly in your terminal via `l -h` (condensed summary) or `l -H` (complete man-page manual).
 
 ---
 
@@ -195,6 +170,7 @@ The installer creates several convenient shortcuts based on the executable name:
 
 For technical details, configuration options, and advanced features, see:
 
+- **[docs/cli_options.md](docs/cli_options.md)**: Complete command-line options catalog, usage examples, and flag reference.
 - **[docs/llm_reference.md](docs/llm_reference.md)**: Token-optimized complete technical reference for AI agents and LLMs (flags, exit codes, config schema, error remedies).
 - **Editor Integrations**: [Vi / Vim / Neovim](docs/vim.md) • [GNU Emacs](docs/emacs.md) • [Visual Studio Code](docs/vscode.md).
 - **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.

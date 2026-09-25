@@ -1,5 +1,7 @@
 # LaTeX intermediate and build artifacts
+junk
 junk/
+**/junk
 **/junk/
 *.aux
 *.bbl

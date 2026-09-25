@@ -1,3 +1,9 @@
+---
+layout: default
+title: latex_it - Fast, isolated, intelligent LaTeX compilation manager
+permalink: /
+---
+
 # latex_it
 
 <p align="center">
@@ -12,11 +18,11 @@
   <a href="https://www.ruby-lang.org"><img src="https://img.shields.io/badge/ruby-%3E%3D%203.0-red.svg" alt="Ruby >= 3.0"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg" alt="Platform">
   <img src="https://img.shields.io/badge/engines-XeLaTeX%20%7C%20LuaLaTeX%20%7C%20pdfLaTeX-blueviolet.svg" alt="Engines">
-  <a href="docs/llm_reference.md"><img src="https://img.shields.io/badge/AI%20Agents-Claude%20%7C%20Cursor%20%7C%20Aider-success.svg" alt="AI Agents"></a>
+  <a href="llm_reference.html"><img src="https://img.shields.io/badge/AI%20Agents-Claude%20%7C%20Cursor%20%7C%20Aider-success.svg" alt="AI Agents"></a>
 </p>
 
 <p align="center">
-  <img src="docs/images/l_vs_latex_demo.gif" alt="latex_it Terminal Demo: Pinpointed Error Diagnostic &amp; Fix" width="100%">
+  <img src="images/l_vs_latex_demo.gif" alt="latex_it Terminal Demo: Pinpointed Error Diagnostic &amp; Fix" width="100%">
 </p>
 
 `latex_it` (invoked as `l`) brings modern compiler diagnostics (like Rust or Typst) to traditional LaTeX workflows (`xelatex`, `lualatex`, and `pdflatex`), while keeping the workspace clean and fully compatible with arXiv submission.
@@ -31,8 +37,8 @@ Like `latexmk`, it automates multi-pass convergence and bibliography processing,
 Standard TeX compiler logs bury the root cause under dozens of lines of internal state, often missing the exact line where an unclosed macro or brace began. `latex_it` intercepts and correlates token streams in real time to pinpoint the source and column immediately:
 
 <p align="center">
-  <a href="https://sarielhp.github.io/latex_it/gallery.html"><img src="docs/images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
-  <em>Explore more real-world examples in the <a href="https://sarielhp.github.io/latex_it/gallery.html">Diagnostic Showcase Gallery</a>.</em>
+  <a href="gallery.html"><img src="images/error_comparison.svg" alt="Error Diagnostics Comparison: latexmk vs latex_it" width="100%"></a><br>
+  <em>Explore more real-world examples in the <a href="gallery.html">Diagnostic Showcase Gallery</a>.</em>
 </p>
 
 ---
@@ -92,7 +98,7 @@ l -B        # Extract cited references into local .bib file
 l -r        # Print raw compiler output (debug mode)
 ```
 
-> **Tip**: For the full catalog of command-line flags, defaults, and symlink shortcuts (`ll`, `lp`, `clean_latex`), see **[docs/cli_options.md](docs/cli_options.md)** or run `l -h`.
+> **Tip**: For the full catalog of command-line flags, defaults, and symlink shortcuts (`ll`, `lp`, `clean_latex`), see **[CLI Options Reference](cli_options.html)** or run `l -h`.
 
 ---
 
@@ -130,7 +136,7 @@ When compiling or checking LaTeX documents, always use `l -llm <file>.tex` inste
 - Confines auxiliary build artifacts to `junk/` automatically.
 ```
 
-*(See [docs/llm_reference.md](docs/llm_reference.md) for the complete token-optimized technical reference.)*
+*(See [AI Agent & LLM Reference](llm_reference.html) for the complete token-optimized technical reference.)*
 
 ---
 
@@ -138,16 +144,16 @@ When compiling or checking LaTeX documents, always use `l -llm <file>.tex` inste
 
 For technical guides, configuration options, and advanced features, see:
 
-- **[docs/cli_options.md](docs/cli_options.md)**: Complete command-line options catalog, usage examples, and flag reference.
-- **[docs/diagnostics.md](docs/diagnostics.html)**: The 4-tier diagnostic hierarchy (**Alerts** & **Whatevers** explained), error explanations (`-x`), and threshold tuning.
-- **[docs/errors/README.md](docs/errors/README.md)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.
-- **[docs/gallery.md](docs/gallery.md)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
-- **[docs/configuration.md](docs/configuration.md)**: Project configuration (`.l.jsonc`), global settings, and theme customization.
-- **Editor Integrations**: [Visual Studio Code](docs/vscode.md) • [GNU Emacs / AUCTeX](docs/emacs.md) • [Vi / Vim / Neovim](docs/vim.md).
-- **[docs/arxiv.md](docs/arxiv.md)**: arXiv submission packaging, flattening, comment stripping, and verification.
-- **[docs/orchestration.md](docs/orchestration.md)**: Orchestrating complex multi-chapter and book setups using `just` and `latex_it`.
-- **[docs/advanced_topics.md](docs/advanced_topics.md)**: Advanced paper packaging (`-z`, `-Z`), cited bibliography extraction (`-B`), text-diff guards, sandboxing, and environment isolation.
-- **[docs/architecture.md](docs/architecture.md)**: Internal design, build lifecycle, modular Ruby structure, and Architectural Decision Records (ADRs).
+- **[CLI Options Reference](cli_options.html)**: Complete command-line options catalog, usage examples, and flag reference.
+- **[Diagnostics Guide](diagnostics.html)**: The 4-tier diagnostic hierarchy (**Alerts** & **Whatevers** explained), error explanations (`-x`), and threshold tuning.
+- **[Master Error Catalog](errors/)**: Master catalog of 55 TeX/LaTeX errors with causes, solutions, and reproducers.
+- **[Diagnostic Showcase Gallery](gallery.html)**: Side-by-side diagnostic gallery comparing standard LaTeX/latexmk against latex_it on real errors.
+- **[Configuration Reference](configuration.html)**: Project configuration (`.l.jsonc`), global settings, and theme customization.
+- **Editor Integrations**: [Visual Studio Code](vscode.html) • [GNU Emacs / AUCTeX](emacs.html) • [Vi / Vim / Neovim](vim.html).
+- **[arXiv Packaging Guide](arxiv.html)**: arXiv submission packaging, flattening, comment stripping, and verification.
+- **[Multi-Chapter Orchestration](orchestration.html)**: Orchestrating complex multi-chapter and book setups using `just` and `latex_it`.
+- **[Advanced Topics](advanced_topics.html)**: Advanced paper packaging (`-z`, `-Z`), cited bibliography extraction (`-B`), text-diff guards, sandboxing, and environment isolation.
+- **[Architecture & Internal Design](architecture.html)**: Internal design, build lifecycle, modular Ruby structure, and Architectural Decision Records (ADRs).
 
 ---
 
@@ -160,7 +166,7 @@ For technical guides, configuration options, and advanced features, see:
 All intermediate build files (`.aux`, `.log`, `.out`, `.toc`, `.fls`, `.bcf`, etc.) are placed in the `junk/` directory. Only your final outputs (`<doc>.pdf`, `<doc>.bbl`, and `<doc>.synctex.gz`) reside in your working directory.
 
 ### Why use `l -llm` instead of an MCP server for AI coding agents?
-Standard GNU compiler plaintext (`file:line: error: message`) takes ~75% fewer context tokens than JSON-RPC payloads, and coding agents already possess native terminal execution tools. For details, see [docs/decisions.md (ADR-0002)](docs/decisions.md).
+Standard GNU compiler plaintext (`file:line: error: message`) takes ~75% fewer context tokens than JSON-RPC payloads, and coding agents already possess native terminal execution tools. For details, see [ADR-0002 (Architecture Decisions)](decisions.html).
 
 ---
 

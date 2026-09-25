@@ -15,7 +15,7 @@ require 'tmpdir'
 require 'yaml'
 
 module DemoRecorder
-  DEFAULT_SCENARIO = File.expand_path('../demos/l_vs_latex.yml', __dir__)
+  DEFAULT_SCENARIO = File.expand_path('../docs/demos/l_vs_latex.yml', __dir__)
 
   # Resolves executable dependencies and environment paths
   class Environment
@@ -330,7 +330,7 @@ module DemoRecorder
         opts.separator ''
         opts.separator 'Options:'
 
-        opts.on('-s', '--scenario FILE', 'Scenario YAML file (default: demos/l_vs_latex.yml)') { |v| options[:scenario] = v }
+        opts.on('-s', '--scenario FILE', 'Scenario YAML file (default: docs/demos/l_vs_latex.yml)') { |v| options[:scenario] = v }
         opts.on('-o', '--output FILE', 'Output GIF path') { |v| options[:output] = v }
         opts.on('--theme THEME', 'Terminal color theme (e.g. Catppuccin Mocha, nord)') { |v| options[:theme] = v }
         opts.on('--width WIDTH', Integer, 'Terminal width in pixels') { |v| options[:width] = v }

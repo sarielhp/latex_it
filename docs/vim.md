@@ -29,23 +29,21 @@ Whenever you run `:make` inside a `.tex` file:
 
 ---
 
-## Compiler Plugin (`compiler/latex_it.vim`)
+## Compiler Plugin (`docs/vim/compiler/latex_it.vim`)
 
-The repository includes a standard Vim compiler script at [`compiler/latex_it.vim`](file:///home/sariel/prog/26/latex_it/compiler/latex_it.vim).
+The repository includes a standard Vim compiler script at [`docs/vim/compiler/latex_it.vim`](vim/compiler/latex_it.vim).
 
 ### Installation:
-Copy or symlink `compiler/latex_it.vim` into your Vim/Neovim compiler directory:
+Copy or symlink `docs/vim/compiler/latex_it.vim` into your Vim/Neovim compiler directory:
 ```bash
 # Classic Vim
 mkdir -p ~/.vim/compiler
-cp compiler/latex_it.vim ~/.vim/compiler/
+cp docs/vim/compiler/latex_it.vim ~/.vim/compiler/
 
 # Neovim
 mkdir -p ~/.config/nvim/compiler
-cp compiler/latex_it.vim ~/.config/nvim/compiler/
+cp docs/vim/compiler/latex_it.vim ~/.config/nvim/compiler/
 ```
-
-*(If you use a plugin manager like vim-plug, lazy.nvim, or packer pointing to this repo, `compiler/latex_it.vim` is detected automatically).*
 
 ### Usage:
 In any LaTeX buffer:

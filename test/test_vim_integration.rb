@@ -10,7 +10,7 @@ require_relative '../lib/latex_it/utils'
 class TestVimIntegration < Minitest::Test
   def setup
     @bin_path = File.expand_path('../latex_it', __dir__)
-    @compiler_vim = File.expand_path('../compiler/latex_it.vim', __dir__)
+    @compiler_vim = File.expand_path('../docs/vim/compiler/latex_it.vim', __dir__)
   end
 
   def test_compiler_vim_file_exists

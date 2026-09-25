@@ -13,7 +13,7 @@ defaults:
       layout: default
 
 exclude:
-  - vendor/
-  - junk/
-  - tools/
-  - test/
+  - internal/
+  - demos/
+  - data/
+  - vim/

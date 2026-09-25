@@ -1,8 +1,9 @@
 ---
 layout: default
 title: Diagnostic Showcase Gallery
-permalink: /docs/gallery.html
+permalink: /gallery.html
 redirect_from:
+  - /docs/gallery.html
   - /docs/gallery.md
 ---
 

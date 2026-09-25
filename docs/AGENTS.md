@@ -35,7 +35,7 @@ This document provides architectural guidelines, core invariants, development wo
   - `test/fixups/`: ArXiv test repair records and schema.
 - **Documentation & Configuration**:
   - [`README.md`](README.md): User-facing feature reference, options, and architecture guide.
-  - [`docs/`](docs/): Comprehensive technical guides (`arxiv.md`, `diagnostics.md`, `configuration.md`, `architecture.md`, `sandbox_testing.md`) and [`docs/errors/`](docs/errors/) error catalog.
+  - [`docs/`](docs/): Comprehensive technical guides (`arxiv.md`, `diagnostics.md`, `configuration.md`, `orchestration.md`, `advanced_topics.md`, `architecture.md`) and [`docs/errors/`](docs/errors/) error catalog.
   - [`AGENTS.md`](AGENTS.md): Machine-readable contract and developer guidelines for AI agents.
 
 ---

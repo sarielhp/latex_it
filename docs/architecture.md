@@ -85,3 +85,11 @@ The codebase is organized into modular files under `lib/latex_it/`:
   - `--medium`: Adds core LaTeX integration tests.
   - `--full`: Complete suite including sandbox builds and paper verifications.
 - **Corpus Test Runner (`tools/test_error_corpus`)**: Parallel runner verifying all 55 error reproducers against real LaTeX engines in $\sim 4$ seconds.
+
+---
+
+## 5. Architectural Decision Records (ADRs)
+
+Key architectural patterns and rejected design alternatives are formally recorded in:
+
+- **[`docs/decisions.md`](decisions.md)**: Includes ADR-0001 (rejection of Homebrew tap distribution), ADR-0002 (native `-llm` flag over daemonized MCP server), and ADR-0003 (external orchestration via `just` over internal compiler pre-build hooks).

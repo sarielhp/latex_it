@@ -184,4 +184,17 @@ class TestConvergenceLoop < Minitest::Test
       assert builder.instance_variable_get(:@cacheable_build)
     end
   end
+
+  def test_last_pass_log_is_numeric_not_lexicographic_and_cleanup_removes_all
+    in_project do |builder|
+      base = builder.instance_variable_get(:@pdferr)
+      FileUtils.mkdir_p(File.dirname(base))
+      %i[@log @loga @biberr].each { |v| builder.instance_variable_set(v, "junk/#{v.to_s.delete('@')}.txt") }
+      [1, 2, 9, 10].each { |n| File.write("#{base}_#{n}", "pass #{n}") }
+      assert_equal "#{base}_10", builder.send(:find_last_latex_log)
+      builder.send(:clean_pass_logs)
+      assert_empty builder.send(:pass_log_files)
+      assert_equal base, builder.send(:find_last_latex_log)
+    end
+  end
 end

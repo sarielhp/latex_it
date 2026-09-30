@@ -2595,13 +2595,18 @@ module LaTeXDiagnostics
     exit 1
   end
 
-  def find_last_latex_log
-    %w[_3 _2 _1].each do |s|
-      candidate = "#{@pdferr}#{s}"
-      return candidate if File.exist?(candidate)
-    end
-    @pdferr
+  # Per-pass logs are err_<engine>_<N>; N is unbounded (up to MAX_PASSES), so
+  # they are discovered rather than enumerated.
+  def pass_log_files
+    dir = File.dirname(@pdferr)
+    base = File.basename(@pdferr)
+    pattern = /\A#{Regexp.escape(base)}_(\d+)\z/
+    return [] unless File.directory?(dir)
+
+    Dir.children(dir).select { |f| f.match?(pattern) }.sort_by { |f| f[pattern, 1].to_i }.map { |f| File.join(dir, f) }
   end
+
+  def find_last_latex_log = pass_log_files.last || @pdferr
 
   def count_latex_errors(content, status = 0)
     errors = 0

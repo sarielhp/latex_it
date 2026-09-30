@@ -175,7 +175,7 @@ class LatexBuilder
   end
 
   def clean_pass_logs
-    FileUtils.rm_f([@log, @loga, @biberr, @pdferr, "#{@pdferr}_1", "#{@pdferr}_2", "#{@pdferr}_3"])
+    FileUtils.rm_f([@log, @loga, @biberr, @pdferr] + pass_log_files)
   end
 
   def finalize_build_outputs(total_t0)

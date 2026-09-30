@@ -107,7 +107,7 @@ l -r        # Print raw compiler output (debug mode)
 | Capability | `latex_it` | `latexmk` | `rubber` | Standard IDEs (VS Code / Overleaf) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Intermediate file isolation** | Automatic (`junk/` subdirs mirrored; only `.pdf`, `.bbl`, `.synctex.gz` exported) | Manual (`-outdir`; can break relative `\input` paths) | Manual (`--into`) | Root directory or local `.aux` clutter |
-| **Multi-pass convergence** | Dependency tracking (`.fls`) + SHA256 build state (1–3 passes) | Re-run loop on `.log`/`.aux` changes | Rule-based dependency tree | Fixed passes or background re-compilation |
+| **Multi-pass convergence** | Dependency tracking (`.fls`) + SHA256 build state (1–10 passes) | Re-run loop on `.log`/`.aux` changes | Rule-based dependency tree | Fixed passes or background re-compilation |
 | **Silent structural flaw detection** | **Alerts**: Inverted `\label` before `\caption`, duplicate labels, large overflows | None (exits 0; buried in log) | None (exits 0; buried in log) | None (treated as successful compile) |
 | **Sub-millimeter noise suppression** | **Whatevers**: $\le 2.5\text{pt}$ overfulls counted in summary, hidden by default | Emits every warning to log | Emits every warning to log | Displays full warning count in problems pane |
 | **AI agent & LLM mode (`-llm`)** | Built-in: pure plaintext, folded warnings, silent on clean success | None (raw log or verbose stdout) | None | None |

@@ -33,7 +33,7 @@ l --json paper.tex
 
 - **Junk Quarantine**: All compilation artifacts (`.aux`, `.log`, `.toc`, `.fls`, `.out`, `.nav`, `.snm`) reside exclusively in `junk/`. Only `<file>.pdf`, `<file>.bbl`, and `<file>.synctex.gz` are written to root.
 - **Engine Selection Precedence**: CLI flag (`-e`) / symlink personality (`llua`, `lp`) $>$ `% !TEX program = <engine>` magic comment $>$ `.l.jsonc` `"engine"` $>$ default (`xelatex`).
-- **Convergence Loop**: Multi-pass scheduler runs up to `passes` (default 3). Exits early if `.aux` digests match across passes. Executes BibTeX/Biber if citations are unresolved or `.bib` files modified.
+- **Convergence Loop**: Multi-pass scheduler runs up to `passes` (default 5). Exits early if `.aux` digests match across passes. Executes BibTeX/Biber if citations are unresolved or `.bib` files modified.
 - **Cache State**: Persisted in `junk/.build_state.json`. If inputs (`*.tex`, `*.bib`, styles) and CLI options match SHA256 hashes, exits `0` in 0 passes.
 
 ---
@@ -46,7 +46,7 @@ l --json paper.tex
 | `--json` | *(none)* | flag | `false` | Emit structured JSON result payload on stdout. |
 | `-f` | `--force` | flag | `false` | Force initial LaTeX run unconditionally (bypasses build cache). |
 | `-u` | `--single-pass`| flag | `false` | Execute exactly 1 LaTeX pass without BibTeX/Biber or convergence passes. |
-| `-n` | `--passes` | integer (1–3)| `3` | Maximum number of LaTeX compilation passes. |
+| `-n` | `--passes` | integer (1–10)| `5` | Maximum number of LaTeX compilation passes. |
 | `-b` | `--[no-]bib` | boolean | auto | Force or skip bibliography pass (Biber or BibTeX). |
 | `-I` | `--[no-]index` | boolean | `false` | Run `makeindex` when `.idx` changes. |
 | `-e` | `--engine` | `x`,`l`,`p` | `x` (`xelatex`)| Compiler: `x` (`xelatex`), `l` (`lualatex`), `p` (`pdflatex`). |
@@ -88,7 +88,7 @@ Global file: `~/.config/latex_it/config.jsonc`.
 ```jsonc
 {
   "engine": "xelatex",               // "xelatex" | "lualatex" | "pdflatex"
-  "passes": 3,                       // 1 | 2 | 3
+  "passes": 5,                       // 1 .. 10
   "junk_dir": "junk",                // "junk" | ".junk" (build artifact directory)
   "index": false,                    // boolean (makeindex)
   "update_on_diff": false,           // boolean (suppress PDF write if text unchanged)

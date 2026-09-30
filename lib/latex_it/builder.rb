@@ -332,13 +332,33 @@ class LatexBuilder
     files.uniq.any? { |f| File.file?(f) && LaTeXUtils.safe_read(f).gsub(/(?<!\\)%.*$/, '').match?(BIBLATEX_USE) }
   end
 
+  # True when the aux state has returned to an earlier value other than the one
+  # just before it: more passes would only repeat the cycle.
+  def aux_cycle?(seen, aux)
+    digest = Digest::SHA256.hexdigest(aux)
+    cycle = seen.include?(digest) && seen.last != digest
+    seen << digest
+    cycle
+  end
+
+  # Appends a LaTeX-style warning to the final pass log so the normal
+  # diagnostics path shows it and --werror / JSON output count it.
+  def report_unconverged(pass, cycling)
+    @cacheable_build = false
+    why = cycling ? 'the auxiliary files keep cycling between states' : "a rerun is still requested after #{pass} passes"
+    msg = "\nLaTeX Warning: latex_it: build did not converge; #{why}. " \
+          "References or page numbers may be stale (raise -n/--passes, max #{LaTeXUtils::MAX_PASSES}).\n"
+    File.open("#{@pdferr}_#{pass}", 'a') { |f| f.write(msg) }
+  end
+
   def run_convergence_loop
     @cacheable_build = true
-    max_passes = @options[:passes] || 3
+    max_passes = @options[:passes] || LaTeXUtils::DEFAULT_PASSES
     pass = 0
     bib_runs = 0
     curr_aux = nil
     aux_before = compute_aux_hash
+    seen_aux = [Digest::SHA256.hexdigest(aux_before)]
 
     loop do
       pass += 1
@@ -359,8 +379,9 @@ class LatexBuilder
       index_ran = check_and_run_index_pass
       rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux) || index_ran
       aux_before = curr_aux
-      if pass >= max_passes
-        @cacheable_build = false if rerun
+      cycling = aux_cycle?(seen_aux, curr_aux)
+      if rerun && (pass >= max_passes || cycling)
+        report_unconverged(pass, cycling)
         break
       end
 

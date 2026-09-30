@@ -36,8 +36,8 @@ module LaTeXConfig
       // rebuilds are automatic via junk/.build_state.json.
       "fast": false,
 
-      // Maximum compilation passes (1-3, default: 3)
-      "passes": 3,
+      // Maximum compilation passes (1-10, default: 5)
+      "passes": 5,
 
       // Run makeindex on target when .idx changes (-I / --[no-]index)
       "index": false,

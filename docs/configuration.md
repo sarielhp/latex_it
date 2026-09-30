@@ -30,8 +30,8 @@ This creates `.l.jsonc` pre-populated with default settings and comments:
   // Default LaTeX engine: "xelatex", "lualatex", or "pdflatex"
   "engine": "xelatex",
 
-  // Maximum number of compilation passes (1-3)
-  "passes": 3,
+  // Maximum number of compilation passes (1-10)
+  "passes": 5,
 
   // Fast incremental mode: reuse aux files and avoid redundant passes
   "fast": false,

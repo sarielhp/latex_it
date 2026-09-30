@@ -24,7 +24,7 @@ The build pipeline follows an orderly sequence of phases:
 │ 2. Pre-Flight     Scan for unclosed braces & syntax errors  │
 │ 3. Workspace      Set up isolated junk/ directory & lockfile│
 │ 4. Change Check   Compare file hashes; exit if up to date   │
-│ 5. Compiler Loop  Execute LaTeX & BibTeX passes (1 to 3)    │
+│ 5. Compiler Loop  Execute LaTeX & BibTeX passes (1 to 10)   │
 │ 6. Export Targets Copy .pdf, .bbl, .synctex.gz to root      │
 │ 7. Diagnostics    Parse log; report errors, alerts, warnings│
 └─────────────────────────────────────────────────────────────┘
@@ -46,7 +46,7 @@ The build pipeline follows an orderly sequence of phases:
 - **Check State**: Checks compiler recorder dependencies (`.fls`) and checksums. If no inputs changed and target PDF exists, exits in 0 passes.
 - **Pass 1**: Runs initial LaTeX pass.
 - **Bibliography Pass**: If citations are unresolved or `.bib` files were modified, runs `bibtex` or `biber` (auto-detected via `.bcf` or `.aux`).
-- **Subsequent Passes**: Reruns LaTeX up to the configured pass limit (default: 3) only if `.aux` changes or rerun notifications appear in the log.
+- **Subsequent Passes**: Reruns LaTeX up to the configured pass limit (default: 5) only if `.aux` changes or rerun notifications appear in the log.
 
 ### Phase 5: Target Export & Diffing
 - Successfully built `.pdf`, `.bbl`, and `.synctex.gz` files are exported to the project directory.

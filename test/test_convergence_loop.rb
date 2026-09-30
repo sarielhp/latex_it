@@ -141,4 +141,47 @@ class TestConvergenceLoop < Minitest::Test
       refute File.exist?('junk/paper.aux')
     end
   end
+
+  def last_pass_log(builder, pass)
+    File.read("#{builder.instance_variable_get(:@pdferr)}_#{pass}")
+  end
+
+  def test_default_pass_cap_allows_more_than_three_passes
+    assert_operator LaTeXUtils::DEFAULT_PASSES, :>=, 5
+    in_project(passes: LaTeXUtils::DEFAULT_PASSES) do |builder|
+      calls = script(builder, aux_states: %w[a b c d d])
+      assert builder.send(:run_convergence_loop)
+      assert_equal 5, calls.count(:latex)
+      assert builder.instance_variable_get(:@cacheable_build)
+    end
+  end
+
+  def test_running_out_of_passes_warns_and_disables_the_cache
+    in_project(passes: 3) do |builder|
+      calls = script(builder, aux_states: %w[a b c d e])
+      FileUtils.mkdir_p('junk')
+      builder.send(:run_convergence_loop)
+      assert_equal 3, calls.count(:latex)
+      refute builder.instance_variable_get(:@cacheable_build)
+      assert_match(/LaTeX Warning: latex_it: build did not converge; a rerun is still requested after 3 passes/, last_pass_log(builder, 3))
+    end
+  end
+
+  def test_cycling_aux_state_stops_early_with_a_warning
+    in_project(passes: 8) do |builder|
+      calls = script(builder, aux_states: %w[a b a b a b a b])
+      builder.send(:run_convergence_loop)
+      assert_operator calls.count(:latex), :<, 8
+      refute builder.instance_variable_get(:@cacheable_build)
+      assert_match(/keep cycling/, last_pass_log(builder, calls.count(:latex)))
+    end
+  end
+
+  def test_unchanged_aux_is_not_mistaken_for_a_cycle
+    in_project(passes: 8) do |builder|
+      script(builder, aux_states: %w[a a a])
+      assert builder.send(:run_convergence_loop)
+      assert builder.instance_variable_get(:@cacheable_build)
+    end
+  end
 end

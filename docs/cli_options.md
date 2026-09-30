@@ -11,7 +11,7 @@ This document provides a complete reference for all command-line flags and optio
 | `(none)` | Build | Find and compile main document automatically. |
 | `-f`, `--force` | Build | Force initial LaTeX run unconditionally, bypassing cache. |
 | `-u`, `--single-pass` | Build | Execute a single LaTeX pass only (no BibTeX or rerun loops). |
-| `-n`, `--passes NUM` | Build | Maximum compilation passes allowed (default: 3). |
+| `-n`, `--passes NUM` | Build | Maximum compilation passes allowed (1-10, default: 5). |
 | `-b`, `--[no-]bib` | Build | Explicitly enable or skip bibliography pass. |
 | `-I`, `--[no-]index` | Build | Run makeindex when `.idx` changes. |
 | `-e`, `--engine ENG` | Build | Compiler engine: `x` (`xelatex`), `l` (`lualatex`), `p` (`pdflatex`). |
@@ -67,7 +67,7 @@ l -u paper.tex
 ```
 
 ### `-n`, `--passes NUM`
-Sets the maximum number of compilation passes allowed (default: 3). If cross-references or bibliographies do not stabilize within this limit, `latex_it` halts with an alert.
+Sets the maximum number of compilation passes allowed (1-10, default: 5). If cross-references or bibliographies do not stabilize within this limit, or the auxiliary state starts cycling between values, `latex_it` stops, reports a warning (which `--werror` treats as an error), and does not cache the build.
 ```bash
 l -n 2 paper.tex
 ```
@@ -322,7 +322,7 @@ When installed via `tools/install` (or manually symlinked), `latex_it` inspects 
 
 | Command | Behavior |
 | :--- | :--- |
-| `l`, `latex_it` | Default compilation (`xelatex`, up to 3 passes, automatic bibliography). |
+| `l`, `latex_it` | Default compilation (`xelatex`, up to 5 passes, automatic bibliography). |
 | `lw` | Incremental rebuild (identical to `l`; preserved for compatibility with legacy shortcuts). |
 | `ll`, `llua` | Compile using LuaLaTeX (`--engine=lualatex`). |
 | `lp`, `pdflatex` | Compile using pdfLaTeX (`--engine=pdflatex`). |

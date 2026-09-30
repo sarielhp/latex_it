@@ -216,7 +216,7 @@ module LatexCLI
       fast: is_lw || cfg['fast'] == true,
       update_on_diff: cfg['update_on_diff'] == true,
       bib: cfg['bib'],
-      passes: (cfg['passes'] || 3).to_i.clamp(1, 3),
+      passes: (cfg['passes'] || LaTeXUtils::DEFAULT_PASSES).to_i.clamp(1, LaTeXUtils::MAX_PASSES),
       timeout: cfg['timeout'],
       time: cfg['time'] == true,
       lock: cfg.key?('lock') ? (cfg['lock'] == true) : true,
@@ -333,8 +333,8 @@ module LatexCLI
       options[:passes] = 1
       options[:bib] = false
     end
-    opts.on('-n', '--passes NUM', Integer, 'Maximum number of compilation passes (1-3, default: 3)') do |v|
-      options[:passes] = v.clamp(1, 3)
+    opts.on('-n', '--passes NUM', Integer, "Maximum number of compilation passes (1-#{LaTeXUtils::MAX_PASSES}, default: #{LaTeXUtils::DEFAULT_PASSES})") do |v|
+      options[:passes] = v.clamp(1, LaTeXUtils::MAX_PASSES)
       options[:explicit_passes] = true
     end
     opts.on('-b', '--[no-]bib', 'Explicitly enable or skip bibliography pass (default: auto-detect)') { |v| options[:bib] = v }

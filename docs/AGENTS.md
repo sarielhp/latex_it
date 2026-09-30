@@ -73,7 +73,7 @@ This document provides architectural guidelines, core invariants, development wo
 Any modifications to compilation logic must honor the following invariants:
 
 1. **Intelligent Convergence Pass Model**:
-   - **Default**: Tracks source dependencies via `-recorder` (`.fls`) and SHA256 build state. Exits in 0 passes if targets are up to date; runs 1 pass if citations/labels are stable; runs pre-primary BibTeX/Biber if `.bib` changed; and only executes extra passes (up to `-n`, default 3) when `.aux` changes or rerun is requested in logs.
+   - **Default**: Tracks source dependencies via `-recorder` (`.fls`) and SHA256 build state. Exits in 0 passes if targets are up to date; runs 1 pass if citations/labels are stable; runs pre-primary BibTeX/Biber if `.bib` changed; and only executes extra passes (up to `-n`, default 5) when `.aux` changes or rerun is requested in logs.
    - **Force Rebuild (`-f` / `--force`)**: Bypasses the initial up-to-date check and forces the first LaTeX pass, continuing with subsequent passes and BibTeX only if needed for convergence.
    - **Single Pass (`-u` / `--single-pass`)**: Executes exactly 1 LaTeX pass with bibliography passes disabled (forces a single rebuild pass and exits immediately).
    - **`--fast` / `lw`**: Accepted for compatibility and currently no-ops. Incremental behaviour is provided unconditionally by `targets_up_to_date?`; either implement a distinct meaning for this flag or remove it.

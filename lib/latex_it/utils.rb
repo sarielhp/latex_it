@@ -57,6 +57,11 @@ module LaTeXUtils
     '*.num.tex', 'pratenddefaultcategory.tex'
   ].freeze
 
+  # Bibliography documents routinely need latex, bib, latex, latex, latex, so the
+  # old ceiling of 3 stopped short of convergence without saying so.
+  DEFAULT_PASSES = 5
+  MAX_PASSES = 10
+
   DEFAULT_EXCLUDE_SOURCE_PATTERNS = [
     'styles/*', 'macros/*', 'pkg/*', 'packages/*',
     '*prefix*.tex', '*preamble*.tex', '*macros*.tex', '*styles*.tex'

@@ -380,6 +380,7 @@ class LatexBuilder
     if state.is_a?(Hash)
       bib_manager.last_bib_citations ||= state['citations'] if state['citations'].is_a?(Array)
       bib_manager.last_bib_sources ||= state['sources'] if state['sources'].is_a?(Hash)
+      bib_manager.last_bcf_sha ||= state['bcf_sha'] if state['bcf_sha']
     end
   end
 
@@ -405,6 +406,8 @@ class LatexBuilder
       'sources' => sources,
       'citations' => current_citation_keys
     }
+    bcf_file = File.join(@junk_dir, "#{@bfilename}.bcf")
+    state['bcf_sha'] = Digest::SHA256.file(bcf_file).hexdigest if File.file?(bcf_file)
     idx_file = File.join(@junk_dir, "#{@bfilename}.idx")
     state['idx_sha'] = Digest::SHA256.file(idx_file).hexdigest if File.file?(idx_file)
 

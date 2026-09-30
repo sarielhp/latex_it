@@ -361,5 +361,79 @@ class TestBibIntegration < Minitest::Test
       assert_includes txt2, 'Updated Title', 'Biber should rerun because .bib content hash changed'
     end
   end
+
+  def test_biber_single_pass_when_citations_and_bib_unchanged
+    Dir.mktmpdir('biber_single_pass_test') do |dir|
+      tex1 = <<~'TEX'
+        \documentclass{article}
+        \usepackage[backend=biber]{biblatex}
+        \addbibresource{refs.bib}
+        \begin{document}
+        Citing: \cite{itemA}.
+        \printbibliography
+        \end{document}
+      TEX
+      bib = <<~'BIB'
+        @article{itemA,
+          author = {Author, Real},
+          title = {A Valid Title},
+          journal = {Journal},
+          year = {2020}
+        }
+      BIB
+      File.write(File.join(dir, 'main.tex'), tex1)
+      File.write(File.join(dir, 'refs.bib'), bib)
+
+      bin_path = File.expand_path('../latex_it', __dir__)
+      out1, status1 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status1.exitstatus, "Pass 1 setup failed:\n#{out1}"
+      assert File.exist?(File.join(dir, 'main.bbl')), 'Expected main.bbl to be created'
+
+      # Text-only edit: no citations or bib files modified
+      tex2 = tex1.sub('Citing:', 'Updated text citing:')
+      File.write(File.join(dir, 'main.tex'), tex2)
+
+      out2, status2 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus, "Recompile failed:\n#{out2}"
+      refute_includes out2, 'biber', 'Biber must not rerun on text-only edit'
+      refute_includes out2, '(2)', 'Must converge in exactly 1 pass'
+    end
+  end
+
+  def test_biber_reruns_when_bcf_options_change_in_source
+    Dir.mktmpdir('biber_bcf_option_test') do |dir|
+      tex1 = <<~'TEX'
+        \documentclass{article}
+        \usepackage[backend=biber]{biblatex}
+        \addbibresource{refs.bib}
+        \begin{document}
+        Citing: \cite{itemA}.
+        \printbibliography
+        \end{document}
+      TEX
+      bib = <<~'BIB'
+        @article{itemA,
+          author = {Author, Real},
+          title = {A Valid Title},
+          journal = {Journal},
+          year = {2020}
+        }
+      BIB
+      File.write(File.join(dir, 'main.tex'), tex1)
+      File.write(File.join(dir, 'refs.bib'), bib)
+
+      bin_path = File.expand_path('../latex_it', __dir__)
+      out1, status1 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status1.exitstatus, "Pass 1 setup failed:\n#{out1}"
+
+      # Change biblatex options in TeX preamble: alters .bcf control file
+      tex2 = tex1.sub('\usepackage[backend=biber]{biblatex}', '\usepackage[backend=biber,sorting=none]{biblatex}')
+      File.write(File.join(dir, 'main.tex'), tex2)
+
+      out2, status2 = Open3.capture2e(bin_path, 'main.tex', chdir: dir)
+      assert_equal 0, status2.exitstatus, "Option change compile failed:\n#{out2}"
+      assert_includes out2, 'biber', 'Biber must rerun when .bcf configuration options change'
+    end
+  end
 end
 

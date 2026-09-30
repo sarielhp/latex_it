@@ -16,13 +16,14 @@ require_relative 'utils'
 
 class LaTeXBibManager
   attr_reader :builder, :bib_fatal
-  attr_accessor :last_bib_citations, :last_bib_sources
+  attr_accessor :last_bib_citations, :last_bib_sources, :last_bcf_sha
 
   def initialize(builder)
     @builder = builder
     @bib_fatal = false
     @last_bib_citations = nil
     @last_bib_sources = nil
+    @last_bcf_sha = nil
   end
 
   def options = @builder.options
@@ -124,12 +125,18 @@ class LaTeXBibManager
 
     result = execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
     @last_bib_citations = current_citation_keys(aux_contents)
+    update_bcf_snapshot if tool == :biber
 
     if options[:time]
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       printf(' [%s]', Rainbow(format('%.2fs', t1 - t0)).green)
     end
     result
+  end
+
+  def update_bcf_snapshot
+    bcf = File.join(junk_dir, "#{bfilename}.bcf")
+    @last_bcf_sha = Digest::SHA256.file(bcf).hexdigest if File.file?(bcf)
   end
 
   def execute_bib_and_verify(tool, fnbbl, previous, root_bbl)
@@ -296,11 +303,18 @@ class LaTeXBibManager
     return true unless bbl_satisfies_citations?(fnbbl, aux_contents)
 
     bcf = File.join(junk_dir, "#{bfilename}.bcf")
+    return true if tool == :biber && bcf_changed?(bcf)
+
     bbl_mtime = File.mtime(fnbbl)
-    return true if tool == :biber && File.exist?(bcf) && File.mtime(bcf) > bbl_mtime
     return true if discover_bib_files(aux_contents).any? { |b| bib_file_changed?(b, bbl_mtime) }
 
     @last_bib_citations && current_citation_keys(aux_contents) != @last_bib_citations
+  end
+
+  def bcf_changed?(bcf_path)
+    return false unless @last_bcf_sha && File.file?(bcf_path)
+
+    Digest::SHA256.file(bcf_path).hexdigest != @last_bcf_sha
   end
 
   def bib_file_changed?(path, bbl_mtime)

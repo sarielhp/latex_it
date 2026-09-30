@@ -43,6 +43,13 @@ class LatexBuilder
   BIBLATEX_USE = /\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{[^}]*\bbiblatex\b/.freeze
   BIBLATEX_BBL_HEADER = 'biblatex bbl format'
   MAX_BIB_RUNS = 2
+  MAX_INDEX_FAILURES = 2
+  # TeX error context ("l.12 ...") and the trace header echo document text, which
+  # can contain rerun phrases without TeX asking for a rerun.
+  ECHOED_SOURCE_LINE = /\A(?:l\.\d+ |\(cd )/.freeze
+  # Files whose content shifts with pagination but that never appear in *.aux
+  # itself, so an aux-only comparison would miss a change in them.
+  SIDE_STATE_EXTS = %w[toc lof lot out nav snm].freeze
 
   ProcessResultStatus = LaTeXUtils::ProcessResultStatus
   NOFOLLOW = defined?(File::NOFOLLOW) ? File::NOFOLLOW : 0
@@ -334,6 +341,16 @@ class LatexBuilder
 
   # True when the aux state has returned to an earlier value other than the one
   # just before it: more passes would only repeat the cycle.
+  # Digest of the pagination-dependent side files; true when it differs from the
+  # previous call (the first call after loop start only records the baseline).
+  def side_state_changed?
+    files = SIDE_STATE_EXTS.flat_map { |ext| Dir.glob(File.join(@junk_dir, "**/*.#{ext}")) }.sort
+    digest = Digest::SHA256.hexdigest(files.map { |f| "#{f}\0#{LaTeXUtils.safe_read(f)}" }.join("\0"))
+    changed = !@side_state.nil? && digest != @side_state
+    @side_state = digest
+    changed
+  end
+
   def aux_cycle?(seen, aux)
     digest = Digest::SHA256.hexdigest(aux)
     cycle = seen.include?(digest) && seen.last != digest
@@ -358,6 +375,8 @@ class LatexBuilder
     bib_runs = 0
     curr_aux = nil
     aux_before = compute_aux_hash
+    @side_state = nil
+    side_state_changed?
     seen_aux = [Digest::SHA256.hexdigest(aux_before)]
 
     loop do
@@ -373,11 +392,12 @@ class LatexBuilder
       if bib_ran_now
         bib_runs += 1
         aux_before = curr_aux
+        side_state_changed?
         next
       end
 
       index_ran = check_and_run_index_pass
-      rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux) || index_ran
+      rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux, side_changed: side_state_changed?) || index_ran
       aux_before = curr_aux
       cycling = aux_cycle?(seen_aux, curr_aux)
       if rerun && (pass >= max_passes || cycling)
@@ -396,6 +416,7 @@ class LatexBuilder
   def needs_index_pass?
     idx = File.join(@junk_dir, "#{@bfilename}.idx")
     return false unless File.file?(idx) && File.size(idx) > 0
+    return false if @index_failures.to_i >= MAX_INDEX_FAILURES
 
     Digest::SHA256.file(idx).hexdigest != @last_idx_hash || !File.file?(File.join(@junk_dir, "#{@bfilename}.ind"))
   end
@@ -406,7 +427,7 @@ class LatexBuilder
     idx_file = File.join(@junk_dir, "#{@bfilename}.idx")
     return false unless File.file?(idx_file)
 
-    @last_idx_hash = Digest::SHA256.file(idx_file).hexdigest
+    idx_hash = Digest::SHA256.file(idx_file).hexdigest
     cmd = ['makeindex', '-q', "#{@bfilename}.idx"]
     out, status = Dir.chdir(@junk_dir) { capture_pass_output(cmd) }
     File.write(File.join(@junk_dir, "#{@bfilename}.ilg"), out) unless out.empty?
@@ -415,7 +436,21 @@ class LatexBuilder
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       printf(" [%s]", Rainbow(format('%.2fs', t1 - t0)).green)
     end
-    status.success?
+    record_index_result(status.success?, idx_hash)
+  end
+
+  # The hash is recorded only on success so a failed makeindex is retried (up to
+  # MAX_INDEX_FAILURES) instead of being treated as done, and it is reported.
+  def record_index_result(success, idx_hash)
+    if success
+      @last_idx_hash = idx_hash
+      @index_failures = 0
+    else
+      @index_failures = @index_failures.to_i + 1
+      @cacheable_build = false
+      warn "\nmakeindex failed; the index may be missing or stale. See #{File.join(@junk_dir, "#{@bfilename}.ilg")}."
+    end
+    success
   end
 
   def index_stale?(state = nil)
@@ -883,7 +918,9 @@ class LatexBuilder
   def collect_bib_candidates(bibdata_str, files) = bib_manager.collect_bib_candidates(bibdata_str, files)
   def extract_aux_bib_files(aux_contents = nil) = bib_manager.extract_aux_bib_files(aux_contents)
 
-  def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil)
+  def needs_latex_rerun?(loga, prev_aux_hash = nil, curr_aux_hash = nil, side_changed: false)
+    return true if side_changed
+
     curr_aux_hash ||= compute_aux_hash
     return true if prev_aux_hash && !prev_aux_hash.empty? && curr_aux_hash != prev_aux_hash
     return true if prev_aux_hash && prev_aux_hash.empty? && aux_has_cross_references?(curr_aux_hash)
@@ -894,6 +931,7 @@ class LatexBuilder
 
   def latex_rerun_requested?(log_content)
     filtered = log_content.gsub(/Package biblatex Warning: Please \(re\)run Biber.*?and rerun LaTeX afterwards\./m, '')
+    filtered = filtered.lines.reject { |l| l.match?(ECHOED_SOURCE_LINE) }.join
     LATEX_RERUN_PATTERNS.any? { |pat| filtered =~ pat }
   end
 

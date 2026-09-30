@@ -197,4 +197,52 @@ class TestConvergenceLoop < Minitest::Test
       assert_equal base, builder.send(:find_last_latex_log)
     end
   end
+
+  def test_toc_only_change_requests_another_pass
+    in_project(passes: 5) do |builder|
+      toc = %w[one two two]
+      builder.define_singleton_method(:compute_aux_hash) { 'stable' }
+      builder.define_singleton_method(:log_pass_start) { |*_a, **_k| nil }
+      calls = []
+      builder.define_singleton_method(:run_latex_pass) { |_s| File.write('junk/paper.toc', toc[calls.size]) && calls << :latex && true }
+      builder.define_singleton_method(:detect_bib_tool) { |_a = nil| nil }
+      builder.send(:run_convergence_loop)
+      assert_equal 3, calls.size
+    end
+  end
+
+  def test_rerun_phrase_in_echoed_source_context_is_ignored
+    in_project do |builder|
+      refute builder.send(:latex_rerun_requested?, "! Undefined control sequence.\nl.12 Please rerun LaTeX before printing\n")
+      assert builder.send(:latex_rerun_requested?, "LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.\n")
+    end
+  end
+
+  FakeStatus = Struct.new(:ok) do
+    def success? = ok
+  end
+
+  def test_failed_makeindex_is_reported_retried_and_uncacheable
+    in_project(index: true) do |builder|
+      File.write('junk/paper.idx', '\\indexentry{a}{1}')
+      builder.instance_variable_set(:@cacheable_build, true)
+      builder.define_singleton_method(:capture_pass_output) { |_c| ['! bad', FakeStatus.new(false)] }
+      _out, err = capture_io { refute builder.send(:run_index_pass) }
+      assert_match(/makeindex failed/, err)
+      assert builder.send(:needs_index_pass?), 'a failed run must be retried'
+      refute builder.instance_variable_get(:@cacheable_build)
+      capture_io { builder.send(:run_index_pass) }
+      refute builder.send(:needs_index_pass?), 'retries are bounded'
+    end
+  end
+
+  def test_successful_makeindex_is_not_repeated_for_the_same_idx
+    in_project(index: true) do |builder|
+      File.write('junk/paper.idx', '\\indexentry{a}{1}')
+      File.write('junk/paper.ind', 'x')
+      builder.define_singleton_method(:capture_pass_output) { |_c| ['', FakeStatus.new(true)] }
+      assert builder.send(:run_index_pass)
+      refute builder.send(:needs_index_pass?)
+    end
+  end
 end

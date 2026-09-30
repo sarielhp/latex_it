@@ -40,6 +40,10 @@ class LatexBuilder
     /Package rerunfilecheck Warning: File .* has changed/i, /Package ocgx2 Warning: Rerun/i
   ].freeze
 
+  BIBLATEX_USE = /\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{[^}]*\bbiblatex\b/.freeze
+  BIBLATEX_BBL_HEADER = 'biblatex bbl format'
+  MAX_BIB_RUNS = 2
+
   ProcessResultStatus = LaTeXUtils::ProcessResultStatus
   NOFOLLOW = defined?(File::NOFOLLOW) ? File::NOFOLLOW : 0
 
@@ -139,6 +143,7 @@ class LatexBuilder
     FileUtils.rm_f(File.join(@junk_dir, '.build_state.json'))
     clean_pass_logs
     junk_dir_create
+    discard_stale_bib_format_files
     total_t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if @options[:time]
 
     unless run_convergence_loop
@@ -244,8 +249,18 @@ class LatexBuilder
   def log_pass_start(engine, pass, first: false) = log_activity_start(engine, "Building #{@bfilename}.pdf (#{engine} pass #{pass})...", suffix: " (#{pass})", first: first)
   def log_bib_start(tool, first: false) = log_activity_start(tool, "Running #{tool} on #{@bfilename}...", first: first)
 
-  def check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
-    return [true, false] unless bib_tool && !bib_ran && needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux)
+  # The first run is decided by needs_bib_pass?; a repeat only when the last run
+  # is provably out of date, so ordinary post-bib "may have changed" warnings
+  # cannot trigger it.
+  def bib_run_wanted?(bib_tool, bib_runs, pass, curr_aux)
+    return false unless bib_tool && bib_runs < MAX_BIB_RUNS
+    return needs_bib_pass?(bib_tool, "#{@pdferr}_#{pass}", curr_aux) if bib_runs.zero?
+
+    bib_manager.bib_stale_since_last_run?(bib_tool, curr_aux)
+  end
+
+  def check_and_run_bib_pass(bib_tool, bib_runs, pass, curr_aux)
+    return [true, false] unless bib_run_wanted?(bib_tool, bib_runs, pass, curr_aux)
 
     log_bib_start(bib_tool, first: false)
     [run_bib_pass(bib_tool, curr_aux), true]
@@ -258,33 +273,86 @@ class LatexBuilder
     run_index_pass
   end
 
-  def handle_convergence_bib_step(bib_ran, pass, curr_aux)
+  # A bib run only helps if another LaTeX pass can follow it, so at the pass cap
+  # it is skipped (honouring -n 1) and the build is left uncacheable instead.
+  def handle_convergence_bib_step(bib_runs, pass, curr_aux, can_follow)
     bib_tool = detect_bib_tool(curr_aux)
-    _bib_ok, bib_ran_now = check_and_run_bib_pass(bib_tool, bib_ran, pass, curr_aux)
+    unless can_follow
+      @cacheable_build = false if bib_run_wanted?(bib_tool, bib_runs, pass, curr_aux)
+      return [true, false]
+    end
+
+    _bib_ok, bib_ran_now = check_and_run_bib_pass(bib_tool, bib_runs, pass, curr_aux)
     return [false, false] if bib_fatal?
 
     [true, bib_ran_now]
+  end
+
+  # Exit check: a bibliography that ran but is still out of date (late-appearing
+  # keys, changed .bcf, or biber still asking for a rerun) must not be cached.
+  def bib_unsatisfied_at_exit?(bib_runs, pass, curr_aux)
+    bib_tool = detect_bib_tool(curr_aux)
+    return false unless bib_tool && bib_runs.positive?
+    return true if bib_manager.bib_stale_since_last_run?(bib_tool, curr_aux)
+
+    LaTeXUtils.safe_read("#{@pdferr}_#{pass}").match?(/Please \(re\)run Biber/i)
+  end
+
+  # junk/ persists, so a .bbl from an earlier build in the other bibliography
+  # system kills pass 1 ("Missing 'biblatex' package" / "not created by
+  # biblatex"), and report_errors exits before any retry is possible. A .bbl
+  # whose format contradicts what the sources load is useless; if a preamble
+  # elsewhere disagrees with the scan, the only cost of removing it is one extra
+  # bib run.
+  def discard_stale_bib_format_files
+    uses_biblatex = sources_use_biblatex?
+    stale = stale_bbl_files(uses_biblatex)
+    stale += biblatex_leftovers unless uses_biblatex
+    FileUtils.rm_f(stale)
+  end
+
+  def stale_bbl_files(uses_biblatex)
+    [File.join(@junk_dir, "#{@bfilename}.bbl"), "#{@bfilename}.bbl"].select do |f|
+      File.file?(f) && File.size(f).positive? && LaTeXUtils.safe_read(f).include?(BIBLATEX_BBL_HEADER) != uses_biblatex
+    end
+  end
+
+  # Biblatex aux files hold \abx@aux@ commands that are undefined without the
+  # package ("Missing \begin{document}"), so they go with the control files. This
+  # only runs when no source loads biblatex.
+  def biblatex_leftovers
+    auxes = Dir.glob(File.join(@junk_dir, '**/*.aux')).select { |f| LaTeXUtils.safe_read(f).include?(LaTeXBibManager::BIBLATEX_AUX_MARKER) }
+    return [] if auxes.empty? && !File.file?(File.join(@junk_dir, "#{@bfilename}.bcf"))
+
+    auxes + %w[bcf run.xml].map { |ext| File.join(@junk_dir, "#{@bfilename}.#{ext}") }
+  end
+
+  def sources_use_biblatex?
+    files = [@filename] + Dir['*.tex', '*/*.tex']
+    files.uniq.any? { |f| File.file?(f) && LaTeXUtils.safe_read(f).gsub(/(?<!\\)%.*$/, '').match?(BIBLATEX_USE) }
   end
 
   def run_convergence_loop
     @cacheable_build = true
     max_passes = @options[:passes] || 3
     pass = 0
-    bib_ran = false
+    bib_runs = 0
+    curr_aux = nil
     aux_before = compute_aux_hash
 
     loop do
       pass += 1
-      log_pass_start(@engine_name, pass, first: pass == 1 && !bib_ran)
+      log_pass_start(@engine_name, pass, first: pass == 1 && bib_runs.zero?)
       return false unless run_latex_pass("_#{pass}")
       break if @options[:single_pass]
 
       curr_aux = compute_aux_hash
-      status_ok, bib_ran_now = handle_convergence_bib_step(bib_ran, pass, curr_aux)
+      status_ok, bib_ran_now = handle_convergence_bib_step(bib_runs, pass, curr_aux, pass < max_passes)
       return false unless status_ok
 
       if bib_ran_now
-        bib_ran = true
+        bib_runs += 1
+        aux_before = curr_aux
         next
       end
 
@@ -298,6 +366,7 @@ class LatexBuilder
 
       break unless rerun
     end
+    @cacheable_build = false if !@options[:single_pass] && bib_unsatisfied_at_exit?(bib_runs, pass, curr_aux)
     true
   end
 

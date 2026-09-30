@@ -52,12 +52,25 @@ class LaTeXBibManager
   def detect_bib_tool(aux_contents = nil)
     return nil if options[:bib] == false
 
+    aux_contents ||= compute_aux_hash
+    discard_stale_biber_control_files(aux_contents)
     return :biber if detect_biber_control_file
 
-    aux_contents ||= compute_aux_hash
     return (options[:bib] == true ? :bibtex : nil) if aux_contents.empty?
 
     detect_bib_tool_from_aux(aux_contents)
+  end
+
+  BIBLATEX_AUX_MARKER = '\\abx@aux@'
+
+  # junk/ persists across builds, so a .bcf left by an earlier biblatex build
+  # outlives a switch to bibtex. Biblatex always writes \abx@aux@ lines to the
+  # aux, so an aux that has content but none of them proves the control files
+  # are stale; trusting them makes biber overwrite the bbl in biblatex format.
+  def discard_stale_biber_control_files(aux_contents)
+    return if aux_contents.empty? || aux_contents.include?(BIBLATEX_AUX_MARKER)
+
+    %w[bcf run.xml].each { |ext| FileUtils.rm_f(File.join(junk_dir, "#{bfilename}.#{ext}")) }
   end
 
   def detect_biber_control_file
@@ -81,7 +94,7 @@ class LaTeXBibManager
   end
 
   def detect_biber_aux(aux_contents)
-    return false unless aux_contents.include?('\abx@aux@bcf')
+    return false unless aux_contents.include?(BIBLATEX_AUX_MARKER)
 
     bcf_path = File.join(junk_dir, "#{bfilename}.bcf")
     return options[:bib] == true unless File.exist?(bcf_path)
@@ -309,6 +322,18 @@ class LaTeXBibManager
     return true if discover_bib_files(aux_contents).any? { |b| bib_file_changed?(b, bbl_mtime) }
 
     @last_bib_citations && current_citation_keys(aux_contents) != @last_bib_citations
+  end
+
+  # True when what the last bibtex/biber run consumed no longer matches what the
+  # document now asks for: uncovered citations, a changed citation set, or (biber)
+  # a changed control file. Unlike needs_bib_pass? it ignores the natbib/biblatex
+  # "may have changed" warnings, which appear after every successful bib run.
+  def bib_stale_since_last_run?(tool, aux_contents = nil)
+    fnbbl = File.join(junk_dir, "#{bfilename}.bbl")
+    return true unless bbl_satisfies_citations?(fnbbl, aux_contents)
+    return true if tool == :biber && bcf_changed?(File.join(junk_dir, "#{bfilename}.bcf"))
+
+    !@last_bib_citations.nil? && current_citation_keys(aux_contents) != @last_bib_citations
   end
 
   def bcf_changed?(bcf_path)

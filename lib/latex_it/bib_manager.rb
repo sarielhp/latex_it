@@ -273,7 +273,7 @@ class LaTeXBibManager
   # everything it \@input's, plus any aux written during this build (bibunits
   # and similar write aux files the main one does not link).
   def current_aux_files
-    all = Dir.glob(File.join(junk_dir, '**/*.aux'))
+    all = LaTeXUtils.glob_under(junk_dir, '**/*.aux')
     since = @builder.build_start_time
     return all.sort unless since
 
@@ -284,18 +284,21 @@ class LaTeXBibManager
     (File.mtime(path) rescue Time.at(0)) >= since - AUX_MTIME_SLACK
   end
 
+  # Containment is checked on canonical paths so a symlinked directory inside
+  # junk/ cannot lead the closure to files outside it.
   def linked_aux_files(main)
-    root = File.expand_path(junk_dir) + File::SEPARATOR
+    root = (File.realpath(junk_dir) rescue File.expand_path(junk_dir)) + File::SEPARATOR
     queue = [File.expand_path(main)]
-    found = []
+    found = {}
     until queue.empty?
       file = queue.shift
-      next if found.include?(file) || !file.start_with?(root) || !File.file?(file)
+      real = (File.realpath(file) rescue nil)
+      next if real.nil? || found.key?(real) || !real.start_with?(root) || !File.file?(real)
 
-      found << file
-      LaTeXUtils.safe_read(file).scan(/\\@input\{([^}]+\.aux)\}/) { |m| queue << File.expand_path(m.first, junk_dir) }
+      found[real] = File.join(junk_dir, file.delete_prefix(File.expand_path(junk_dir) + File::SEPARATOR))
+      LaTeXUtils.safe_read(real).scan(/\\@input\{([^}]+\.aux)\}/) { |m| queue << File.expand_path(m.first, junk_dir) }
     end
-    found.map { |f| f.delete_prefix(File.expand_path(junk_dir) + File::SEPARATOR).then { |rel| File.join(junk_dir, rel) } }
+    found.values
   end
 
   def current_citation_keys(aux_contents = nil)

@@ -254,6 +254,14 @@ module LaTeXUtils
     d[left.length][right.length]
   end
 
+  # Glob with `dir` taken literally: interpolating it into the pattern would let
+  # [ ] { } * ? in a --junk-dir name match (and act on) unrelated directories.
+  def self.glob_under(dir, pattern)
+    return [] unless dir && File.directory?(dir)
+
+    Dir.glob(pattern, base: dir).map { |rel| File.join(dir, rel) }
+  end
+
   def self.safe_read(path)
     return '' unless path && File.file?(path)
 

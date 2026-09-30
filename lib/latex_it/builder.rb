@@ -277,7 +277,7 @@ class LatexBuilder
     return false unless @options[:index] && needs_index_pass?
 
     log_index_start(first: false)
-    run_index_pass
+    run_index_pass || (needs_index_pass? && run_index_pass)
   end
 
   # A bib run only helps if another LaTeX pass can follow it, so at the pass cap
@@ -312,13 +312,20 @@ class LatexBuilder
   # elsewhere disagrees with the scan, the only cost of removing it is one extra
   # bib run.
   def discard_stale_bib_format_files
+    return if @options[:bib] == false
+
     uses_biblatex = sources_use_biblatex?
     stale = stale_bbl_files(uses_biblatex)
     stale += biblatex_leftovers unless uses_biblatex
     FileUtils.rm_f(stale)
   end
 
+  # A .bbl that cannot be regenerated (no bibliography database on disk) is never
+  # discarded: the scan for biblatex cannot see a class or .sty loading it, and a
+  # supplied .bbl (arXiv-style) would be lost for good.
   def stale_bbl_files(uses_biblatex)
+    return [] if bib_files_on_disk.empty?
+
     [File.join(@junk_dir, "#{@bfilename}.bbl"), "#{@bfilename}.bbl"].select do |f|
       File.file?(f) && File.size(f).positive? && LaTeXUtils.safe_read(f).include?(BIBLATEX_BBL_HEADER) != uses_biblatex
     end
@@ -326,33 +333,36 @@ class LatexBuilder
 
   # Biblatex aux files hold \abx@aux@ commands that are undefined without the
   # package ("Missing \begin{document}"), so they go with the control files. This
-  # only runs when no source loads biblatex.
+  # only runs when no source loads biblatex, and only touches this document's aux
+  # tree: other documents sharing junk/ (or \includeonly'd chapters) keep theirs.
   def biblatex_leftovers
-    auxes = Dir.glob(File.join(@junk_dir, '**/*.aux')).select { |f| LaTeXUtils.safe_read(f).include?(LaTeXBibManager::BIBLATEX_AUX_MARKER) }
+    auxes = bib_manager.current_aux_files.select { |f| LaTeXUtils.safe_read(f).include?(LaTeXBibManager::BIBLATEX_AUX_MARKER) }
     return [] if auxes.empty? && !File.file?(File.join(@junk_dir, "#{@bfilename}.bcf"))
 
     auxes + %w[bcf run.xml].map { |ext| File.join(@junk_dir, "#{@bfilename}.#{ext}") }
   end
 
   def sources_use_biblatex?
-    files = [@filename] + Dir['*.tex', '*/*.tex']
+    files = [@filename] + Dir['*.{tex,cls,sty}', '*/*.{tex,cls,sty}']
     files.uniq.any? { |f| File.file?(f) && LaTeXUtils.safe_read(f).gsub(/(?<!\\)%.*$/, '').match?(BIBLATEX_USE) }
   end
 
-  # True when the aux state has returned to an earlier value other than the one
-  # just before it: more passes would only repeat the cycle.
   # Digest of the pagination-dependent side files; true when it differs from the
   # previous call (the first call after loop start only records the baseline).
   def side_state_changed?
-    files = SIDE_STATE_EXTS.flat_map { |ext| Dir.glob(File.join(@junk_dir, "**/*.#{ext}")) }.sort
+    files = SIDE_STATE_EXTS.flat_map { |ext| LaTeXUtils.glob_under(@junk_dir, "**/*.#{ext}") }.sort
     digest = Digest::SHA256.hexdigest(files.map { |f| "#{f}\0#{LaTeXUtils.safe_read(f)}" }.join("\0"))
     changed = !@side_state.nil? && digest != @side_state
     @side_state = digest
     changed
   end
 
+  # True when the compilation state (aux plus pagination side files) has returned
+  # to an earlier value other than the one just before it: more passes would only
+  # repeat the cycle. History is cleared whenever a bib or index run changes the
+  # inputs, since the same aux then no longer implies the same next pass.
   def aux_cycle?(seen, aux)
-    digest = Digest::SHA256.hexdigest(aux)
+    digest = Digest::SHA256.hexdigest("#{aux}\0#{@side_state}")
     cycle = seen.include?(digest) && seen.last != digest
     seen << digest
     cycle
@@ -377,7 +387,7 @@ class LatexBuilder
     aux_before = compute_aux_hash
     @side_state = nil
     side_state_changed?
-    seen_aux = [Digest::SHA256.hexdigest(aux_before)]
+    seen_aux = [Digest::SHA256.hexdigest("#{aux_before}\0#{@side_state}")]
 
     loop do
       pass += 1
@@ -393,12 +403,14 @@ class LatexBuilder
         bib_runs += 1
         aux_before = curr_aux
         side_state_changed?
+        seen_aux.clear
         next
       end
 
       index_ran = check_and_run_index_pass
       rerun = needs_latex_rerun?("#{@pdferr}_#{pass}", aux_before, curr_aux, side_changed: side_state_changed?) || index_ran
       aux_before = curr_aux
+      seen_aux.clear if index_ran
       cycling = aux_cycle?(seen_aux, curr_aux)
       if rerun && (pass >= max_passes || cycling)
         report_unconverged(pass, cycling)

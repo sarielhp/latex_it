@@ -99,6 +99,7 @@ class TestConvergenceLoop < Minitest::Test
 
   def test_biblatex_bbl_is_discarded_when_no_source_uses_biblatex
     in_project do |builder|
+      File.write('refs.bib', "@book{a, title={T}}\n")
       File.write('junk/paper.bbl', "% $ biblatex bbl format version 3.3 $\n")
       FileUtils.cp('junk/paper.bbl', 'paper.bbl')
       File.write('junk/paper.bcf', '<bcf:citekey>a</bcf:citekey>')
@@ -119,6 +120,7 @@ class TestConvergenceLoop < Minitest::Test
   def test_bibtex_bbl_is_discarded_when_the_document_now_uses_biblatex
     in_project do |builder|
       File.write('paper.tex', "\\usepackage[backend=biber]{biblatex}\n")
+      File.write('refs.bib', "@book{a, title={T}}\n")
       File.write('junk/paper.bbl', "\\begin{thebibliography}{1}\n\\end{thebibliography}\n")
       builder.send(:discard_stale_bib_format_files)
       refute File.exist?('junk/paper.bbl')
@@ -128,6 +130,7 @@ class TestConvergenceLoop < Minitest::Test
   def test_commented_out_biblatex_does_not_count_as_use
     in_project do |builder|
       File.write('paper.tex', "% \\usepackage{biblatex}\n")
+      File.write('refs.bib', "@book{a, title={T}}\n")
       File.write('junk/paper.bbl', "\\begin{thebibliography}{1}\n\\end{thebibliography}\n")
       builder.send(:discard_stale_bib_format_files)
       assert File.exist?('junk/paper.bbl')
@@ -137,6 +140,7 @@ class TestConvergenceLoop < Minitest::Test
   def test_biblatex_aux_is_discarded_when_no_source_uses_biblatex
     in_project do |builder|
       File.write('junk/paper.aux', "\\relax\n\\abx@aux@cite{0}{a}\n")
+      builder.instance_variable_set(:@build_start_time, Time.now)
       builder.send(:discard_stale_bib_format_files)
       refute File.exist?('junk/paper.aux')
     end
@@ -246,16 +250,19 @@ class TestConvergenceLoop < Minitest::Test
     end
   end
 
-  def aux_names(builder) = builder.send(:bib_manager).current_aux_files.map { |f| File.basename(f) }
+  def aux_names(builder) = builder.send(:bib_manager).current_aux_files.map { |f| File.basename(f) }.sort
 
   def test_aux_discovery_ignores_old_aux_of_other_documents
     in_project do |builder|
       File.write('junk/paper.aux', "\\relax\n\\@input{ch1.aux}\n")
-      File.write('junk/ch1.aux', "\\relax\n")
+      File.write('junk/ch1.aux', "\\relax\n\\@input{sub/ch2.aux}\n")
+      FileUtils.mkdir_p('junk/sub')
+      File.write('junk/sub/ch2.aux', "\\relax\n")
+      %w[junk/ch1.aux junk/sub/ch2.aux].each { |f| File.utime(Time.now - 3600, Time.now - 3600, f) }
       File.write('junk/oldpaper.aux', "\\citation{x}\n\\bibdata{refs}\n")
       File.utime(Time.now - 3600, Time.now - 3600, 'junk/oldpaper.aux')
       builder.instance_variable_set(:@build_start_time, Time.now)
-      assert_equal %w[ch1.aux paper.aux], aux_names(builder)
+      assert_equal %w[ch1.aux ch2.aux paper.aux], aux_names(builder)
       refute_includes builder.compute_aux_hash, 'oldpaper'
     end
   end
@@ -275,6 +282,109 @@ class TestConvergenceLoop < Minitest::Test
       File.write('junk/paper.aux', "\\@input{../outside.aux}\n")
       builder.instance_variable_set(:@build_start_time, Time.now)
       assert_equal %w[paper.aux], aux_names(builder)
+    end
+  end
+
+  def test_aux_input_cannot_escape_junk_through_a_symlinked_directory
+    in_project do |builder|
+      FileUtils.mkdir_p('elsewhere')
+      File.write('elsewhere/chapter.aux', "\\citation{x}\n")
+      File.symlink(File.expand_path('elsewhere'), 'junk/shared')
+      File.write('junk/paper.aux', "\\@input{shared/chapter.aux}\n")
+      builder.instance_variable_set(:@build_start_time, Time.now)
+      assert_equal %w[paper.aux], aux_names(builder)
+    end
+  end
+
+  def test_junk_dir_name_with_glob_characters_does_not_touch_a_lookalike_directory
+    Dir.mktmpdir('latex_it_glob_test') do |dir|
+      Dir.chdir(dir) do
+        FileUtils.mkdir_p(%w[build1 build[1]])
+        File.write('paper.tex', "\\begin{document}x\\end{document}\n")
+        File.write('build1/other.aux', "\\abx@aux@cite{0}{a}\n")
+        File.write('build1/x.toc', 'toc')
+        builder = LatexBuilder.new('paper.tex', { engine: 'xelatex', passes: 3, lock: false, junk_dir: 'build[1]' })
+        builder.instance_variable_set(:@build_start_time, Time.now)
+        builder.send(:discard_stale_bib_format_files)
+        assert File.exist?('build1/other.aux'), 'a lookalike directory was cleaned'
+        assert_empty LaTeXUtils.glob_under('build[1]', '**/*.toc')
+        File.write('build[1]/a.toc', 'x')
+        assert_equal ['build[1]/a.toc'], LaTeXUtils.glob_under('build[1]', '**/*.toc')
+      end
+    end
+  end
+
+  def test_other_documents_biblatex_aux_in_shared_junk_is_kept
+    in_project do |builder|
+      File.write('junk/paper.aux', "\\relax\n")
+      File.write('junk/thesis.aux', "\\abx@aux@cite{0}{a}\n")
+      File.utime(Time.now - 3600, Time.now - 3600, 'junk/thesis.aux')
+      builder.instance_variable_set(:@build_start_time, Time.now)
+      builder.send(:discard_stale_bib_format_files)
+      assert File.exist?('junk/thesis.aux')
+    end
+  end
+
+  def test_supplied_bbl_without_a_bib_database_is_never_discarded
+    in_project do |builder|
+      File.write('paper.bbl', "% $ biblatex bbl format version 3.3 $\n")
+      builder.send(:discard_stale_bib_format_files)
+      assert File.exist?('paper.bbl')
+    end
+  end
+
+  def test_bbl_kept_when_biblatex_is_loaded_by_a_class_file
+    in_project do |builder|
+      File.write('refs.bib', "@book{a, title={T}}\n")
+      File.write('mythesis.cls', "\\RequirePackage[backend=biber]{biblatex}\n")
+      File.write('paper.bbl', "% $ biblatex bbl format version 3.3 $\n")
+      builder.send(:discard_stale_bib_format_files)
+      assert File.exist?('paper.bbl')
+    end
+  end
+
+  def test_no_bib_option_disables_bbl_discard
+    in_project(bib: false) do |builder|
+      File.write('refs.bib', "@book{a, title={T}}\n")
+      File.write('paper.bbl', "% $ biblatex bbl format version 3.3 $\n")
+      builder.send(:discard_stale_bib_format_files)
+      assert File.exist?('paper.bbl')
+    end
+  end
+
+  def test_index_run_between_aux_transitions_is_not_a_cycle
+    in_project(passes: 6, index: true) do |builder|
+      calls = script(builder, initial: 'A', aux_states: %w[B A A A])
+      builder.define_singleton_method(:needs_index_pass?) { calls.count(:index).zero? }
+      builder.define_singleton_method(:run_index_pass) { calls << :index && true }
+      builder.define_singleton_method(:detect_bib_tool) { |_a = nil| nil }
+      builder.define_singleton_method(:log_index_start) { |*_a, **_k| nil }
+      assert builder.send(:run_convergence_loop)
+      assert_equal %i[latex index latex latex], calls
+      assert builder.instance_variable_get(:@cacheable_build)
+    end
+  end
+
+  def test_failed_makeindex_is_retried_within_the_loop
+    in_project(passes: 4, index: true) do |builder|
+      calls = script(builder, aux_states: %w[a a a])
+      results = [false, true]
+      builder.define_singleton_method(:needs_index_pass?) { calls.count(:index) < 2 }
+      builder.define_singleton_method(:run_index_pass) { calls << :index && results.shift }
+      builder.define_singleton_method(:detect_bib_tool) { |_a = nil| nil }
+      builder.define_singleton_method(:log_index_start) { |*_a, **_k| nil }
+      builder.send(:run_convergence_loop)
+      assert_equal 2, calls.count(:index)
+      assert_operator calls.count(:latex), :>=, 2, 'a successful retry should be followed by another pass'
+    end
+  end
+
+  def test_bibliography_stale_at_a_stable_exit_below_the_cap_is_not_cached
+    in_project(passes: 8) do |builder|
+      calls = script(builder, aux_states: %w[a a a a a a], bib_stale: [true] * 20)
+      assert builder.send(:run_convergence_loop)
+      assert_operator calls.count(:latex), :<, 8, 'the run must end by stability, not by the cap'
+      refute builder.instance_variable_get(:@cacheable_build), 'exit-time bib check is not effective'
     end
   end
 end

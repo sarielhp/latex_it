@@ -7,6 +7,16 @@ require 'fileutils'
 require 'open3'
 
 class TestLatexItCLI < Minitest::Test
+  # Several tests flip the process-global Rainbow.enabled; without this the value
+  # leaks into whichever test file runs next and makes results order-dependent.
+  def setup
+    @saved_rainbow_enabled = Rainbow.enabled
+  end
+
+  def teardown
+    Rainbow.enabled = @saved_rainbow_enabled
+  end
+
   BIN = File.expand_path('../latex_it', __dir__)
   load BIN
 
@@ -190,12 +200,12 @@ class TestLatexItCLI < Minitest::Test
 
   def test_help_lines_style
     # In dumb terminal (test runner default), dividers use '-'
-    stdout_lines, status_lines = Open3.capture2(BIN, '-h', '--help-style=lines')
+    stdout_lines, status_lines = Open3.capture2({ 'TERM' => 'dumb', 'LANG' => 'C', 'LC_ALL' => 'C' }, BIN, '-h', '--help-style=lines')
     assert status_lines.success?
     assert_includes stdout_lines, '----------------------------------------------------------------------------'
 
     # In UTF-8 terminal with color, dividers use '─' with faint styling
-    stdout_utf8, status_utf8 = Open3.capture2({ 'TERM' => 'xterm-256color' }, BIN, '-h', '--help-style=lines', '--color')
+    stdout_utf8, status_utf8 = Open3.capture2({ 'TERM' => 'xterm-256color', 'LANG' => 'en_US.UTF-8', 'LC_ALL' => 'en_US.UTF-8' }, BIN, '-h', '--help-style=lines', '--color')
     assert status_utf8.success?
     assert_includes stdout_utf8, '────────────────────────────────────────────────────────────────────────────'
     assert_match(/\e\[2m/, stdout_utf8)

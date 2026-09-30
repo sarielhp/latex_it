@@ -25,7 +25,7 @@ class TestConvergenceLoop < Minitest::Test
 
   # aux_states[i] is the aux content after LaTeX pass i+1; `initial` is what a
   # previous build left in junk/. bib_stale answers bib_stale_since_last_run?.
-  def script(builder, aux_states:, initial: '', bib_stale: [])
+  def script(builder, aux_states:, initial: '', bib_stale: [], bib_tool: :bibtex)
     calls = []
     aux = initial
     passes = 0
@@ -38,9 +38,9 @@ class TestConvergenceLoop < Minitest::Test
       calls << :latex
       true
     end
-    builder.define_singleton_method(:detect_bib_tool) { |_aux = nil| :bibtex }
+    builder.define_singleton_method(:detect_bib_tool) { |_aux = nil| bib_tool }
     builder.define_singleton_method(:needs_bib_pass?) { |*_a| calls.count(:bib).zero? }
-    builder.define_singleton_method(:run_bib_pass) { |*_a| calls << :bib && true }
+    builder.define_singleton_method(:run_bib_pass) { |*_a| (calls << :bib) && true }
     builder.send(:bib_manager).define_singleton_method(:bib_stale_since_last_run?) { |*_a| bib_stale.shift || false }
     calls
   end
@@ -208,7 +208,7 @@ class TestConvergenceLoop < Minitest::Test
       builder.define_singleton_method(:compute_aux_hash) { 'stable' }
       builder.define_singleton_method(:log_pass_start) { |*_a, **_k| nil }
       calls = []
-      builder.define_singleton_method(:run_latex_pass) { |_s| File.write('junk/paper.toc', toc[calls.size]) && calls << :latex && true }
+      builder.define_singleton_method(:run_latex_pass) { |_s| File.write('junk/paper.toc', toc[calls.size]) && (calls << :latex) && true }
       builder.define_singleton_method(:detect_bib_tool) { |_a = nil| nil }
       builder.send(:run_convergence_loop)
       assert_equal 3, calls.size
@@ -354,10 +354,9 @@ class TestConvergenceLoop < Minitest::Test
 
   def test_index_run_between_aux_transitions_is_not_a_cycle
     in_project(passes: 6, index: true) do |builder|
-      calls = script(builder, initial: 'A', aux_states: %w[B A A A])
+      calls = script(builder, initial: 'A', aux_states: %w[B A A A], bib_tool: nil)
       builder.define_singleton_method(:needs_index_pass?) { calls.count(:index).zero? }
-      builder.define_singleton_method(:run_index_pass) { calls << :index && true }
-      builder.define_singleton_method(:detect_bib_tool) { |_a = nil| nil }
+      builder.define_singleton_method(:run_index_pass) { (calls << :index) && true }
       builder.define_singleton_method(:log_index_start) { |*_a, **_k| nil }
       assert builder.send(:run_convergence_loop)
       assert_equal %i[latex index latex latex], calls
@@ -367,11 +366,10 @@ class TestConvergenceLoop < Minitest::Test
 
   def test_failed_makeindex_is_retried_within_the_loop
     in_project(passes: 4, index: true) do |builder|
-      calls = script(builder, aux_states: %w[a a a])
+      calls = script(builder, aux_states: %w[a a a], bib_tool: nil)
       results = [false, true]
       builder.define_singleton_method(:needs_index_pass?) { calls.count(:index) < 2 }
-      builder.define_singleton_method(:run_index_pass) { calls << :index && results.shift }
-      builder.define_singleton_method(:detect_bib_tool) { |_a = nil| nil }
+      builder.define_singleton_method(:run_index_pass) { (calls << :index) && results.shift }
       builder.define_singleton_method(:log_index_start) { |*_a, **_k| nil }
       builder.send(:run_convergence_loop)
       assert_equal 2, calls.count(:index)

@@ -24,7 +24,7 @@ require_relative 'bib_manager'
 class LatexBuilder
   include LaTeXDiagnostics
 
-  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :biberr, :input_snapshots
+  attr_reader :options, :filename, :bfilename, :bdir, :engine_name, :biberr, :input_snapshots, :build_start_time
 
   CACHE_ENV_KEYS = %w[
     LATEXOPTS LATEXOPTIONS TEXINPUTS PDFTEXINPUTS XETEXINPUTS LUATEXINPUTS

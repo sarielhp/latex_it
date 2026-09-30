@@ -245,4 +245,36 @@ class TestConvergenceLoop < Minitest::Test
       refute builder.send(:needs_index_pass?)
     end
   end
+
+  def aux_names(builder) = builder.send(:bib_manager).current_aux_files.map { |f| File.basename(f) }
+
+  def test_aux_discovery_ignores_old_aux_of_other_documents
+    in_project do |builder|
+      File.write('junk/paper.aux', "\\relax\n\\@input{ch1.aux}\n")
+      File.write('junk/ch1.aux', "\\relax\n")
+      File.write('junk/oldpaper.aux', "\\citation{x}\n\\bibdata{refs}\n")
+      File.utime(Time.now - 3600, Time.now - 3600, 'junk/oldpaper.aux')
+      builder.instance_variable_set(:@build_start_time, Time.now)
+      assert_equal %w[ch1.aux paper.aux], aux_names(builder)
+      refute_includes builder.compute_aux_hash, 'oldpaper'
+    end
+  end
+
+  def test_aux_discovery_keeps_unlinked_aux_written_during_this_build
+    in_project do |builder|
+      File.write('junk/paper.aux', "\\relax\n")
+      builder.instance_variable_set(:@build_start_time, Time.now - 10)
+      File.write('junk/bu1.aux', "\\relax\n")
+      assert_equal %w[bu1.aux paper.aux], aux_names(builder)
+    end
+  end
+
+  def test_aux_input_cannot_escape_the_junk_directory
+    in_project do |builder|
+      File.write('outside.aux', "secret\n")
+      File.write('junk/paper.aux', "\\@input{../outside.aux}\n")
+      builder.instance_variable_set(:@build_start_time, Time.now)
+      assert_equal %w[paper.aux], aux_names(builder)
+    end
+  end
 end

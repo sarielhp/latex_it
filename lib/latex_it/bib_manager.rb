@@ -224,7 +224,7 @@ class LaTeXBibManager
 
   def extract_aux_bib_files(aux_contents = nil)
     files = []
-    sources = aux_contents ? [aux_contents] : Dir.glob(File.join(junk_dir, '**/*.aux')).map { |aux| LaTeXUtils.safe_read(aux) }
+    sources = aux_contents ? [aux_contents] : current_aux_files.map { |aux| LaTeXUtils.safe_read(aux) }
     sources.each { |content| content.scan(/\\bibdata\{([^}]+)\}/) { |m| collect_bib_candidates(m.first, files) } }
     files
   end
@@ -262,8 +262,40 @@ class LaTeXBibManager
   end
 
   def compute_aux_hash
-    aux_files = Dir.glob(File.join(junk_dir, '**/*.aux'))
-    aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
+    current_aux_files.map { |f| "#{f}:#{LaTeXUtils.safe_read(f)}" }.join("\n")
+  end
+
+  AUX_MTIME_SLACK = 2
+
+  # junk/ persists, so it also holds aux files of renamed or earlier documents
+  # that are never rewritten; feeding those to bib detection can start a
+  # spurious bibtex run. The current document's aux tree is the main aux plus
+  # everything it \@input's, plus any aux written during this build (bibunits
+  # and similar write aux files the main one does not link).
+  def current_aux_files
+    all = Dir.glob(File.join(junk_dir, '**/*.aux'))
+    since = @builder.build_start_time
+    return all.sort unless since
+
+    (linked_aux_files(File.join(junk_dir, "#{bfilename}.aux")) + all.select { |f| fresh_file?(f, since) }).uniq.sort
+  end
+
+  def fresh_file?(path, since)
+    (File.mtime(path) rescue Time.at(0)) >= since - AUX_MTIME_SLACK
+  end
+
+  def linked_aux_files(main)
+    root = File.expand_path(junk_dir) + File::SEPARATOR
+    queue = [File.expand_path(main)]
+    found = []
+    until queue.empty?
+      file = queue.shift
+      next if found.include?(file) || !file.start_with?(root) || !File.file?(file)
+
+      found << file
+      LaTeXUtils.safe_read(file).scan(/\\@input\{([^}]+\.aux)\}/) { |m| queue << File.expand_path(m.first, junk_dir) }
+    end
+    found.map { |f| f.delete_prefix(File.expand_path(junk_dir) + File::SEPARATOR).then { |rel| File.join(junk_dir, rel) } }
   end
 
   def current_citation_keys(aux_contents = nil)
